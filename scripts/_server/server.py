@@ -6,6 +6,9 @@ v0.1.9: drag-drop file uploads (base64) + sha256 reproducibility for datasets, r
 and expert docs.
 v0.1.10: PDF-first reference flow (/api/reference-pdf); legacy BibTeX paste renamed to
 /api/reference-bibtex; BibTeX auto-generated from typed metadata via _lib.bibtex.
+v0.1.12: /api/reference-pdf is now drop-and-go; pypdf extracts metadata from the PDF so no
+typed fields are required. Auto-generates bib_key. Sets _metadata_pending flag when extraction
+is incomplete.
 """
 from __future__ import annotations
 import argparse
@@ -602,45 +605,56 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(*_branched_action(branch, commit_msg, action))
 
     def _post_reference_pdf(self, body: dict):
-        """Primary PDF-first reference flow (v0.1.10).
+        """Drop-and-go PDF reference flow (v0.1.12).
 
-        Required: bib_key, title, authors, year, pdf_b64, pdf_filename.
+        Only pdf_b64 is required. All metadata fields (bib_key, title, authors, year,
+        journal, doi) are optional — the server extracts them from the PDF's embedded
+        metadata using pypdf. If extraction is incomplete, the entry is created with
+        _metadata_pending: true and a _pending_<ts> bib_key as fallback.
+
         Optional: journal, doi, claim_mappings (list of claim IDs).
-        Auto-generates BibTeX from typed metadata; saves PDF to
-        references/papers/<bib_key>.pdf; appends entry to papers.bib and
-        references_pdfs in workspace.yaml.
         """
-        bib_key = body.get("bib_key", "").strip()
-        title = body.get("title", "").strip()
-        authors = body.get("authors", "").strip()
-        year_raw = body.get("year")
-        journal = body.get("journal", "").strip() or None
-        doi = body.get("doi", "").strip() or None
         pdf_b64 = body.get("pdf_b64", "").strip()
-        pdf_filename = body.get("pdf_filename", "").strip()
-        claim_mappings_raw = body.get("claim_mappings", [])
-
-        # Validate required fields.
-        if not bib_key:
-            return self._json({"error": "bib_key is required"}, 400)
-        if not re.match(r"^[A-Za-z0-9_:\-]+$", bib_key):
-            return self._json({"error": "bib_key must match ^[A-Za-z0-9_:-]+$"}, 400)
-        if not title:
-            return self._json({"error": "title is required"}, 400)
-        if not authors:
-            return self._json({"error": "authors is required"}, 400)
-        if year_raw is None:
-            return self._json({"error": "year is required"}, 400)
-        try:
-            year = int(year_raw)
-        except (ValueError, TypeError):
-            return self._json({"error": "year must be an integer"}, 400)
         if not pdf_b64:
-            return self._json({"error": "pdf_b64 is required (drop a PDF first)"}, 400)
-        if not pdf_filename:
-            return self._json({"error": "pdf_filename is required"}, 400)
+            return self._json({"error": "pdf_b64 is required"}, 400)
+
+        # Extract metadata from PDF bytes.
+        import base64 as _base64
+        raw_pdf = _base64.b64decode(pdf_b64)
+        _ws_add_to_sys_path()
+        from scripts._lib.pdf_metadata import extract_pdf_metadata, auto_bib_key, build_bibtex
+        extracted = extract_pdf_metadata(raw_pdf)
+
+        # Merge: typed-by-user > extracted > empty.
+        title = (body.get("title") or "").strip() or extracted.get("title", "")
+        authors_input = (body.get("authors") or "").strip()
+        if authors_input:
+            authors = [a.strip() for a in re.split(r"[;|]| and ", authors_input) if a.strip()]
+        else:
+            authors = extracted.get("authors", [])
+        year_raw = body.get("year")
+        if year_raw is not None:
+            try:
+                year: int | None = int(year_raw)
+            except (ValueError, TypeError):
+                year = extracted.get("year")
+        else:
+            year = extracted.get("year")
+        journal = (body.get("journal") or "").strip() or None
+        doi = (body.get("doi") or "").strip() or None
+
+        bib_key = (body.get("bib_key") or "").strip()
+        if not bib_key:
+            bib_key = auto_bib_key(authors, year)
+        if not re.match(r"^[A-Za-z0-9_:\-]+$", bib_key):
+            return self._json({"error": f"invalid bib_key: '{bib_key}'"}, 400)
+
+        metadata_pending = (
+            not title or not authors or not year or bib_key.startswith("_pending")
+        )
 
         # Normalise claim_mappings: accept list of claim IDs or comma-separated string.
+        claim_mappings_raw = body.get("claim_mappings", [])
         if isinstance(claim_mappings_raw, str):
             claim_ids: list[str] = [c.strip() for c in claim_mappings_raw.split(",") if c.strip()]
         elif isinstance(claim_mappings_raw, list):
@@ -651,7 +665,9 @@ class Handler(BaseHTTPRequestHandler):
         import time as _time
         epoch = int(_time.time())
         branch = f"stage/5-reference-{_safe_slug(bib_key)}-{epoch}"
-        commit_msg = f"feat(5): add reference '{bib_key}' (PDF + auto-generated BibTeX)"
+        commit_msg = f"feat(5): add reference '{bib_key}'"
+        if metadata_pending:
+            commit_msg += " (metadata pending)"
 
         def action():
             bib_file = WORKSPACE / "references" / "papers.bib"
@@ -659,25 +675,23 @@ class Handler(BaseHTTPRequestHandler):
             pdf_dest_rel = f"references/papers/{bib_key}.pdf"
             pdf_dest = WORKSPACE / pdf_dest_rel
 
-            # Validate bib_key uniqueness.
+            # Validate bib_key uniqueness in papers.bib.
             if bib_file.exists():
                 existing_text = bib_file.read_text()
-                if f"{{{bib_key}," in existing_text or f"{{{bib_key} " in existing_text:
+                if re.search(rf"@\w+\{{{re.escape(bib_key)},", existing_text):
                     raise ValueError(f"BibTeX key '{bib_key}' already exists in papers.bib")
 
             # Save PDF.
             sha = _save_upload(pdf_b64, pdf_dest)
 
-            # Build and append BibTeX.
-            _ws_add_to_sys_path()
-            from scripts._lib.bibtex import render_bibtex
-            bibtex_entry = render_bibtex(
-                bib_key=bib_key, title=title, authors=authors, year=year,
-                journal=journal, doi=doi,
-            )
+            # Build BibTeX entry (may be sparse if metadata_pending).
+            bibtex_entry = build_bibtex(bib_key, title, authors, year, journal, doi)
             bib_file.parent.mkdir(parents=True, exist_ok=True)
+            existing_bib = bib_file.read_text() if bib_file.exists() else ""
             with bib_file.open("a") as f:
-                f.write("\n" + bibtex_entry)
+                if existing_bib and not existing_bib.endswith("\n"):
+                    f.write("\n")
+                f.write(bibtex_entry + "\n")
 
             # Append to references_pdfs in workspace.yaml.
             from scripts._lib.workspace_yaml import load_workspace, save_workspace
@@ -688,7 +702,10 @@ class Handler(BaseHTTPRequestHandler):
                 refs_pdfs = []
                 ws["references_pdfs"] = refs_pdfs
             if not any(e.get("bib_key") == bib_key for e in refs_pdfs):
-                refs_pdfs.append({"bib_key": bib_key, "path": pdf_dest_rel, "sha256": sha})
+                entry = {"bib_key": bib_key, "path": pdf_dest_rel, "sha256": sha}
+                if metadata_pending:
+                    entry["_metadata_pending"] = True
+                refs_pdfs.append(entry)
             save_workspace(ws_file, ws)
 
             # Update claims.yaml if claim IDs provided.
@@ -707,7 +724,12 @@ class Handler(BaseHTTPRequestHandler):
                 claims_file.parent.mkdir(parents=True, exist_ok=True)
                 claims_file.write_text(_yaml.safe_dump(existing_claims, sort_keys=False))
 
-        return self._json(*_branched_action(branch, commit_msg, action))
+        response, status = _branched_action(branch, commit_msg, action)
+        response["bib_key"] = bib_key
+        response["metadata_pending"] = metadata_pending
+        # Return extracted metadata (minus the raw dump) for transparency.
+        response["extracted"] = {k: v for k, v in extracted.items() if k != "raw"}
+        return self._json(response, status)
 
     def _post_reference(self, body: dict):
         """Legacy BibTeX-paste reference flow (now also served as /api/reference-bibtex)."""
