@@ -55,28 +55,38 @@ def _submodule_paths() -> set[str]:
     return paths
 
 
-def _dirty_excluding_submodules() -> str:
-    """Return the porcelain status with submodule-pointer/internal lines stripped.
+def _is_generated_path(path: str) -> bool:
+    """True if `path` is a generated report file (the dashboard rebuilds these
+    on every page load, so they're chronically dirty and shouldn't block actions).
+    """
+    if path.startswith("reports/"):
+        return True
+    # Per-model reports
+    if path.startswith("models/") and "/reports/" in path:
+        return True
+    return False
 
-    Submodule pointer changes ('M models/foo' or ' M models/foo') and submodule
-    internal-content changes (' m models/foo') don't block a workspace-level
-    action — that action doesn't touch the submodule. Only return tracked-file
-    or untracked-file changes that the action might collide with.
+
+def _dirty_excluding_submodules() -> str:
+    """Return the porcelain status with lines that don't block a workspace
+    action stripped:
+      - submodule pointer changes ('M models/foo')
+      - submodule internal changes (' m models/foo')
+      - generated report files (reports/*, models/*/reports/*) — derived state
     """
     status = subprocess.run(
         ["git", "status", "--porcelain"],
         cwd=WORKSPACE, capture_output=True, text=True, check=True,
     ).stdout
     submodules = _submodule_paths()
-    if not submodules:
-        return status
     kept = []
     for raw in status.splitlines():
-        # porcelain format: XY <space> path; X = staged, Y = working
         if len(raw) < 4:
             continue
         path = raw[3:]
         if path in submodules:
+            continue
+        if _is_generated_path(path):
             continue
         kept.append(raw)
     return "\n".join(kept)
@@ -113,12 +123,18 @@ def _branched_action(branch_name: str, commit_message: str, action_fn) -> tuple[
         action_fn()  # raises on validation/lint failure
 
         subprocess.run(["git", "add", "-A"], cwd=WORKSPACE, check=True, capture_output=True)
-        # Unstage any submodule pointer/internal changes — workspace-level actions
+        # Unstage submodule pointer/internal changes — workspace-level actions
         # don't own submodules and shouldn't sweep their pointer drift into this
         # commit.
         for sub in _submodule_paths():
             subprocess.run(["git", "reset", "HEAD", "--", sub],
                            cwd=WORKSPACE, check=False, capture_output=True)
+        # Unstage generated reports — they're derived state, regenerated on
+        # every page load; mixing them into action commits creates noise.
+        subprocess.run(["git", "reset", "HEAD", "--", "reports/"],
+                       cwd=WORKSPACE, check=False, capture_output=True)
+        subprocess.run(["git", "reset", "HEAD", "--", "models/*/reports/"],
+                       cwd=WORKSPACE, check=False, capture_output=True)
         # No-op-commit guard: if action_fn made no changes, abort cleanly.
         diff = subprocess.run(
             ["git", "diff", "--cached", "--stat"],
