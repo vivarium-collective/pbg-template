@@ -34,52 +34,52 @@ def _next_step_hint(ws: dict) -> dict:
 
     if not imports and not models:
         return {
-            "label": "Stage 0.5 — Import an existing model (optional) OR jump to Stage 1+2",
+            "label": "Add workspace inputs — import an existing model (optional) or add your first model",
             "command": "(plugin) /pbg-import-models <name> --source <url> --ref <ref> --mode reference\n(no-plugin) python3 -c \"...\"  — see NEXT_STEPS.md",
             "details": "If your project builds on an existing model, register it now. Otherwise, scaffold your first model with /pbg-add-model.",
         }
     if not models:
         return {
-            "label": "Stage 1+2 — Add your first model",
+            "label": "Add your first model",
             "command": "/pbg-add-model <name>  — or scaffold by hand from pbg-superpowers/templates/model/",
             "details": "Each model lives under models/<name>/ as its own git submodule.",
         }
 
-    # Pick the first model with an incomplete stage
-    canonical = ["pull_processes", "data", "expert_input", "baseline", "phase_plan"]
-    stage_to_script = {
-        "data": "scripts/add-dataset.sh + scripts/add-reference.sh",
-        "expert_input": "scripts/add-acceptance.sh",
-        "phase_plan": "scripts/add-phase-plan.sh",
-    }
     for model_name, m in models.items():
-        stages = m.get("stages", {})
-        for stg in canonical:
-            if stages.get(stg, {}).get("status") != "complete":
-                hint = {
-                    "label": f"Model '{model_name}': Stage {stg.replace('_', '-')}",
-                    "command": stage_to_script.get(stg, f"(plugin) /pbg-{stg.replace('_', '-')} {model_name}"),
-                    "details": "",
-                }
-                return hint
-        # All canonical stages complete; check phases
+        # Check Setup: observables
+        observables = m.get("observables") or []
+        if not observables:
+            return {
+                "label": f"Model '{model_name}': add observables (Setup step 1)",
+                "command": f"(plugin) /pbg-add-observable {model_name}\n(dashboard) open the model's deep-dive page and click '+ Add observable'",
+                "details": "Pick which state variables to track (e.g. chromosome.DnaA_count).",
+            }
+        # Check Setup: visualizations
+        visualizations = m.get("visualizations") or []
+        if not visualizations:
+            return {
+                "label": f"Model '{model_name}': add visualizations (Setup step 2)",
+                "command": f"(dashboard) open the model's deep-dive page and click '+ Add visualization'",
+                "details": "Define how to render the observables (time-series, phase-space, heatmap, histogram).",
+            }
+        # Check mechanisms
         phases = m.get("phases", []) or []
         if not phases:
             return {
-                "label": f"Model '{model_name}': Stage 8 — phase plan",
+                "label": f"Model '{model_name}': plan mechanism integration",
                 "command": f"bash scripts/add-phase-plan.sh   # then enter '{model_name}'",
-                "details": "Lay out the multi-phase model-extension plan.",
+                "details": "Lay out the mechanisms to integrate, each backed by an expert doc or dataset.",
             }
         for p in phases:
-            if p["status"] != "complete":
+            if p.get("status") != "complete":
                 return {
-                    "label": f"Model '{model_name}' phase {p['n']} ({p['name']}): {p['status']}",
+                    "label": f"Model '{model_name}' mechanism {p['n']} ({p['name']}): {p.get('status', '?')}",
                     "command": f"bash scripts/start-phase.sh {model_name} {p['n']}    # then evaluate-phase-gate.sh when done",
                     "details": "",
                 }
         return {
-            "label": f"Model '{model_name}': all planned phases complete",
-            "command": "Edit phases/plan.md to add more phases, or move on to the next model.",
+            "label": f"Model '{model_name}': all planned mechanisms integrated",
+            "command": "Add more mechanisms via the dashboard, or move on to the next model.",
             "details": "",
         }
     return {"label": "(unknown)", "command": "", "details": ""}
@@ -207,75 +207,6 @@ def _read_phases(model_dir: Path) -> list[dict]:
     return phases
 
 
-def _stage_progression(ws: dict) -> list[dict]:
-    """Compute progress for the 9-stage track."""
-    steps = [
-        {"label": "0 · bootstrap", "key": "workspace_bootstrap"},
-        {"label": "0.5 · imports", "key": "imports", "optional": True},
-        {"label": "1+2 · model", "key": "models"},
-        {"label": "3 · processes", "key": "pull_processes"},
-        {"label": "4 · data", "key": "data"},
-        {"label": "5 · refs", "key": "data"},  # data = stage 4+5 (combined)
-        {"label": "5+ · expert docs", "key": "expert_docs", "optional": True},
-        {"label": "6 · expert input", "key": "expert_input"},
-        {"label": "7 · baseline", "key": "baseline"},
-        {"label": "8+ · phases", "key": "phases"},
-    ]
-    models = ws.get("models", {}) or {}
-    imports = ws.get("imports", {}) or {}
-    expert_docs = ws.get("expert_docs", []) or []
-
-    has_models = bool(models)
-    bootstrap_done = ws.get("stages", {}).get("workspace_bootstrap", {}).get("status") == "complete"
-
-    def model_stage_done(stage_key):
-        if not models:
-            return False
-        return any(m.get("stages", {}).get(stage_key, {}).get("status") == "complete" for m in models.values())
-
-    def model_stage_partial(stage_key):
-        if not models:
-            return False
-        return any(m.get("stages", {}).get(stage_key, {}).get("status") == "in_progress" for m in models.values())
-
-    out = []
-    next_marked = False
-    for step in steps:
-        key = step["key"]
-        if key == "workspace_bootstrap":
-            cls = "done" if bootstrap_done else "todo"
-        elif key == "imports":
-            cls = "done" if imports else "todo"
-        elif key == "models":
-            cls = "done" if has_models else "todo"
-        elif key == "expert_docs":
-            cls = "done" if expert_docs else "todo"
-        elif key == "phases":
-            phases = []
-            for m in models.values():
-                phases.extend(m.get("phases", []) or [])
-            if not phases:
-                cls = "todo"
-            elif all(p.get("status") == "complete" for p in phases):
-                cls = "done"
-            else:
-                cls = "partial"
-        else:
-            if model_stage_done(key):
-                cls = "done"
-            elif model_stage_partial(key):
-                cls = "partial"
-            else:
-                cls = "todo"
-
-        # Promote the first non-done step to "next"
-        if cls == "todo" and not next_marked:
-            cls = "next"
-            next_marked = True
-
-        out.append({"label": step["label"], "cls": cls, "optional": step.get("optional", False)})
-    return out
-
 
 def _count_bib_entries(ws_root: Path) -> int:
     """Count @-entries in references/papers.bib."""
@@ -310,7 +241,6 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     datasets = ws.get("datasets") or []
     expert_docs = ws.get("expert_docs") or []
     references_pdfs = ws.get("references_pdfs") or []
-    stage_progression = _stage_progression(ws)
     out.write_text(tpl.render(
         workspace_name=ws["name"],
         generated_at=today,
@@ -322,7 +252,6 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         decisions=decisions,
         next_step=hint,
         expert_docs=expert_docs,
-        stage_progression=stage_progression,
     ))
     return out
 
@@ -378,6 +307,10 @@ def render_model_report(
         except Exception:
             acceptance_tests = []
 
+    model_data = models[model_name]
+    observables = model_data.get("observables") or []
+    visualizations = model_data.get("visualizations") or []
+
     out.write_text(tpl.render(
         model_name=model_name,
         generated_at=today,
@@ -386,5 +319,7 @@ def render_model_report(
         registry_warning=registry_warning,
         pbg_doc_json=json.dumps(pbg_doc, indent=2, default=str),
         acceptance_tests=acceptance_tests,
+        observables=observables,
+        visualizations=visualizations,
     ))
     return out

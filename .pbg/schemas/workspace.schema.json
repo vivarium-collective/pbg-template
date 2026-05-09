@@ -66,6 +66,14 @@
           "type": "array",
           "items": {"$ref": "#/definitions/phase"}
         },
+        "observables": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/observable"}
+        },
+        "visualizations": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/visualization"}
+        },
         "external": {"type": "boolean"}
       }
     },
@@ -88,7 +96,34 @@
         "name": {"type": "string"},
         "status": {"enum": ["planned", "in_progress", "gate_pending", "complete"]},
         "pr": {"type": ["integer", "null"]},
-        "gate_passed": {"type": "boolean"}
+        "gate_passed": {"type": "boolean"},
+        "source_artifact": {
+          "type": "object",
+          "properties": {
+            "kind": {"enum": ["expert_doc", "dataset", "reference", "claim"]},
+            "ref": {"type": "string"}
+          }
+        }
+      }
+    },
+    "observable": {
+      "type": "object",
+      "required": ["name", "store_path"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "store_path": {"type": "string", "minLength": 1},
+        "units": {"type": ["string", "null"]},
+        "description": {"type": ["string", "null"]}
+      }
+    },
+    "visualization": {
+      "type": "object",
+      "required": ["name", "type", "observables"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "type": {"enum": ["time-series", "phase-space", "heatmap", "histogram"]},
+        "observables": {"type": "array", "items": {"type": "string"}},
+        "config": {"type": "object"}
       }
     },
     "dataset": {

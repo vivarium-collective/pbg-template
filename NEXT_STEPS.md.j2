@@ -1,11 +1,7 @@
 # Next steps for {{ workspace_name }}
 
-Your workspace is bootstrapped. The canonical PR flow walks from this empty
-state through importing existing models, adding your own model, pulling
-processes, capturing expert input, building a baseline, and implementing
-phases of model extension. Each stage lands as its own PR.
-
-Tick boxes as you go.
+This template separates **inputs** (what you load and keep loading) from
+**model lifecycle** (per-model iterative work).
 
 ## Setup (now)
 
@@ -14,182 +10,163 @@ Tick boxes as you go.
 - [ ] **Activate it** in your shell: `source .venv/bin/activate`
       *(every new shell needs this; subsequent commands assume the venv is active)*
 - [ ] Install workspace deps: `uv pip install -e ".[dev]"`
-      *(if you skipped activation: `uv pip install --python .venv/bin/python -e ".[dev]"`)*
 - [ ] Lint: `python scripts/lint-workspace.py` should print `workspace lint: OK`
 
-> **Push to GitHub later.** It's tempting to `gh repo create` right now, but
-> the canonical convention is to push *after* you've registered at least one
-> model (Stage 1+2 below) — that way the first GitHub commit already shows
-> the workspace doing something. See the **Publish** section after Stage 1+2.
+> **Push to GitHub later.** The canonical convention is to push *after* you've
+> registered at least one model — that way the first GitHub commit already shows
+> real structure. See the **Publish** section below.
 
-## Stage 0.5 — Import existing models *(optional)*
+## Workspace inputs (load anytime)
 
-If your project builds on an existing model (e.g., `vivarium-collective/v2ecoli`),
-register it here. Three modes:
+A research project keeps loading new inputs throughout its life. None of these
+are sequential stages — add and refresh whenever a new dataset, paper, or
+expert document arrives.
 
-- **reference** — read-only submodule under `external/<name>/` for citation,
-  comparison, or per-file cherry-pick.
+- **Imports** — external models you reference, fork from, or operate against in-place
+- **Models** — your own composite models (each is a git submodule; `gh repo create` + `git submodule add` from terminal)
+- **Datasets** — experimental data each model compares against
+- **References** — paper PDFs (drop a PDF; metadata auto-extracted via pypdf)
+- **Expert knowledge** — curated PDFs, lab notes, expert-review docs
+
+All five panels are in the dashboard's "Workspace inputs" section. Each + Add
+button creates a new feature branch you review and PR.
+
+### Imports (optional)
+
+If your project builds on an existing model, register it in one of three modes:
+
+- **reference** — read-only submodule under `external/<name>/`
 - **fork-source** — catalog-only seed for a future `/pbg-add-model --from-import`
-  (no checkout yet).
-- **in-place** — submodule under `models/<name>/` with `external: true`; you
-  operate against an external repo and PRs from this workspace open against
-  the upstream remote.
+- **in-place** — submodule under `models/<name>/` with `external: true`
 
-Workflow:
+```
+# plugin path
+/pbg-import-models <name> --source <url> --ref <ref> --mode reference
 
-- [ ] *(plugin path)* `/pbg-import-models <name> --source <url> --ref <ref> --mode <reference|fork-source|in-place>`
-- [ ] *(no-plugin path)* edit `workspace.yaml.imports` directly + run
-      `git submodule add <source> external/<name>` (or `models/<name>` for in-place mode)
+# no-plugin path
+# Edit workspace.yaml.imports directly, then:
+git submodule add <source> external/<name>
+```
 
-Full lifecycle: `pbg-superpowers/skills/pbg-import-models/SKILL.md`.
-
-## Stage 1+2 — Add a model
+### Models (registration)
 
 Each model lives under `models/<name>/` as a git submodule (its own GitHub repo).
 
-- [ ] Scaffold from the model template (in `pbg-superpowers/templates/model/`) into a fresh sibling dir, e.g. `~/code/<name>/`
-- [ ] In that dir: `git init && git add -A && git commit -m "feat(M3-stage-2): model package scaffold"`, then `gh repo create <org>/<name> --public --source=. --remote=origin --push`
+- [ ] Scaffold from the model template in `pbg-superpowers/templates/model/`
+- [ ] In that dir: `git init && git add -A && git commit -m "feat: model scaffold"`, then `gh repo create <org>/<name> --public --source=. --remote=origin --push`
 - [ ] Back in the workspace: `git submodule add https://github.com/<org>/<name>.git models/<name>`
 - [ ] Add the entry under `workspace.yaml.models.<name>` (`submodule_path`, `remote`, `pbg_processes: []`, `stages.add_model.status: complete`)
 - [ ] `python scripts/lint-workspace.py` to confirm
 
-Full lifecycle: `pbg-superpowers/skills/pbg-add-model/SKILL.md`.
-
 ## Publish — push the workspace to GitHub
 
-Now that the workspace has at least one model + (optionally) imports, the
-first GitHub commit shows real structure rather than an empty scaffold.
+Now that the workspace has at least one model, push to GitHub:
 
-- [ ] Create the workspace repo on GitHub and push:
-  ```
-  gh repo create <org>/{{ workspace_name }} --public --source=. --remote=origin --push
-  ```
-- [ ] Make sure each model submodule's GitHub repo also exists (you should
-      have done that during Stage 1+2 above).
-- [ ] Collaborators clone with:
-  ```
-  git clone https://github.com/<org>/{{ workspace_name }}.git
-  cd {{ workspace_name }}
-  git submodule update --init --recursive
-  ```
+```
+gh repo create <org>/{{ workspace_name }} --public --source=. --remote=origin --push
+```
 
-Workflow CI (`.github/workflows/workspace-ci.yml`) runs lint + per-model
-pytest on every push.
+Collaborators clone with:
 
-## Stages 3 – 9..N — driving each stage
+```
+git clone https://github.com/<org>/{{ workspace_name }}.git
+cd {{ workspace_name }}
+git submodule update --init --recursive
+```
 
-Each stage below has a shell script in `scripts/` that walks you through it
-without requiring the `pbg-superpowers` plugin. Run from the workspace root.
+## Per-model lifecycle (the real multi-step workflow)
 
-### Stage 3 — pull processes *(plugin-only for now)*
+Each registered model goes through:
 
-Pull required `pbg-*` wrappers and register them in `models/<name>/pbg_<slug>/core.py`.
-Use the plugin's `/pbg-pull-processes <model>` skill, or follow
-`pbg-superpowers/skills/pbg-pull-processes/SKILL.md` manually.
+### 1. Setup — observables + visualizations
 
-### Stage 4 — datasets
+Pick the model's **observables** (which state variables you'll track —
+e.g. `chromosome.DnaA_count`) and the **visualizations** that render them
+(time-series, phase-space, heatmap, histogram). One per addition; all live.
 
-- [ ] `bash scripts/add-dataset.sh`
-      *(prompts: name, path/url, sha256 if url, claims served)*
+```
+# plugin path
+/pbg-add-observable <model>
+/pbg-add-visualization <model>
 
-### Stage 5 — references
+# no-plugin path (dashboard)
+bash scripts/serve.sh
+# open the model's deep-dive page and use the + Add observable / + Add visualization buttons
+```
 
-- [ ] `bash scripts/add-reference.sh`
-      *(paste a BibTeX entry; optionally map its key to claim IDs)*
+### 2. Initial run (v0.2.1)
 
-### Stage 6 — expert input
+Run the composite with the configured observables; capture trajectories;
+render the visualizations. Coming in v0.2.1 — for now, this section is a
+placeholder in the per-model dashboard.
 
-- [ ] `bash scripts/add-acceptance.sh`
-      *(captures one "if X, then Y" acceptance test for a model)*
+### 3. Mechanism integration (the guided iterative part)
 
-### Stage 7 — baseline *(plugin-only for now)*
+Add mechanisms one at a time, each backed by an expert doc / dataset /
+reference from your input bag. Each mechanism is a separate PR with:
 
-The baseline scaffolds a Composite from `pbg-composer`. Use the plugin's
-`/pbg-baseline <model>` skill, or follow `pbg-superpowers/skills/pbg-baseline/SKILL.md`
-manually.
+- The mechanism's biological motivation (linked to its source artifact)
+- Implementation tasks
+- Acceptance tests
+- Phase Gate evaluation
 
-### Stage 8 — phase plan
+```
+# Generate mechanism plan (dashboard or terminal)
+bash scripts/add-phase-plan.sh
 
-- [ ] `bash scripts/add-phase-plan.sh`
-      *(prompts: model name, N phases, name + objective per phase. Writes
-      `phases/plan.md` + `phases/phase-N.md` and updates workspace.yaml.)*
+# Start a mechanism
+bash scripts/start-phase.sh <model> <n>
 
-### Stages 9..N — phase implementation
+# Evaluate the gate when done
+bash scripts/evaluate-phase-gate.sh <model> <n>
+```
 
-- [ ] `bash scripts/start-phase.sh <model> <n>`
-      *(opens phase n; refuses if phase n-1 hasn't passed its gate. Generates
-      `tests/test_phases.py` placeholders from acceptance frontmatter.)*
-- [ ] Implement each test body; update each `acceptance_tests[*].status` in
-      the phase frontmatter as you go (`pending` → `passing` / `failing`).
-- [ ] `bash scripts/evaluate-phase-gate.sh <model> <n>` to mark the phase
-      complete when all acceptance tests pass.
-
-These scripts call vendored copies of the `pbg-superpowers` Python helpers
-(under `scripts/_lib/`) — same code path as the plugin, just runnable from
-inside the workspace.
-
-Full design: see `pbg-superpowers/docs/superpowers/specs/`.
+This is where the dashboard's step-by-step guidance pays off — the
+"carefully add mechanisms using curated knowledge" loop.
 
 ## Two paths
 
 - **With Claude Code + the [pbg-superpowers plugin](https://github.com/vivarium-collective/pbg-superpowers):**
-  every stage above is a `/pbg-*` skill that walks the interactive flow and
-  opens a clean PR.
-- **Without the plugin:** use the `scripts/` shell scripts above for stages
-  4–6, 8, 9..N. For stages 3 and 7, follow the relevant `SKILL.md` manually.
-  Run `python scripts/lint-workspace.py` after every change.
+  every action is a `/pbg-*` skill.
+- **Without the plugin:** the dashboard's `bash scripts/serve.sh` is the primary UI;
+  or use the shell scripts in `scripts/` directly.
 
-## Optional: browser walkthrough
+## Browser dashboard
 
-If you'd rather follow the canonical flow in a browser instead of (or in addition
-to) reading this file, run:
+Run:
 
     bash scripts/serve.sh
 
-This renders the workspace dashboard at `reports/index.html`, picks a free port,
-and serves it locally. The dashboard's top panel ("NEXT STEP") detects your
-current stage from `workspace.yaml` and shows the next command to run, with a
-copy-to-clipboard button.
+This renders the workspace dashboard at `reports/index.html` and serves it locally.
+The top panel ("Next step") detects your current state from `workspace.yaml` and
+shows the next action.
 
-The dashboard includes a top-level workspace summary. Per-model deep dives
-(phase tracker, process registry, type registry, browsable composite document)
-render at `models/<name>/reports/index.html` when you run with `--all`:
+Per-model deep dives render at `models/<name>/reports/index.html`. The deep-dive
+page has:
 
-    python3 scripts/render-dashboard.py --all
-    bash scripts/serve.sh   # also calls --all
+1. **Setup** — observables + visualizations panels (add + view)
+2. **Initial run** — placeholder (v0.2.1)
+3. **Mechanism integration** — the iterative phase tracker
+4. **Reference** — process registry, type registry, composite document, run tests
 
-The dashboard:
-- Re-renders on `bash scripts/serve.sh` or `python3 scripts/render-dashboard.py --all`
-  (run after any state change to refresh).
-- Works fully offline; no plugin install required.
-- Stops cleanly with Ctrl-C.
+Actions available in the browser:
 
-The dashboard isn't just a status display — most stages can be driven from
-the browser. Each action creates its own feature branch (e.g.
-`stage/4-dataset-bremer-1996-1715284800`) so you can review the diff and open
-a PR from your terminal:
-
-    git log stage/4-dataset-bremer-1996-1715284800
-    git diff main..stage/4-dataset-bremer-1996-1715284800
-    gh pr create --base main --head stage/4-dataset-bremer-1996-1715284800
-
-The dashboard's Branch timeline shows every `stage/*` branch waiting for review.
-
-Actions available in the browser (v0.1.7+):
-- Register imports (stage 0.5)
-- Add datasets (stage 4)
-- Add BibTeX references (stage 5)
-- Add acceptance tests (stage 6)
-- Generate phase plans (stage 8)
-- Start phases and evaluate gates (stages 9+)
+- Register imports, datasets, references (PDF drop), expert documents
+- Add observables and visualizations per model
+- Generate mechanism plans, start mechanisms, evaluate gates
 - Run pytest for any model and see output inline
+
+Every action creates its own feature branch (e.g.
+`stage/setup-observable-chromosome-rep1-DnaA-1715284800`) so you can review
+the diff and open a PR from your terminal:
+
+    gh pr create --base main --head <branch>
 
 ## Config files to know
 
-- `workspace.yaml` — canonical state (models registered, imports catalog, stage status per model)
-- `docs/decisions.yaml` — append-only design log; every stage skill writes here
+- `workspace.yaml` — canonical state (models, imports, observables, visualizations, mechanisms)
+- `docs/decisions.yaml` — append-only design log
 - `references/{papers.bib, claims.yaml}` — bibliography + claim → paper mapping
-- `datasets/_index.yaml` — dataset registry
 - `.pbg/schemas/` — workspace + phase JSON schemas (used by `lint-workspace.py`)
 
 ## When stuck

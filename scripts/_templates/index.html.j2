@@ -47,6 +47,15 @@
   border-radius: 4px; cursor: pointer; font-size: 0.88em;
 }
 .action-btn:hover { background: #bbdefb; }
+.section-header {
+  margin: 28px 0 6px 0;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #e0e0e0;
+  color: #333;
+}
+.section-lead {
+  color: #666; font-size: 0.92em; margin: 0 0 16px 0; font-style: italic;
+}
 </style>
 </head><body>
 <header><h1>{{ workspace_name }}</h1>
@@ -54,31 +63,24 @@
 <main>
 <div id="guidance" class="guidance panel"></div>
 
-<!-- Workspace progress panel -->
-<div class="panel"><h2>Workspace progress</h2>
-<p class="stage-explainer">The canonical PR flow has 9 stages. Each stage's status is computed from <code>workspace.yaml</code>.</p>
-<div class="stage-track">
-  {% for step in stage_progression %}
-  <div class="step {{ step.cls }}">{{ step.label }}{% if step.optional %} *{% endif %}</div>
-  {% endfor %}
-</div>
-<p class="stage-explainer">* optional</p>
-</div>
-
 {% if next_step %}
 <div class="panel" id="walkthrough-panel" style="background:linear-gradient(180deg,#fff7e6,#fff);border-color:#f5b042">
-  <div style="font-size:0.78em;letter-spacing:0.05em;color:#a86b00;font-weight:600;margin-bottom:6px">&#9658; NEXT STEP</div>
+  <div style="font-size:0.78em;letter-spacing:0.05em;color:#a86b00;font-weight:600;margin-bottom:6px">Next step</div>
   <h2 style="margin-top:0">{{ next_step.label }}</h2>
   {% if next_step.details %}<p>{{ next_step.details }}</p>{% endif %}
   {% if next_step.command %}<pre style="background:rgba(0,0,0,0.05);padding:10px;border-radius:4px;white-space:pre-wrap"><code>{{ next_step.command }}</code></pre>{% endif %}
-  <p class="subtitle">Full canonical flow in <code>NEXT_STEPS.md</code>.</p>
+  <p class="subtitle">Full guide in <code>NEXT_STEPS.md</code>.</p>
 </div>
 {% endif %}
 
+<!-- ===== WORKSPACE INPUTS ===== -->
+<h2 class="section-header">Workspace inputs</h2>
+<p class="section-lead">Inputs the model builds on. Add and refresh anytime &mdash; there&rsquo;s no canonical &ldquo;completed&rdquo; state.</p>
+
 <!-- Imports panel -->
 <div class="panel">
-  <h2>Imports <span class="stage-label optional">Stage 0.5</span></h2>
-  <p class="stage-explainer">Register external models you want to reference, fork from, or operate against in-place. Optional — skip this if your project starts from scratch.</p>
+  <h2>Imports</h2>
+  <p class="stage-explainer">Register external models you want to reference, fork from, or operate against in-place. Optional &mdash; skip this if your project starts from scratch.</p>
   {% if imports %}
   <table><thead><tr><th>Name</th><th>Mode</th><th>Source</th></tr></thead><tbody>
   {% for name, imp in imports.items() %}
@@ -91,24 +93,17 @@
   <button class="action-btn" onclick="openModal('modal-import')">+ Add import</button>
 </div>
 
-<!-- Models panel -->
-<div class="panel"><h2>Models <span class="stage-label">Stage 1+2</span></h2>
-<p class="stage-explainer">Each model is a git submodule under <code>models/&lt;name&gt;/</code> — its own GitHub repo with its own PR flow. Add a model from the terminal: <code>gh repo create &lt;org&gt;/&lt;name&gt; &hellip;</code> + <code>git submodule add</code>.</p>
+<!-- Models input panel (registration) -->
+<div class="panel"><h2>Models</h2>
+<p class="stage-explainer">Each model is a git submodule under <code>models/&lt;name&gt;/</code> &mdash; its own GitHub repo. Add a model from the terminal: <code>gh repo create &lt;org&gt;/&lt;name&gt; &hellip;</code> + <code>git submodule add</code>.</p>
 {% if models %}
-<table><thead><tr><th>Model</th><th>Stages complete</th><th>Phases</th><th>Deep dive</th></tr></thead><tbody>
-{% for name, m in models.items() %}
-<tr><td><code>{{ name }}</code></td>
-<td>{{ m.stages|length }} / 7</td>
-<td>{{ (m.phases or [])|length }}</td>
-<td><a href="../models/{{ name }}/reports/index.html">deep dive &rarr;</a></td></tr>
-{% endfor %}
-</tbody></table>
+<p style="color:#888;font-size:0.9em">Registered models are listed in the <strong>Models &mdash; lifecycle</strong> section below.</p>
 {% else %}<p>No models yet. <code>/pbg-add-model &lt;name&gt;</code></p>{% endif %}
 </div>
 
 <!-- Datasets panel -->
 <div class="panel">
-  <h2>Datasets <span class="stage-label">Stage 4</span></h2>
+  <h2>Datasets</h2>
   <p class="stage-explainer">Register datasets your model will compare against. Each entry maps to specific model claims it supports.</p>
   {% if datasets %}
   <table><thead><tr><th>Name</th><th>Source</th><th>Claims</th></tr></thead><tbody>
@@ -128,7 +123,7 @@
 
 <!-- References panel -->
 <div class="panel">
-  <h2>References <span class="stage-label">Stage 5</span></h2>
+  <h2>References</h2>
   <p class="stage-explainer">BibTeX bibliography + claim &rarr; paper mapping. Adds entries to <code>references/papers.bib</code> and <code>references/claims.yaml</code>.</p>
   <p>Entries in <code>references/papers.bib</code>: <strong>{{ references_count }}</strong> &nbsp;&middot;&nbsp; PDFs committed: <strong>{{ (references_pdfs or [])|length }}</strong></p>
   {% if references_pdfs %}
@@ -147,7 +142,7 @@
 
 <!-- Expert knowledge panel -->
 <div class="panel">
-  <h2>Expert knowledge <span class="stage-label">Stage 5+</span></h2>
+  <h2>Expert knowledge</h2>
   <p class="stage-explainer">Curated expert documents &mdash; PDFs, lab notes, expert review docs &mdash; that aren&rsquo;t formal publications but capture domain knowledge driving the model. Linked to the claims they support.</p>
   {% if expert_docs %}
   <table><thead><tr><th>Name</th><th>File</th><th>Description</th><th>Contributor</th><th>Claims</th></tr></thead><tbody>
@@ -166,6 +161,27 @@
   {% endif %}
   <button class="action-btn" onclick="openModal('modal-expert-doc')">+ Add expert document</button>
 </div>
+
+<!-- ===== MODELS — LIFECYCLE ===== -->
+{% if models %}
+<h2 class="section-header">Models &mdash; lifecycle</h2>
+
+<div class="panel">
+  <table>
+    <thead><tr><th>Model</th><th>Setup</th><th>Mechanisms integrated</th><th>Deep dive</th></tr></thead>
+    <tbody>
+    {% for name, m in models.items() %}
+    <tr>
+      <td><code>{{ name }}</code></td>
+      <td>{{ (m.observables or [])|length }} observables, {{ (m.visualizations or [])|length }} viz</td>
+      <td>{{ (m.phases or [])|selectattr('status', 'equalto', 'complete')|list|length }} / {{ (m.phases or [])|length }}</td>
+      <td><a href="../models/{{ name }}/reports/index.html">deep dive &rarr;</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 <!-- Branch timeline panel -->
 <div class="panel">
