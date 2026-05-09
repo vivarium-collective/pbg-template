@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Stage 4: register a dataset in the workspace.
-# Updates datasets/_index.yaml with provenance (path or url+sha256) and the claims it serves.
+# Appends an entry to workspace.yaml.datasets — the canonical, schema-validated
+# registry. (datasets/_index.yaml was retired in v0.1.5.)
 set -euo pipefail
 
 WS_ROOT="$(pwd)"
@@ -22,24 +23,34 @@ fi
 read -rp "claims served (comma-separated, e.g. phase-1.dnaA-accumulation): " DS_CLAIMS
 
 python3 -c "
-import sys, yaml
+import sys
+sys.path.insert(0, 'scripts')
 from pathlib import Path
+from _lib.workspace_yaml import load_workspace, save_workspace, WorkspaceValidationError
+
 ws_root = Path('$WS_ROOT')
-idx = ws_root / 'datasets' / '_index.yaml'
-data = yaml.safe_load(idx.read_text()) or {'datasets': []}
+ws_file = ws_root / 'workspace.yaml'
+ws = load_workspace(ws_file)
+
 entry = {'name': '$DS_NAME', 'claims': [c.strip() for c in '$DS_CLAIMS'.split(',') if c.strip()]}
 if '$DS_KIND' == 'path':
     entry['path'] = '$DS_SOURCE'
 else:
     entry['url'] = '$DS_SOURCE'
     entry['sha256'] = '$DS_SHA'
-# guard against duplicates
-for d in data.get('datasets', []):
+
+datasets = ws.setdefault('datasets', [])
+for d in datasets:
     if d.get('name') == '$DS_NAME':
-        sys.exit(f\"dataset '$DS_NAME' already registered; edit datasets/_index.yaml directly to amend\")
-data.setdefault('datasets', []).append(entry)
-idx.write_text(yaml.safe_dump(data, sort_keys=False))
-print(f'wrote {idx}')
+        sys.exit(f\"dataset '$DS_NAME' already registered in workspace.yaml.datasets; edit by hand to amend\")
+datasets.append(entry)
+
+try:
+    save_workspace(ws_file, ws)
+except WorkspaceValidationError as e:
+    sys.exit(f'workspace.yaml validation failed after add: {e}')
+
+print(f'appended workspace.yaml.datasets[\"$DS_NAME\"]')
 "
 
 python3 scripts/lint-workspace.py
