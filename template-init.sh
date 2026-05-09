@@ -14,7 +14,7 @@ if [[ ! "$WS_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 
 TODAY="$(date -u +%Y-%m-%d)"
-PLUGIN_VERSION="0.1.0"
+PLUGIN_VERSION="0.1.1"
 
 # Render every .j2 file in the workspace
 find . -name '*.j2' -type f -not -path './.git/*' | while read -r tpl; do
@@ -35,4 +35,12 @@ rm -f template-init.sh
 
 echo
 echo "✓ workspace '$WS_NAME' initialized"
-echo "  next:  python scripts/lint-workspace.py  &&  git add -A && git commit -m 'workspace bootstrap'"
+echo
+echo "📋 Next steps are in: NEXT_STEPS.md"
+echo
+echo "Quick setup:"
+echo "  1. git init && git add -A && git commit -m 'feat(stage-0): workspace bootstrap'"
+echo "  2. uv venv .venv && source .venv/bin/activate && uv pip install -e \".[dev]\""
+echo "  3. python scripts/lint-workspace.py    # should print 'workspace lint: OK'"
+echo
+echo "Then open NEXT_STEPS.md to walk through stages 0.5 → 9..N."

@@ -1,0 +1,84 @@
+# Next steps for {{ workspace_name }}
+
+Your workspace is bootstrapped. The canonical PR flow walks from this empty
+state through importing existing models, adding your own model, pulling
+processes, capturing expert input, building a baseline, and implementing
+phases of model extension. Each stage lands as its own PR.
+
+Tick boxes as you go.
+
+## Setup (now)
+
+- [ ] `git init && git add -A && git commit -m "feat(stage-0): workspace bootstrap"`
+- [ ] `uv venv .venv && source .venv/bin/activate && uv pip install -e ".[dev]"`
+- [ ] `python scripts/lint-workspace.py` should print `workspace lint: OK`
+- [ ] Push to GitHub: `gh repo create <org>/{{ workspace_name }} --public --source=. --remote=origin --push`
+
+## Stage 0.5 — Import existing models *(optional)*
+
+If your project builds on an existing model (e.g., `vivarium-collective/v2ecoli`),
+register it here. Three modes:
+
+- **reference** — read-only submodule under `external/<name>/` for citation,
+  comparison, or per-file cherry-pick.
+- **fork-source** — catalog-only seed for a future `/pbg-add-model --from-import`
+  (no checkout yet).
+- **in-place** — submodule under `models/<name>/` with `external: true`; you
+  operate against an external repo and PRs from this workspace open against
+  the upstream remote.
+
+Workflow:
+
+- [ ] *(plugin path)* `/pbg-import-models <name> --source <url> --ref <ref> --mode <reference|fork-source|in-place>`
+- [ ] *(no-plugin path)* edit `workspace.yaml.imports` directly + run
+      `git submodule add <source> external/<name>` (or `models/<name>` for in-place mode)
+
+Full lifecycle: `pbg-superpowers/skills/pbg-import-models/SKILL.md`.
+
+## Stage 1+2 — Add a model
+
+Each model lives under `models/<name>/` as a git submodule (its own GitHub repo).
+
+- [ ] Scaffold from the model template (in `pbg-superpowers/templates/model/`) into a fresh sibling dir, e.g. `~/code/<name>/`
+- [ ] In that dir: `git init && git add -A && git commit -m "feat(M3-stage-2): model package scaffold"`, then `gh repo create <org>/<name> --public --source=. --remote=origin --push`
+- [ ] Back in the workspace: `git submodule add https://github.com/<org>/<name>.git models/<name>`
+- [ ] Add the entry under `workspace.yaml.models.<name>` (`submodule_path`, `remote`, `pbg_processes: []`, `stages.add_model.status: complete`)
+- [ ] `python scripts/lint-workspace.py` to confirm
+
+Full lifecycle: `pbg-superpowers/skills/pbg-add-model/SKILL.md`.
+
+## Stages 3 – 9..N
+
+| Stage | What | SKILL.md |
+|---|---|---|
+| 3 | Pull required `pbg-*` wrappers; register them in `models/<name>/pbg_<slug>/core.py` | `pbg-pull-processes/SKILL.md` |
+| 4+5 | Add datasets to `datasets/_index.yaml`; references to `references/papers.bib` + `claims.yaml` | `pbg-data/SKILL.md` |
+| 6 | Capture expert expectations as `if X then Y` acceptance tests | `pbg-expert-input/SKILL.md` |
+| 7 | Build minimal end-to-end Composite; persist registry snapshot to `tests/registry-snapshot.json` | `pbg-baseline/SKILL.md` |
+| 8 | Lay out N phases using the Phase Template | `pbg-phase-plan/SKILL.md` |
+| 9..N | Implement each phase; run the Phase Gate before moving to the next | `pbg-phase/SKILL.md` |
+
+Full design: see `pbg-superpowers/docs/superpowers/specs/`.
+
+## Two paths
+
+- **With Claude Code + the [pbg-superpowers plugin](https://github.com/vivarium-collective/pbg-superpowers):**
+  every stage above is a `/pbg-*` skill that walks the interactive flow and
+  opens a clean PR.
+- **Without the plugin:** open the relevant `SKILL.md` and follow the
+  9-phase lifecycle manually. Run `python scripts/lint-workspace.py` after
+  every change.
+
+## Config files to know
+
+- `workspace.yaml` — canonical state (models registered, imports catalog, stage status per model)
+- `docs/decisions.yaml` — append-only design log; every stage skill writes here
+- `references/{papers.bib, claims.yaml}` — bibliography + claim → paper mapping
+- `datasets/_index.yaml` — dataset registry
+- `.pbg/schemas/` — workspace + phase JSON schemas (used by `lint-workspace.py`)
+
+## When stuck
+
+1. Run `python scripts/lint-workspace.py` — most workspace-shape issues surface here.
+2. Open the relevant `SKILL.md` in `pbg-superpowers/skills/`.
+3. File an issue at <https://github.com/vivarium-collective/pbg-superpowers/issues>.
