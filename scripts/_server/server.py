@@ -4,6 +4,8 @@ v0.1.7: adds mutating POST endpoints with auto-branch/commit, /api/branches, /ap
 and /api/render for post-action page reload.
 v0.1.9: drag-drop file uploads (base64) + sha256 reproducibility for datasets, references PDFs,
 and expert docs.
+v0.1.10: PDF-first reference flow (/api/reference-pdf); legacy BibTeX paste renamed to
+/api/reference-bibtex; BibTeX auto-generated from typed metadata via _lib.bibtex.
 """
 from __future__ import annotations
 import argparse
@@ -390,17 +392,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": f"invalid JSON: {e}"}, 400)
 
         route_map = {
-            "/api/click":       self._post_click,
-            "/api/import":      self._post_import,
-            "/api/dataset":     self._post_dataset,
-            "/api/reference":   self._post_reference,
-            "/api/expert-doc":  self._post_expert_doc,
-            "/api/acceptance":  self._post_acceptance,
-            "/api/phase-plan":  self._post_phase_plan,
-            "/api/phase-start": self._post_phase_start,
-            "/api/phase-gate":  self._post_phase_gate,
-            "/api/run-tests":   self._post_run_tests,
-            "/api/render":      self._post_render,
+            "/api/click":              self._post_click,
+            "/api/import":             self._post_import,
+            "/api/dataset":            self._post_dataset,
+            "/api/reference-pdf":      self._post_reference_pdf,
+            "/api/reference-bibtex":   self._post_reference,
+            # Legacy alias kept for backward compat (v0.1.9 and earlier).
+            "/api/reference":          self._post_reference,
+            "/api/expert-doc":         self._post_expert_doc,
+            "/api/acceptance":         self._post_acceptance,
+            "/api/phase-plan":         self._post_phase_plan,
+            "/api/phase-start":        self._post_phase_start,
+            "/api/phase-gate":         self._post_phase_gate,
+            "/api/run-tests":          self._post_run_tests,
+            "/api/render":             self._post_render,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -548,7 +553,116 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._json(*_branched_action(branch, commit_msg, action))
 
+    def _post_reference_pdf(self, body: dict):
+        """Primary PDF-first reference flow (v0.1.10).
+
+        Required: bib_key, title, authors, year, pdf_b64, pdf_filename.
+        Optional: journal, doi, claim_mappings (list of claim IDs).
+        Auto-generates BibTeX from typed metadata; saves PDF to
+        references/papers/<bib_key>.pdf; appends entry to papers.bib and
+        references_pdfs in workspace.yaml.
+        """
+        bib_key = body.get("bib_key", "").strip()
+        title = body.get("title", "").strip()
+        authors = body.get("authors", "").strip()
+        year_raw = body.get("year")
+        journal = body.get("journal", "").strip() or None
+        doi = body.get("doi", "").strip() or None
+        pdf_b64 = body.get("pdf_b64", "").strip()
+        pdf_filename = body.get("pdf_filename", "").strip()
+        claim_mappings_raw = body.get("claim_mappings", [])
+
+        # Validate required fields.
+        if not bib_key:
+            return self._json({"error": "bib_key is required"}, 400)
+        if not re.match(r"^[A-Za-z0-9_:\-]+$", bib_key):
+            return self._json({"error": "bib_key must match ^[A-Za-z0-9_:-]+$"}, 400)
+        if not title:
+            return self._json({"error": "title is required"}, 400)
+        if not authors:
+            return self._json({"error": "authors is required"}, 400)
+        if year_raw is None:
+            return self._json({"error": "year is required"}, 400)
+        try:
+            year = int(year_raw)
+        except (ValueError, TypeError):
+            return self._json({"error": "year must be an integer"}, 400)
+        if not pdf_b64:
+            return self._json({"error": "pdf_b64 is required (drop a PDF first)"}, 400)
+        if not pdf_filename:
+            return self._json({"error": "pdf_filename is required"}, 400)
+
+        # Normalise claim_mappings: accept list of claim IDs or comma-separated string.
+        if isinstance(claim_mappings_raw, str):
+            claim_ids: list[str] = [c.strip() for c in claim_mappings_raw.split(",") if c.strip()]
+        elif isinstance(claim_mappings_raw, list):
+            claim_ids = [str(c).strip() for c in claim_mappings_raw if str(c).strip()]
+        else:
+            claim_ids = []
+
+        import time as _time
+        epoch = int(_time.time())
+        branch = f"stage/5-reference-{_safe_slug(bib_key)}-{epoch}"
+        commit_msg = f"feat(5): add reference '{bib_key}' (PDF + auto-generated BibTeX)"
+
+        def action():
+            bib_file = WORKSPACE / "references" / "papers.bib"
+            claims_file = WORKSPACE / "references" / "claims.yaml"
+            pdf_dest_rel = f"references/papers/{bib_key}.pdf"
+            pdf_dest = WORKSPACE / pdf_dest_rel
+
+            # Validate bib_key uniqueness.
+            if bib_file.exists():
+                existing_text = bib_file.read_text()
+                if f"{{{bib_key}," in existing_text or f"{{{bib_key} " in existing_text:
+                    raise ValueError(f"BibTeX key '{bib_key}' already exists in papers.bib")
+
+            # Save PDF.
+            sha = _save_upload(pdf_b64, pdf_dest)
+
+            # Build and append BibTeX.
+            _ws_add_to_sys_path()
+            from scripts._lib.bibtex import render_bibtex
+            bibtex_entry = render_bibtex(
+                bib_key=bib_key, title=title, authors=authors, year=year,
+                journal=journal, doi=doi,
+            )
+            bib_file.parent.mkdir(parents=True, exist_ok=True)
+            with bib_file.open("a") as f:
+                f.write("\n" + bibtex_entry)
+
+            # Append to references_pdfs in workspace.yaml.
+            from scripts._lib.workspace_yaml import load_workspace, save_workspace
+            ws_file = WORKSPACE / "workspace.yaml"
+            ws = load_workspace(ws_file)
+            refs_pdfs = ws.setdefault("references_pdfs", [])
+            if refs_pdfs is None:
+                refs_pdfs = []
+                ws["references_pdfs"] = refs_pdfs
+            if not any(e.get("bib_key") == bib_key for e in refs_pdfs):
+                refs_pdfs.append({"bib_key": bib_key, "path": pdf_dest_rel, "sha256": sha})
+            save_workspace(ws_file, ws)
+
+            # Update claims.yaml if claim IDs provided.
+            if claim_ids:
+                import yaml as _yaml
+                existing_claims: dict = {}
+                if claims_file.exists():
+                    try:
+                        existing_claims = _yaml.safe_load(claims_file.read_text()) or {}
+                    except Exception:
+                        existing_claims = {}
+                for claim_id in claim_ids:
+                    existing_claims.setdefault(claim_id, [])
+                    if bib_key not in existing_claims[claim_id]:
+                        existing_claims[claim_id].append(bib_key)
+                claims_file.parent.mkdir(parents=True, exist_ok=True)
+                claims_file.write_text(_yaml.safe_dump(existing_claims, sort_keys=False))
+
+        return self._json(*_branched_action(branch, commit_msg, action))
+
     def _post_reference(self, body: dict):
+        """Legacy BibTeX-paste reference flow (now also served as /api/reference-bibtex)."""
         bibtex_text = body.get("bibtex_text", "").strip()
         claim_mappings_raw = body.get("claim_mappings", {})
         pdf_b64 = body.get("pdf_b64", "").strip()

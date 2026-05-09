@@ -142,7 +142,7 @@
   {% endfor %}
   </tbody></table>
   {% endif %}
-  <button class="action-btn" onclick="openModal('modal-reference')">+ Add BibTeX reference</button>
+  <button class="action-btn" onclick="openModal('modal-reference')">+ Add reference (PDF)</button>
 </div>
 
 <!-- Expert knowledge panel -->
@@ -233,29 +233,77 @@
 
 <!-- Reference modal -->
 <div id="modal-reference" class="modal-overlay">
-  <div class="modal-box">
+  <div class="modal-box" style="max-width:600px">
     <button class="modal-close" onclick="closeModal('modal-reference')">&times;</button>
-    <h3>Add BibTeX reference</h3>
-    <form id="form-reference" onsubmit="event.preventDefault(); _submitReference(this)">
-      <label>BibTeX entry *
-        <textarea name="bibtex_text" placeholder="@article{Bremer1996,
+    <h3>Add reference</h3>
+
+    <!-- PRIMARY section: PDF + metadata (expanded by default) -->
+    <p style="font-size:0.85em;color:#555;margin-bottom:10px">
+      Drop the paper PDF and type its metadata. BibTeX is auto-generated on the server.
+    </p>
+    <form id="form-reference-pdf" onsubmit="event.preventDefault(); _submitReferencePdf(this)">
+      <label style="margin-bottom:4px">Drop the paper PDF here *</label>
+      <div id="ref-pdf-drop-zone" class="drop-zone">
+        <span class="drop-hint">Drag &amp; drop PDF here, or click to select</span>
+        <div class="file-info"></div>
+        <div class="file-hash"></div>
+      </div>
+      <label style="margin-top:8px">Bib key * <small>(e.g. Smith2024 &mdash; also used as PDF filename)</small>
+        <input name="bib_key" placeholder="Smith2024" required pattern="[A-Za-z0-9_:\-]+">
+      </label>
+      <label>Title *
+        <input name="title" placeholder="Full paper title" required>
+      </label>
+      <label>Authors * <small>(semicolon-separated, e.g. <code>Smith, J.; Doe, J.</code>)</small>
+        <input name="authors" placeholder="Smith, J.; Doe, J." required>
+      </label>
+      <label>Year *
+        <input name="year" type="number" placeholder="2024" required min="1000" max="2100">
+      </label>
+      <label>Journal <small>(optional)</small>
+        <input name="journal" placeholder="e.g. EcoSal Plus">
+      </label>
+      <label>DOI <small>(optional)</small>
+        <input name="doi" placeholder="e.g. 10.1145/...">
+      </label>
+      <label>Claims supported <small>(optional, comma-separated claim IDs)</small>
+        <input name="claim_mappings" placeholder="phase-1.dnaA-accumulation, rep-initiation">
+      </label>
+      <div class="form-error"></div>
+      <button type="submit">Add reference (PDF + auto BibTeX)</button>
+    </form>
+
+    <!-- SECONDARY section: legacy BibTeX paste (collapsed) -->
+    <details style="margin-top:18px;border-top:1px solid #e0e0e0;padding-top:12px">
+      <summary style="cursor:pointer;font-size:0.88em;color:#555;font-weight:600">
+        Or paste an existing BibTeX entry (legacy)
+      </summary>
+      <p style="font-size:0.82em;color:#888;margin:6px 0 10px">
+        Use this if you already have a BibTeX entry (e.g. exported from Zotero) or want to import
+        metadata without a PDF. The PDF drop is optional here.
+      </p>
+      <form id="form-reference" onsubmit="event.preventDefault(); _submitReference(this)">
+        <label>BibTeX entry *
+          <textarea name="bibtex_text" placeholder="@article{Bremer1996,
   author = {Bremer, H. and Dennis, P.},
   title  = {...},
   ...
 }" required></textarea>
-      </label>
-      <label>Claim mappings (optional, format: <code>claim-id:bibkey, ...</code>)
-        <input name="claim_mappings" placeholder="growth-rate-vs-medium:Bremer1996">
-      </label>
-      <label style="margin-bottom:4px">Optional: drop the paper PDF here</label>
-      <div id="ref-drop-zone" class="drop-zone">
-        <span class="drop-hint">Drag &amp; drop PDF here, or click to select (optional)</span>
-        <div class="file-info"></div>
-        <div class="file-hash"></div>
-      </div>
-      <div class="form-error"></div>
-      <button type="submit">Add reference</button>
-    </form>
+        </label>
+        <label>Claim mappings <small>(optional, format: <code>claim-id:bibkey, ...</code>)</small>
+          <input name="claim_mappings" placeholder="growth-rate-vs-medium:Bremer1996">
+        </label>
+        <label style="margin-bottom:4px">Optional: drop the paper PDF here</label>
+        <div id="ref-drop-zone" class="drop-zone">
+          <span class="drop-hint">Drag &amp; drop PDF here, or click to select (optional)</span>
+          <div class="file-info"></div>
+          <div class="file-hash"></div>
+        </div>
+        <div class="form-error"></div>
+        <button type="submit">Add reference (BibTeX paste)</button>
+      </form>
+    </details>
+
   </div>
 </div>
 
@@ -301,7 +349,8 @@
 document.addEventListener("DOMContentLoaded", function() {
   if (typeof setupDropZone === "function") {
     setupDropZone("ds-drop-zone", "dataset");
-    setupDropZone("ref-drop-zone", "reference_pdf");
+    setupDropZone("ref-pdf-drop-zone", "reference_pdf_primary");  // primary PDF-first zone
+    setupDropZone("ref-drop-zone", "reference_pdf");              // legacy zone
     setupDropZone("expert-drop-zone", "expert_doc");
   }
 });
@@ -330,9 +379,36 @@ function _submitDataset(form) {
   });
 }
 
-// Reference form submission (v0.1.9: optionally includes pdf_b64).
+// Primary PDF-first reference form submission (v0.1.10).
+function _submitReferencePdf(form) {
+  submitForm(form, '/api/reference-pdf', function(f) {
+    var stored = (typeof _dropZoneStore !== "undefined") ? _dropZoneStore["reference_pdf_primary"] : null;
+    if (!stored || !stored.file_b64) {
+      var errEl = form.querySelector(".form-error");
+      if (errEl) errEl.textContent = "Error: please drop or select a PDF first.";
+      return null;
+    }
+    var data = {
+      bib_key:      f.bib_key.value.trim(),
+      title:        f.title.value.trim(),
+      authors:      f.authors.value.trim(),
+      year:         parseInt(f.year.value, 10),
+      pdf_b64:      stored.file_b64,
+      pdf_filename: stored.filename,
+    };
+    if (f.journal && f.journal.value.trim()) data.journal = f.journal.value.trim();
+    if (f.doi && f.doi.value.trim()) data.doi = f.doi.value.trim();
+    if (f.claim_mappings && f.claim_mappings.value.trim()) {
+      // Parse comma-separated claim IDs into an array.
+      data.claim_mappings = f.claim_mappings.value.trim().split(",").map(function(s) { return s.trim(); }).filter(Boolean);
+    }
+    return data;
+  });
+}
+
+// Legacy BibTeX-paste reference form submission (now posts to /api/reference-bibtex).
 function _submitReference(form) {
-  submitForm(form, '/api/reference', function(f) {
+  submitForm(form, '/api/reference-bibtex', function(f) {
     var data = {
       bibtex_text: f.bibtex_text.value.trim(),
       claim_mappings: f.claim_mappings.value.trim(),
