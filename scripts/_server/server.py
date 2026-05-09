@@ -39,16 +39,58 @@ LOCK = Lock()
 # Git helpers
 # ---------------------------------------------------------------------------
 
-def _branched_action(branch_name: str, commit_message: str, action_fn) -> tuple[dict, int]:
-    """Run action_fn on a fresh branch off main; commit; return to main.
+def _submodule_paths() -> set[str]:
+    """Return the set of submodule paths declared in .gitmodules (if any)."""
+    gm = WORKSPACE / ".gitmodules"
+    if not gm.exists():
+        return set()
+    paths = set()
+    for line in gm.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("path = "):
+            paths.add(line.split("=", 1)[1].strip())
+    return paths
 
-    Returns (response_dict, http_status_code).
+
+def _dirty_excluding_submodules() -> str:
+    """Return the porcelain status with submodule-pointer/internal lines stripped.
+
+    Submodule pointer changes ('M models/foo' or ' M models/foo') and submodule
+    internal-content changes (' m models/foo') don't block a workspace-level
+    action — that action doesn't touch the submodule. Only return tracked-file
+    or untracked-file changes that the action might collide with.
     """
-    # Pre-flight: refuse if dirty (with a clear error).
     status = subprocess.run(
         ["git", "status", "--porcelain"],
         cwd=WORKSPACE, capture_output=True, text=True, check=True,
     ).stdout
+    submodules = _submodule_paths()
+    if not submodules:
+        return status
+    kept = []
+    for raw in status.splitlines():
+        # porcelain format: XY <space> path; X = staged, Y = working
+        if len(raw) < 4:
+            continue
+        path = raw[3:]
+        if path in submodules:
+            continue
+        kept.append(raw)
+    return "\n".join(kept)
+
+
+def _branched_action(branch_name: str, commit_message: str, action_fn) -> tuple[dict, int]:
+    """Run action_fn on a fresh branch off main; commit; return to main.
+
+    Returns (response_dict, http_status_code).
+
+    The pre-flight check ignores submodule pointer/internal changes — workspace-
+    level actions don't touch submodules, so a stale submodule pointer (common
+    after model-level actions) shouldn't block them. Submodule-level actions use
+    a separate helper that DOES enforce submodule cleanliness.
+    """
+    # Pre-flight: refuse if dirty (excluding submodule lines).
+    status = _dirty_excluding_submodules()
     if status.strip():
         return {"error": f"working tree dirty (uncommitted changes): {status[:300]}"}, 409
 
@@ -68,6 +110,12 @@ def _branched_action(branch_name: str, commit_message: str, action_fn) -> tuple[
         action_fn()  # raises on validation/lint failure
 
         subprocess.run(["git", "add", "-A"], cwd=WORKSPACE, check=True, capture_output=True)
+        # Unstage any submodule pointer/internal changes — workspace-level actions
+        # don't own submodules and shouldn't sweep their pointer drift into this
+        # commit.
+        for sub in _submodule_paths():
+            subprocess.run(["git", "reset", "HEAD", "--", sub],
+                           cwd=WORKSPACE, check=False, capture_output=True)
         # No-op-commit guard: if action_fn made no changes, abort cleanly.
         diff = subprocess.run(
             ["git", "diff", "--cached", "--stat"],
