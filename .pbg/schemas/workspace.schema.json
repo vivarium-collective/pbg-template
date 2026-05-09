@@ -31,6 +31,10 @@
     "imports": {
       "type": "object",
       "additionalProperties": {"$ref": "#/definitions/import"}
+    },
+    "expert_docs": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/expertDoc"}
     }
   },
   "definitions": {
@@ -92,6 +96,17 @@
         "url": {"type": ["string", "null"]},
         "sha256": {"type": ["string", "null"]},
         "claims": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "expertDoc": {
+      "type": "object",
+      "required": ["name", "path"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+        "description": {"type": ["string", "null"]},
+        "contributor": {"type": ["string", "null"]},
+        "claims_supported": {"type": "array", "items": {"type": "string"}}
       }
     }
   }

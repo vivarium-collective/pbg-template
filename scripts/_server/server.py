@@ -382,6 +382,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/import":      self._post_import,
             "/api/dataset":     self._post_dataset,
             "/api/reference":   self._post_reference,
+            "/api/expert-doc":  self._post_expert_doc,
             "/api/acceptance":  self._post_acceptance,
             "/api/phase-plan":  self._post_phase_plan,
             "/api/phase-start": self._post_phase_start,
@@ -562,6 +563,85 @@ class Handler(BaseHTTPRequestHandler):
                         existing_claims[claim_id].append(bkey)
                 claims_file.parent.mkdir(parents=True, exist_ok=True)
                 claims_file.write_text(_yaml.safe_dump(existing_claims, sort_keys=False))
+
+        return self._json(*_branched_action(branch, commit_msg, action))
+
+    def _post_expert_doc(self, body: dict):
+        """Register an expert document (PDF, lab notes, etc.) in workspace.yaml.
+
+        Body fields:
+          name         (required) — short label, used as filename stem
+          source_path  (required) — absolute or workspace-relative path to file on disk
+          description  (optional)
+          contributor  (optional)
+          claims_supported (optional list or comma-separated string)
+        """
+        import shutil as _shutil
+        import time as _time
+
+        name = body.get("name", "").strip()
+        source_path_raw = body.get("source_path", "").strip()
+        description = body.get("description", "").strip() or None
+        contributor = body.get("contributor", "").strip() or None
+        claims_raw = body.get("claims_supported", [])
+
+        if not name:
+            return self._json({"error": "name is required"}, 400)
+        if not source_path_raw:
+            return self._json({"error": "source_path is required"}, 400)
+
+        # Resolve source path (absolute or workspace-relative).
+        source_path = Path(source_path_raw)
+        if not source_path.is_absolute():
+            source_path = WORKSPACE / source_path
+        if not source_path.exists():
+            return self._json({"error": f"source_path does not exist: {source_path}"}, 400)
+        if not source_path.is_file():
+            return self._json({"error": f"source_path is not a regular file: {source_path}"}, 400)
+
+        # Parse claims_supported.
+        if isinstance(claims_raw, str):
+            claims_supported = [c.strip() for c in claims_raw.split(",") if c.strip()]
+        elif isinstance(claims_raw, list):
+            claims_supported = list(claims_raw)
+        else:
+            claims_supported = []
+
+        # Determine destination extension (default .pdf).
+        ext = source_path.suffix if source_path.suffix else ".pdf"
+        dest_rel = f"references/expert/{_safe_slug(name)}{ext}"
+
+        epoch = int(_time.time())
+        branch = f"stage/5-expert-doc-{_safe_slug(name)}-{epoch}"
+        commit_msg = f"feat(5): add expert document '{name}'"
+
+        def action():
+            dest = WORKSPACE / dest_rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            _shutil.copy2(str(source_path), str(dest))
+
+            # Update workspace.yaml.
+            _ws_add_to_sys_path()
+            from scripts._lib.workspace_yaml import load_workspace, save_workspace
+            ws_file = WORKSPACE / "workspace.yaml"
+            ws = load_workspace(ws_file)
+            expert_docs = ws.setdefault("expert_docs", [])
+            if expert_docs is None:
+                expert_docs = []
+                ws["expert_docs"] = expert_docs
+            # Avoid duplicate names.
+            for existing in expert_docs:
+                if isinstance(existing, dict) and existing.get("name") == name:
+                    raise ValueError(f"expert doc '{name}' already registered")
+            entry: dict = {"name": name, "path": dest_rel}
+            if description:
+                entry["description"] = description
+            if contributor:
+                entry["contributor"] = contributor
+            if claims_supported:
+                entry["claims_supported"] = claims_supported
+            expert_docs.append(entry)
+            save_workspace(ws_file, ws)
 
         return self._json(*_branched_action(branch, commit_msg, action))
 

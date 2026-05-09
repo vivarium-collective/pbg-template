@@ -207,6 +207,76 @@ def _read_phases(model_dir: Path) -> list[dict]:
     return phases
 
 
+def _stage_progression(ws: dict) -> list[dict]:
+    """Compute progress for the 9-stage track."""
+    steps = [
+        {"label": "0 · bootstrap", "key": "workspace_bootstrap"},
+        {"label": "0.5 · imports", "key": "imports", "optional": True},
+        {"label": "1+2 · model", "key": "models"},
+        {"label": "3 · processes", "key": "pull_processes"},
+        {"label": "4 · data", "key": "data"},
+        {"label": "5 · refs", "key": "data"},  # data = stage 4+5 (combined)
+        {"label": "5+ · expert docs", "key": "expert_docs", "optional": True},
+        {"label": "6 · expert input", "key": "expert_input"},
+        {"label": "7 · baseline", "key": "baseline"},
+        {"label": "8+ · phases", "key": "phases"},
+    ]
+    models = ws.get("models", {}) or {}
+    imports = ws.get("imports", {}) or {}
+    expert_docs = ws.get("expert_docs", []) or []
+
+    has_models = bool(models)
+    bootstrap_done = ws.get("stages", {}).get("workspace_bootstrap", {}).get("status") == "complete"
+
+    def model_stage_done(stage_key):
+        if not models:
+            return False
+        return any(m.get("stages", {}).get(stage_key, {}).get("status") == "complete" for m in models.values())
+
+    def model_stage_partial(stage_key):
+        if not models:
+            return False
+        return any(m.get("stages", {}).get(stage_key, {}).get("status") == "in_progress" for m in models.values())
+
+    out = []
+    next_marked = False
+    for step in steps:
+        key = step["key"]
+        if key == "workspace_bootstrap":
+            cls = "done" if bootstrap_done else "todo"
+        elif key == "imports":
+            cls = "done" if imports else "todo"
+        elif key == "models":
+            cls = "done" if has_models else "todo"
+        elif key == "expert_docs":
+            cls = "done" if expert_docs else "todo"
+        elif key == "phases":
+            phases = []
+            for m in models.values():
+                phases.extend(m.get("phases", []) or [])
+            if not phases:
+                cls = "todo"
+            elif all(p.get("status") == "complete" for p in phases):
+                cls = "done"
+            else:
+                cls = "partial"
+        else:
+            if model_stage_done(key):
+                cls = "done"
+            elif model_stage_partial(key):
+                cls = "partial"
+            else:
+                cls = "todo"
+
+        # Promote the first non-done step to "next"
+        if cls == "todo" and not next_marked:
+            cls = "next"
+            next_marked = True
+
+        out.append({"label": step["label"], "cls": cls, "optional": step.get("optional", False)})
+    return out
+
+
 def _count_bib_entries(ws_root: Path) -> int:
     """Count @-entries in references/papers.bib."""
     bib_file = ws_root / "references" / "papers.bib"
@@ -238,6 +308,8 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     hint = _next_step_hint(ws)
     references_count = _count_bib_entries(ws_root)
     datasets = ws.get("datasets") or []
+    expert_docs = ws.get("expert_docs") or []
+    stage_progression = _stage_progression(ws)
     out.write_text(tpl.render(
         workspace_name=ws["name"],
         generated_at=today,
@@ -247,6 +319,8 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         references_count=references_count,
         decisions=decisions,
         next_step=hint,
+        expert_docs=expert_docs,
+        stage_progression=stage_progression,
     ))
     return out
 

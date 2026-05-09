@@ -29,3 +29,22 @@ th{background:rgba(0,0,0,0.03)}
 .json-tree summary{cursor:pointer;user-select:none}
 code{font-family:ui-monospace,Menlo,monospace;background:rgba(0,0,0,0.04);padding:1px 4px;border-radius:3px}
 img{max-width:100%}
+.stage-label{
+  display:inline-block;
+  font-size:0.7em;
+  background:#f5b042;
+  color:#fff;
+  padding:2px 8px;
+  border-radius:10px;
+  margin-left:8px;
+  vertical-align:middle;
+  letter-spacing:0.05em;
+}
+.stage-label.optional{background:#7c7c7c}
+.stage-explainer{color:var(--gray);font-size:0.92em;margin:-4px 0 12px}
+.stage-track{display:flex;gap:4px;margin:8px 0;flex-wrap:wrap}
+.stage-track .step{flex:1;min-width:90px;padding:8px;border-radius:4px;font-size:0.78em;text-align:center}
+.stage-track .step.done{background:#d1fae5}
+.stage-track .step.todo{background:#f3f4f6;color:#888}
+.stage-track .step.partial{background:#fef3c7}
+.stage-track .step.next{background:#fff7e6;border:2px solid #f5b042;color:#a86b00;font-weight:600}

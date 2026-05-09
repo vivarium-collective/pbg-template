@@ -77,6 +77,17 @@ def main() -> None:
                 if key not in bib_keys:
                     _fail(f"claim '{claim}' references missing bib key '{key}'")
 
+    # Expert docs path existence
+    for doc in ws.get("expert_docs", []) or []:
+        doc_path = doc.get("path", "")
+        if doc_path:
+            full = WS_ROOT / doc_path
+            if not full.exists():
+                _fail(
+                    f"expert_docs entry '{doc.get('name', '?')}' path missing: {doc_path} "
+                    f"(expected at {full})"
+                )
+
     # Phase frontmatter integrity per model
     phase_validator = Draft7Validator(_schema("phase.schema.json"))
     fm_re = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
