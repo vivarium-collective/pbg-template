@@ -139,6 +139,24 @@ Full design: see `pbg-superpowers/docs/superpowers/specs/`.
   4–6, 8, 9..N. For stages 3 and 7, follow the relevant `SKILL.md` manually.
   Run `python scripts/lint-workspace.py` after every change.
 
+## Optional: browser walkthrough
+
+If you'd rather follow the canonical flow in a browser instead of (or in addition
+to) reading this file, run:
+
+    bash scripts/serve.sh
+
+This renders the workspace dashboard at `reports/index.html`, picks a free port,
+and serves it locally. The dashboard's top panel ("NEXT STEP") detects your
+current stage from `workspace.yaml` and shows the next command to run, with a
+copy-to-clipboard button.
+
+The dashboard:
+- Re-renders on `bash scripts/serve.sh` or `python3 scripts/render-dashboard.py`
+  (run after any state change to refresh).
+- Works fully offline; no plugin install required.
+- Stops cleanly with Ctrl-C.
+
 ## Config files to know
 
 - `workspace.yaml` — canonical state (models registered, imports catalog, stage status per model)

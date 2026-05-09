@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><title>{{ workspace_name }}</title>
+<link rel="stylesheet" href="assets/style.css">
+</head><body>
+<header><h1>{{ workspace_name }}</h1>
+<p class="subtitle">Workspace dashboard · regenerated {{ generated_at }}</p></header>
+<main>
+<div id="guidance" class="guidance panel"></div>
+{% if next_step %}
+<div class="panel" id="walkthrough-panel" style="background:linear-gradient(180deg,#fff7e6,#fff);border-color:#f5b042">
+  <div style="font-size:0.78em;letter-spacing:0.05em;color:#a86b00;font-weight:600;margin-bottom:6px">▸ NEXT STEP</div>
+  <h2 style="margin-top:0">{{ next_step.label }}</h2>
+  {% if next_step.details %}<p>{{ next_step.details }}</p>{% endif %}
+  {% if next_step.command %}<pre style="background:rgba(0,0,0,0.05);padding:10px;border-radius:4px;white-space:pre-wrap"><code>{{ next_step.command }}</code></pre>{% endif %}
+  <p class="subtitle">Full canonical flow in <code>NEXT_STEPS.md</code>.</p>
+</div>
+{% endif %}
+{% if imports %}
+<div class="panel"><h2>Imports</h2>
+<table><thead><tr><th>Name</th><th>Mode</th><th>Source</th></tr></thead><tbody>
+{% for name, imp in imports.items() %}
+<tr><td><code>{{ name }}</code></td><td>{{ imp.mode }}</td><td><code>{{ imp.source }}</code> @ <code>{{ imp.ref }}</code></td></tr>
+{% endfor %}
+</tbody></table></div>
+{% endif %}
+<div class="panel"><h2>Models</h2>
+{% if models %}
+<table><thead><tr><th>Model</th><th>Stages complete</th><th>Phases</th></tr></thead><tbody>
+{% for name, m in models.items() %}
+<tr><td><code>{{ name }}</code></td>
+<td>{{ m.stages|length }} / 7</td>
+<td>{{ (m.phases or [])|length }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% else %}<p>No models yet. <code>/pbg-add-model &lt;name&gt;</code></p>{% endif %}
+</div>
+<div class="panel"><h2>Recent decisions</h2>
+{% if decisions %}<ul>{% for d in (decisions[-10:] | reverse) %}<li><strong>{{ d.skill }}</strong> · {{ d.timestamp }} — {{ d.summary }}</li>{% endfor %}</ul>
+{% else %}<p>No decisions logged yet.</p>{% endif %}
+</div>
+</main>
+<script src="assets/render-helpers.js"></script>
+<script src="assets/client.js" onerror="/* live mode unavailable */"></script>
+<script src="assets/walkthrough.js" onerror="/* walkthrough unavailable */"></script>
+</body></html>

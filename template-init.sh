@@ -16,8 +16,9 @@ fi
 TODAY="$(date -u +%Y-%m-%d)"
 PLUGIN_VERSION="0.1.1"
 
-# Render every .j2 file in the workspace
-find . -name '*.j2' -type f -not -path './.git/*' | while read -r tpl; do
+# Render every .j2 file in the workspace root (skip scripts/ — those are
+# runtime Jinja2 templates for the dashboard renderer, not init-time files)
+find . -name '*.j2' -type f -not -path './.git/*' -not -path './scripts/*' | while read -r tpl; do
   out="${tpl%.j2}"
   sed \
     -e "s/{{ *workspace_name *}}/$WS_NAME/g" \
