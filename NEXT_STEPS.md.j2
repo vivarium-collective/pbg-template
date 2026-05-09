@@ -10,9 +10,17 @@ Tick boxes as you go.
 ## Setup (now)
 
 - [ ] `git init && git add -A && git commit -m "feat(stage-0): workspace bootstrap"`
-- [ ] `uv venv .venv && source .venv/bin/activate && uv pip install -e ".[dev]"`
-- [ ] `python scripts/lint-workspace.py` should print `workspace lint: OK`
-- [ ] Push to GitHub: `gh repo create <org>/{{ workspace_name }} --public --source=. --remote=origin --push`
+- [ ] Create the venv: `uv venv .venv`
+- [ ] **Activate it** in your shell: `source .venv/bin/activate`
+      *(every new shell needs this; subsequent commands assume the venv is active)*
+- [ ] Install workspace deps: `uv pip install -e ".[dev]"`
+      *(if you skipped activation: `uv pip install --python .venv/bin/python -e ".[dev]"`)*
+- [ ] Lint: `python scripts/lint-workspace.py` should print `workspace lint: OK`
+
+> **Push to GitHub later.** It's tempting to `gh repo create` right now, but
+> the canonical convention is to push *after* you've registered at least one
+> model (Stage 1+2 below) — that way the first GitHub commit already shows
+> the workspace doing something. See the **Publish** section after Stage 1+2.
 
 ## Stage 0.5 — Import existing models *(optional)*
 
@@ -46,6 +54,27 @@ Each model lives under `models/<name>/` as a git submodule (its own GitHub repo)
 - [ ] `python scripts/lint-workspace.py` to confirm
 
 Full lifecycle: `pbg-superpowers/skills/pbg-add-model/SKILL.md`.
+
+## Publish — push the workspace to GitHub
+
+Now that the workspace has at least one model + (optionally) imports, the
+first GitHub commit shows real structure rather than an empty scaffold.
+
+- [ ] Create the workspace repo on GitHub and push:
+  ```
+  gh repo create <org>/{{ workspace_name }} --public --source=. --remote=origin --push
+  ```
+- [ ] Make sure each model submodule's GitHub repo also exists (you should
+      have done that during Stage 1+2 above).
+- [ ] Collaborators clone with:
+  ```
+  git clone https://github.com/<org>/{{ workspace_name }}.git
+  cd {{ workspace_name }}
+  git submodule update --init --recursive
+  ```
+
+Workflow CI (`.github/workflows/workspace-ci.yml`) runs lint + per-model
+pytest on every push.
 
 ## Stages 3 – 9..N
 
