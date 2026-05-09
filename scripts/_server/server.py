@@ -27,10 +27,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_events_sse()
         if self.path.startswith("/api/guidance"):
             return self._serve_guidance()
-        # Default: serve under reports/
         rel = self.path.lstrip("/")
-        path = WORKSPACE / "reports" / rel
-        return self._serve_file(path, self._guess_mime(rel))
+        # Refuse path traversal and absolute paths.
+        if ".." in rel.split("/") or rel.startswith("/"):
+            self.send_response(403); self.end_headers(); return
+        # Resolve under the workspace root so per-model reports
+        # (e.g. /models/<name>/reports/index.html) are reachable.
+        # If the file isn't found there, fall back to <workspace>/reports/
+        # so legacy relative asset paths (e.g. /assets/style.css) still work.
+        primary = WORKSPACE / rel
+        if primary.is_file():
+            return self._serve_file(primary, self._guess_mime(rel))
+        fallback = WORKSPACE / "reports" / rel
+        return self._serve_file(fallback, self._guess_mime(rel))
 
     def do_POST(self):
         if self.path == "/api/click":
