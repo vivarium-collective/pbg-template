@@ -2,6 +2,7 @@
 <html lang="en"><head>
 <meta charset="UTF-8"><title>{{ workspace_name }}</title>
 <link rel="stylesheet" href="assets/style.css">
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
 /* Modal overlay */
 .modal-overlay {
@@ -47,6 +48,12 @@
   border-radius: 4px; cursor: pointer; font-size: 0.88em;
 }
 .action-btn:hover { background: #bbdefb; }
+.pill-btn {
+  font-size: 0.78em; padding: 2px 8px; border-radius: 3px;
+  border: 1px solid #666; background: #fff; cursor: pointer; margin-left: 6px;
+  vertical-align: middle;
+}
+.pill-btn:hover { background: #eee; }
 .section-header {
   margin: 28px 0 6px 0;
   padding-bottom: 6px;
@@ -56,6 +63,20 @@
 .section-lead {
   color: #666; font-size: 0.92em; margin: 0 0 16px 0; font-style: italic;
 }
+.source-artifact-tag {
+  font-size: 0.78em; color: #555; font-style: italic; margin-left: 8px;
+}
+.pending-review-badge{
+  display:inline-block;font-size:0.7em;background:#fef3c7;color:#a86b00;
+  padding:2px 8px;border-radius:10px;margin-left:8px;
+}
+#run-tests-output {
+  white-space: pre-wrap; font-family: monospace; font-size: 0.82em;
+  background: #f8f8f8; border: 1px solid #ccc; border-radius: 4px;
+  padding: 10px; margin-top: 10px; max-height: 420px; overflow-y: auto;
+  display: none;
+}
+#run-tests-spinner { display: none; margin-left: 8px; color: #888; }
 </style>
 </head><body>
 <header><h1>{{ workspace_name }}</h1>
@@ -80,25 +101,35 @@
 <!-- Imports panel -->
 <div class="panel">
   <h2>Imports</h2>
-  <p class="stage-explainer">Register external models you want to reference, fork from, or operate against in-place. Optional &mdash; skip this if your project starts from scratch.</p>
+  <p class="stage-explainer">Register external models you want to reference, fork from, or operate against in-place. Optional &mdash; skip if your project starts from scratch.</p>
   {% if imports %}
   <table><thead><tr><th>Name</th><th>Mode</th><th>Source</th></tr></thead><tbody>
   {% for name, imp in imports.items() %}
   <tr><td><code>{{ name }}</code></td><td>{{ imp.mode }}</td><td><code>{{ imp.source }}</code> @ <code>{{ imp.ref }}</code></td></tr>
+  {% endfor %}
+  {% for p in (pending.imports or []) %}
+  <tr>
+    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td>{{ p.entry.mode or '' }}</td>
+    <td><code>{{ p.entry.source or '' }}</code></td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+  {% elif pending.imports %}
+  <p style="color:#888;font-style:italic">No imports on main yet.</p>
+  <table><thead><tr><th>Name</th><th>Mode</th><th>Source</th></tr></thead><tbody>
+  {% for p in pending.imports %}
+  <tr>
+    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td>{{ p.entry.mode or '' }}</td>
+    <td><code>{{ p.entry.source or '' }}</code></td>
+  </tr>
   {% endfor %}
   </tbody></table>
   {% else %}
   <p style="color:#888;font-style:italic">No imports registered yet.</p>
   {% endif %}
   <button class="action-btn" onclick="openModal('modal-import')">+ Add import</button>
-</div>
-
-<!-- Models input panel (registration) -->
-<div class="panel"><h2>Models</h2>
-<p class="stage-explainer">Each model is a git submodule under <code>models/&lt;name&gt;/</code> &mdash; its own GitHub repo. Add a model from the terminal: <code>gh repo create &lt;org&gt;/&lt;name&gt; &hellip;</code> + <code>git submodule add</code>.</p>
-{% if models %}
-<p style="color:#888;font-size:0.9em">Registered models are listed in the <strong>Models &mdash; lifecycle</strong> section below.</p>
-{% else %}<p>No models yet. <code>/pbg-add-model &lt;name&gt;</code></p>{% endif %}
 </div>
 
 <!-- Datasets panel -->
@@ -112,6 +143,24 @@
     <td><code>{{ ds.name }}</code></td>
     <td><code>{% if ds.path %}{{ ds.path }}{% elif ds.url %}{{ ds.url }}{% endif %}</code></td>
     <td>{{ (ds.claims or [])|join(', ') }}</td>
+  </tr>
+  {% endfor %}
+  {% for p in (pending.datasets or []) %}
+  <tr>
+    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.path or p.entry.url or '' }}</code></td>
+    <td>{{ (p.entry.claims or [])|join(', ') }}</td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+  {% elif pending.datasets %}
+  <p style="color:#888;font-style:italic">No datasets on main yet.</p>
+  <table><thead><tr><th>Name</th><th>Source</th><th>Claims</th></tr></thead><tbody>
+  {% for p in pending.datasets %}
+  <tr>
+    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.path or p.entry.url or '' }}</code></td>
+    <td>{{ (p.entry.claims or [])|join(', ') }}</td>
   </tr>
   {% endfor %}
   </tbody></table>
@@ -135,6 +184,23 @@
     <td><code>{{ pdf.sha256[:8] }}&hellip;</code></td>
   </tr>
   {% endfor %}
+  {% for p in (pending.references_pdfs or []) %}
+  <tr>
+    <td><code>{{ p.entry.bib_key }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td>{{ p.entry.path or '' }}</td>
+    <td><code>{{ (p.entry.sha256 or '')[:8] }}&hellip;</code></td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+  {% elif pending.references_pdfs %}
+  <table style="font-size:0.86em;margin-bottom:10px"><thead><tr><th>Bib key</th><th>Path</th><th>SHA256 (trunc)</th></tr></thead><tbody>
+  {% for p in pending.references_pdfs %}
+  <tr>
+    <td><code>{{ p.entry.bib_key }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td>{{ p.entry.path or '' }}</td>
+    <td><code>{{ (p.entry.sha256 or '')[:8] }}&hellip;</code></td>
+  </tr>
+  {% endfor %}
   </tbody></table>
   {% endif %}
   <button class="action-btn" onclick="openModal('modal-reference')">+ Add reference (PDF)</button>
@@ -155,6 +221,25 @@
     <td>{{ (doc.claims_supported or [])|join(', ') }}</td>
   </tr>
   {% endfor %}
+  {% for p in (pending.expert_docs or []) %}
+  <tr>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td>{{ p.entry.path or '' }}</td>
+    <td>{{ p.entry.description or '' }}</td>
+    <td>{{ p.entry.contributor or '' }}</td>
+    <td>{{ (p.entry.claims_supported or [])|join(', ') }}</td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+  {% elif pending.expert_docs %}
+  <table><thead><tr><th>Name</th><th>File</th><th>Description</th></tr></thead><tbody>
+  {% for p in pending.expert_docs %}
+  <tr>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td>{{ p.entry.path or '' }}</td>
+    <td>{{ p.entry.description or '' }}</td>
+  </tr>
+  {% endfor %}
   </tbody></table>
   {% else %}
   <p style="color:#888;font-style:italic">No expert documents registered yet.</p>
@@ -162,28 +247,215 @@
   <button class="action-btn" onclick="openModal('modal-expert-doc')">+ Add expert document</button>
 </div>
 
-<!-- ===== MODELS — LIFECYCLE ===== -->
-{% if models %}
-<h2 class="section-header">Models &mdash; lifecycle</h2>
+<!-- ===== SETUP ===== -->
+<h2 class="section-header">Setup</h2>
+<p class="section-lead">Define what the model tracks (observables) and how to visualize it.</p>
+
+<!-- Observables panel -->
+<div class="panel">
+  <h2>Observables</h2>
+  <p class="stage-explainer">State variables to track during a run. Each observable is a dotted path into the composite document (e.g. <code>chromosome.DnaA_count</code>).</p>
+  {% if observables %}
+  <table><thead><tr><th>Name</th><th>Store path</th><th>Units</th><th>Description</th></tr></thead><tbody>
+  {% for obs in observables %}
+  <tr>
+    <td><strong>{{ obs.name }}</strong></td>
+    <td><code>{{ obs.store_path }}</code></td>
+    <td>{{ obs.units or '' }}</td>
+    <td>{{ obs.description or '' }}</td>
+  </tr>
+  {% endfor %}
+  {% for p in (pending.observables or []) %}
+  <tr>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.store_path }}</code></td>
+    <td>{{ p.entry.units or '' }}</td>
+    <td>{{ p.entry.description or '' }}</td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+  {% elif pending.observables %}
+  <p style="color:#888;font-style:italic">No observables on main yet.</p>
+  <table><thead><tr><th>Name</th><th>Store path</th><th>Units</th></tr></thead><tbody>
+  {% for p in pending.observables %}
+  <tr>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.store_path }}</code></td>
+    <td>{{ p.entry.units or '' }}</td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+  {% else %}
+  <p style="color:#888;font-style:italic">No observables defined yet.</p>
+  {% endif %}
+  <button class="action-btn" onclick="openModal('modal-observable')">+ Add observable</button>
+</div>
+
+<!-- Visualizations panel -->
+<div class="panel">
+  <h2>Visualizations</h2>
+  <p class="stage-explainer">Charts that render observable trajectories. Define them now; they will be populated when you run the model.</p>
+  {% if visualizations %}
+  <table><thead><tr><th>Name</th><th>Type</th><th>Observables</th></tr></thead><tbody>
+  {% for viz in visualizations %}
+  <tr>
+    <td><strong>{{ viz.name }}</strong></td>
+    <td><code>{{ viz.type }}</code></td>
+    <td>{{ viz.observables | join(', ') }}</td>
+  </tr>
+  {% endfor %}
+  {% for p in (pending.visualizations or []) %}
+  <tr>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.type }}</code></td>
+    <td>{{ (p.entry.observables or []) | join(', ') }}</td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+  {% elif pending.visualizations %}
+  <p style="color:#888;font-style:italic">No visualizations on main yet.</p>
+  <table><thead><tr><th>Name</th><th>Type</th><th>Observables</th></tr></thead><tbody>
+  {% for p in pending.visualizations %}
+  <tr>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.type }}</code></td>
+    <td>{{ (p.entry.observables or []) | join(', ') }}</td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+  {% else %}
+  <p style="color:#888;font-style:italic">No visualizations defined yet.</p>
+  {% endif %}
+  <button class="action-btn" onclick="openModal('modal-visualization')">+ Add visualization</button>
+</div>
+
+<!-- ===== PHASES ===== -->
+<h2 class="section-header">Phases</h2>
+<p class="section-lead">Mechanism integration phases. Each phase adds biological mechanisms to the composite, is backed by a source artifact, and passes a Phase Gate before the next starts.</p>
 
 <div class="panel">
-  <table>
-    <thead><tr><th>Model</th><th>Setup</th><th>Mechanisms integrated</th><th>Deep dive</th></tr></thead>
-    <tbody>
-    {% for name, m in models.items() %}
-    <tr>
-      <td><code>{{ name }}</code></td>
-      <td>{{ (m.observables or [])|length }} observables, {{ (m.visualizations or [])|length }} viz</td>
-      <td>{{ (m.phases or [])|selectattr('status', 'equalto', 'complete')|list|length }} / {{ (m.phases or [])|length }}</td>
-      <td><a href="../models/{{ name }}/reports/index.html">deep dive &rarr;</a></td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <h2>Phase tracker</h2>
+  {% if phases %}
+  <div class="tracker">
+  {% for p in phases %}
+  <div class="pill {{ p.status }}">
+    <strong>{{ p.n }} &middot; {{ p.name }}</strong><br>{{ p.status }}
+    {% if p.source_artifact %}
+    <span class="source-artifact-tag">based on: {{ p.source_artifact.kind }} &lsquo;{{ p.source_artifact.ref }}&rsquo;</span>
+    {% endif %}
+    {% if p.status == 'planned' %}
+    <br><button class="pill-btn" onclick="phaseStart({{ p.n }})">Start</button>
+    {% elif p.status in ('in_progress', 'gate_pending') %}
+    <br><button class="pill-btn" onclick="phaseGate({{ p.n }})">Evaluate gate</button>
+    {% elif p.status == 'complete' %}
+    <br><button class="pill-btn" onclick="phaseGate({{ p.n }})">Re-evaluate</button>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% for p in (pending.phases or []) %}
+  <div class="pill planned">
+    <strong>{{ p.entry.n }} &middot; {{ p.entry.name }}</strong>
+    <span class="pending-review-badge">pending review</span>
+    <br><small style="color:#888">branch: {{ p.branch }}</small>
+  </div>
+  {% endfor %}
+  </div>
+  {% else %}
+  {% if pending.phases %}
+  <p style="color:#888;font-style:italic">No phases on main yet.</p>
+  <div class="tracker">
+  {% for p in pending.phases %}
+  <div class="pill planned">
+    <strong>{{ p.entry.n }} &middot; {{ p.entry.name }}</strong>
+    <span class="pending-review-badge">pending review</span>
+    <br><small style="color:#888">branch: {{ p.branch }}</small>
+  </div>
+  {% endfor %}
+  </div>
+  {% else %}
+  <p>No phases planned yet.</p>
+  {% endif %}
+  <button class="action-btn" onclick="openModal('modal-phase-plan')">+ Add phase plan</button>
+  {% endif %}
+  {% if phases %}
+  <button class="action-btn" style="margin-top:10px" onclick="openModal('modal-phase-plan')">+ Add more phases</button>
+  {% endif %}
+</div>
+
+<!-- Per-phase detail for completed phases -->
+{% for p in phases if p.status == 'complete' %}
+<div class="panel">
+  <h3>Phase {{ p.n }} &middot; {{ p.name }} &mdash; complete</h3>
+  {% if p.source_artifact %}
+  <p class="source-artifact-tag">Source: {{ p.source_artifact.kind }} &lsquo;{{ p.source_artifact.ref }}&rsquo;</p>
+  {% endif %}
+  {% if p.deliverables and p.deliverables.plots %}
+  {% for plot in p.deliverables.plots %}
+  <img src="../phases/{{ plot }}" alt="">
+  {% endfor %}
+  {% endif %}
+  {% if p.acceptance_tests %}
+  <h4>Acceptance tests</h4>
+  <table><thead><tr><th>ID</th><th>Description</th><th>Status</th></tr></thead><tbody>
+  {% for t in p.acceptance_tests %}
+  <tr><td><code>{{ t.id }}</code></td><td>{{ t.desc }}</td><td>{{ t.status }}</td></tr>
+  {% endfor %}
+  </tbody></table>
+  {% endif %}
+</div>
+{% endfor %}
+
+<!-- ===== REFERENCE ===== -->
+<h2 class="section-header">Reference</h2>
+
+{% if registry_warning %}
+<div class="panel" style="background:#fff3cd;border-color:#ffc107">
+  <strong>Warning:</strong> {{ registry_warning }}
 </div>
 {% endif %}
 
-<!-- Branch timeline panel -->
+<!-- Process registry panel -->
+<div class="panel"><h2>Process registry</h2>
+{% if registry and registry.processes %}
+<table><thead><tr><th>Name</th></tr></thead><tbody>
+{% for proc in registry.processes %}<tr><td><code>{{ proc }}</code></td></tr>{% endfor %}
+</tbody></table>
+{% else %}
+<p style="color:#888;font-style:italic">No processes registered yet. Install the workspace package or run <code>/pbg-pull-processes</code>.</p>
+{% endif %}
+</div>
+
+<!-- Type registry panel -->
+<div class="panel"><h2>Type registry</h2>
+{% if registry and registry.types %}
+<table><thead><tr><th>Type</th></tr></thead><tbody>
+{% for t in registry.types %}<tr><td><code>{{ t }}</code></td></tr>{% endfor %}
+</tbody></table>
+{% else %}
+<p style="color:#888;font-style:italic">No custom types yet.</p>
+{% endif %}
+</div>
+
+<!-- Composite document panel -->
+<div class="panel"><h2>Composite document</h2>
+<p class="stage-explainer">Browsable process-bigraph document for <code>{{ package_path or 'workspace package' }}</code>.</p>
+<div id="pbg-tree" class="json-tree"></div>
+<script>
+const PBG_DOC = {{ pbg_doc_json | safe }};
+document.getElementById('pbg-tree').innerHTML = window.renderJsonTree ? window.renderJsonTree(PBG_DOC) : '<pre>' + JSON.stringify(PBG_DOC, null, 2) + '</pre>';
+</script>
+</div>
+
+<!-- Run tests panel -->
+<div class="panel">
+  <h2>Run tests</h2>
+  <p class="stage-explainer">Runs <code>pytest -v tests/</code> at workspace root.</p>
+  <button id="run-tests-btn" class="action-btn" onclick="runTests()">Run pytest</button>
+  <span id="run-tests-spinner">running&hellip;</span>
+  <pre id="run-tests-output"></pre>
+</div>
+
+<!-- ===== BRANCH TIMELINE ===== -->
 <div class="panel">
   <h2>Branch timeline</h2>
   <p class="stage-explainer">Every action above creates a feature branch. Open PRs from your terminal: <code>gh pr create --base main --head &lt;branch&gt;</code>.</p>
@@ -211,9 +483,9 @@
       <label>Ref *<input name="ref" placeholder="main" required></label>
       <label>Mode *
         <select name="mode">
-          <option value="reference">reference (read-only submodule under external/)</option>
-          <option value="fork-source">fork-source (catalog only; no checkout)</option>
-          <option value="in-place">in-place (submodule under models/)</option>
+          <option value="reference">reference (read-only under external/)</option>
+          <option value="fork-source">fork-source (catalog only)</option>
+          <option value="in-place">in-place (submodule under external/)</option>
         </select>
       </label>
       <label>Description (optional)<input name="description" placeholder="Short description"></label>
@@ -254,7 +526,6 @@
     <h3>Add reference</h3>
     <p class="subtitle" style="font-size:0.85em;color:#555;margin-bottom:12px">
       Drop a PDF &mdash; metadata is auto-extracted from the PDF&rsquo;s embedded fields.
-      Refine in the optional section below if extraction misses anything.
     </p>
 
     <label style="margin-bottom:4px;font-weight:600">Drop a PDF here *</label>
@@ -286,7 +557,7 @@
           <input type="text" id="ref-doi" name="doi" placeholder="e.g. 10.1145/..." style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
         </label>
         <label style="font-size:0.88em">Maps to claims (comma-separated, optional):
-          <input type="text" id="ref-claim_mappings" name="claim_mappings" placeholder="phase-1.dnaA-accumulation, rep-initiation" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
+          <input type="text" id="ref-claim_mappings" name="claim_mappings" placeholder="phase-1.dnaA-accumulation" style="width:100%;box-sizing:border-box;border:1px solid #ccc;border-radius:4px;padding:5px 8px">
         </label>
       </div>
     </details>
@@ -346,6 +617,68 @@
   </div>
 </div>
 
+<!-- Observable modal -->
+<div id="modal-observable" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-observable')">&times;</button>
+    <h3>Add observable</h3>
+    <p style="font-size:0.85em;color:#555">Register a state variable to track. The store path is a dotted path into the composite document.</p>
+    <form id="form-observable" onsubmit="event.preventDefault(); submitForm(this, '/api/observable', function(f){ return { name: f.obs_name.value.trim(), store_path: f.store_path.value.trim(), units: f.units.value.trim() || null, description: f.description.value.trim() || null }; })">
+      <label>Name * <small>(e.g. DnaA)</small><input name="obs_name" placeholder="DnaA" required></label>
+      <label>Store path * <small>(e.g. chromosome.DnaA_count)</small><input name="store_path" placeholder="chromosome.DnaA_count" required></label>
+      <label>Units (optional)<input name="units" placeholder="molecules"></label>
+      <label>Description (optional)<input name="description" placeholder="DnaA protein count in chromosome compartment"></label>
+      <div class="form-error"></div>
+      <button type="submit">Add observable</button>
+    </form>
+  </div>
+</div>
+
+<!-- Visualization modal -->
+<div id="modal-visualization" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-visualization')">&times;</button>
+    <h3>Add visualization</h3>
+    <p style="font-size:0.85em;color:#555">Define a chart that renders registered observables.</p>
+    <form id="form-visualization" onsubmit="event.preventDefault(); _submitVisualization(this)">
+      <label>Name * <small>(e.g. dnaA-trajectory)</small><input name="viz_name" placeholder="dnaA-trajectory" required></label>
+      <label>Type *
+        <select name="viz_type">
+          <option value="time-series">time-series</option>
+          <option value="phase-space">phase-space</option>
+          <option value="heatmap">heatmap</option>
+          <option value="histogram">histogram</option>
+        </select>
+      </label>
+      <label>Observables * <small>(comma-separated observable names)</small><input name="viz_observables" placeholder="DnaA, cell_mass" required></label>
+      <label>Y-axis label (optional, for time-series)<input name="y_label" placeholder="DnaA (molecules)"></label>
+      <div class="form-error"></div>
+      <button type="submit">Add visualization</button>
+    </form>
+  </div>
+</div>
+
+<!-- Phase plan modal -->
+<div id="modal-phase-plan" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px">
+    <button class="modal-close" onclick="closeModal('modal-phase-plan')">&times;</button>
+    <h3>Add phase plan</h3>
+    <p style="font-size:0.85em;color:#555">
+      Enter phases as JSON. Each phase needs <code>n</code> (integer) and <code>name</code> (string).
+      Optional: <code>objective</code>, <code>prereq_phases</code>, <code>acceptance_tests</code>.
+    </p>
+    <label>Phases JSON *
+      <textarea id="phase-plan-json" style="width:100%;min-height:180px;font-family:monospace;font-size:0.88em;border:1px solid #ccc;border-radius:4px;padding:8px;box-sizing:border-box"
+        placeholder='[{"n": 1, "name": "Baseline", "objective": "Establish replication initiation baseline"}, {"n": 2, "name": "DnaA accumulation", "objective": "Add DnaA binding dynamics"}]'></textarea>
+    </label>
+    <div class="form-error" id="phase-plan-error"></div>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="action-btn" style="background:#1976d2;color:#fff;border-color:#1976d2" onclick="submitPhasePlan()">Submit phase plan</button>
+      <button class="action-btn" onclick="closeModal('modal-phase-plan')">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script src="assets/render-helpers.js"></script>
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
 <script src="assets/walkthrough.js" onerror="/* walkthrough unavailable */"></script>
@@ -354,12 +687,12 @@
 document.addEventListener("DOMContentLoaded", function() {
   if (typeof setupDropZone === "function") {
     setupDropZone("ds-drop-zone", "dataset");
-    setupDropZone("ref-pdf-drop-zone", "reference_pdf_primary");  // primary drop-and-go zone
+    setupDropZone("ref-pdf-drop-zone", "reference_pdf_primary");
     setupDropZone("expert-drop-zone", "expert_doc");
   }
 });
 
-// Dataset form submission (v0.1.9: supports file_b64 or url).
+// Dataset form submission.
 function _submitDataset(form) {
   submitForm(form, '/api/dataset', function(f) {
     var data = { name: f.name.value.trim(), claims: f.claims.value.trim() };
@@ -373,7 +706,6 @@ function _submitDataset(form) {
         data.url = url;
         if (f.sha256.value.trim()) data.sha256 = f.sha256.value.trim();
       } else {
-        // Show error — neither file nor URL.
         var errEl = form.querySelector(".form-error");
         if (errEl) errEl.textContent = "Error: drop a file or enter a URL.";
         return null;
@@ -383,9 +715,7 @@ function _submitDataset(form) {
   });
 }
 
-// Unified reference form submission (v0.1.12: drop-and-go).
-// Routes to /api/reference-pdf if a PDF was dropped, or /api/reference-bibtex
-// if only a BibTeX block was pasted.
+// Reference form submission.
 function submitReferenceForm() {
   var errEl = document.getElementById("ref-form-error");
   if (errEl) errEl.textContent = "";
@@ -395,7 +725,6 @@ function submitReferenceForm() {
   bibtexText = bibtexText.trim();
 
   if (pdfStored && pdfStored.file_b64) {
-    // PDF path — drop-and-go; all fields optional.
     var data = { pdf_b64: pdfStored.file_b64, pdf_filename: pdfStored.filename };
     var bibKey    = (document.getElementById("ref-bib_key") || {}).value || "";
     var title     = (document.getElementById("ref-title") || {}).value || "";
@@ -416,7 +745,6 @@ function submitReferenceForm() {
     _postReferenceData("/api/reference-pdf", data);
 
   } else if (bibtexText) {
-    // BibTeX-paste path — legacy flow.
     var bibClaims = (document.getElementById("ref-bibtex_claim_mappings") || {}).value || "";
     var data = { bibtex_text: bibtexText, claim_mappings: bibClaims.trim() };
     _postReferenceData("/api/reference-bibtex", data);
@@ -449,7 +777,7 @@ function _postReferenceData(endpoint, data) {
       var msg = "Done!";
       if (bib_key) msg += " bib_key: " + bib_key;
       if (branch)  msg += "\nBranch: " + branch + (commit ? " (" + commit + ")" : "");
-      if (pending) msg += "\n\nNote: metadata incomplete — entry marked 'Needs metadata'. Refine via the form.";
+      if (pending) msg += "\n\nNote: metadata incomplete — entry marked 'Needs metadata'.";
       fetch("/api/render", { method: "POST" }).finally(function() {
         alert(msg);
         location.reload();
@@ -460,7 +788,7 @@ function _postReferenceData(endpoint, data) {
     });
 }
 
-// Expert doc form submission (v0.1.9: file_b64 required).
+// Expert doc form submission.
 function _submitExpertDoc(form) {
   submitForm(form, '/api/expert-doc', function(f) {
     var stored = (typeof _dropZoneStore !== "undefined") ? _dropZoneStore["expert_doc"] : null;
@@ -479,6 +807,130 @@ function _submitExpertDoc(form) {
     if (f.claims_supported && f.claims_supported.value.trim()) data.claims_supported = f.claims_supported.value.trim();
     return data;
   });
+}
+
+// Visualization form submission.
+function _submitVisualization(form) {
+  submitForm(form, '/api/visualization', function(f) {
+    var obs_raw = f.viz_observables.value.trim();
+    var obs_list = obs_raw.split(",").map(function(s) { return s.trim(); }).filter(Boolean);
+    var data = {
+      name: f.viz_name.value.trim(),
+      type: f.viz_type.value,
+      observables: obs_list,
+    };
+    var yLabel = f.y_label.value.trim();
+    if (yLabel) data.config = { y_label: yLabel };
+    return data;
+  });
+}
+
+// Phase plan submission.
+function submitPhasePlan() {
+  var errEl = document.getElementById("phase-plan-error");
+  if (errEl) errEl.textContent = "";
+  var raw = document.getElementById("phase-plan-json").value.trim();
+  var phases;
+  try {
+    phases = JSON.parse(raw);
+  } catch (e) {
+    if (errEl) errEl.textContent = "Invalid JSON: " + e.message;
+    return;
+  }
+  if (!Array.isArray(phases) || !phases.length) {
+    if (errEl) errEl.textContent = "phases must be a non-empty JSON array";
+    return;
+  }
+  fetch("/api/phase-plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phases: phases }),
+  })
+    .then(function(res) { return res.json().then(function(j) { return { ok: res.ok, json: j }; }); })
+    .then(function(r) {
+      if (!r.ok) {
+        if (errEl) errEl.textContent = "Error: " + (r.json.error || "unknown");
+        return;
+      }
+      fetch("/api/render", { method: "POST" }).finally(function() {
+        alert("Phase plan created!\nBranch: " + (r.json.branch || "") + "\nMerge it to make phases appear on main.");
+        location.reload();
+      });
+    })
+    .catch(function(err) {
+      if (errEl) errEl.textContent = "Network error: " + String(err);
+    });
+}
+
+// Phase start.
+function phaseStart(n) {
+  fetch("/api/phase-start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ n: n }),
+  })
+    .then(function(res) { return res.json().then(function(j) { return { ok: res.ok, json: j }; }); })
+    .then(function(r) {
+      if (!r.ok) { alert("Error: " + (r.json.error || "unknown")); return; }
+      fetch("/api/render", { method: "POST" }).finally(function() {
+        alert("Phase " + n + " started!\nBranch: " + (r.json.branch || ""));
+        location.reload();
+      });
+    })
+    .catch(function(err) { alert("Network error: " + err); });
+}
+
+// Phase gate.
+function phaseGate(n) {
+  fetch("/api/phase-gate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ n: n }),
+  })
+    .then(function(res) { return res.json().then(function(j) { return { ok: res.ok, json: j }; }); })
+    .then(function(r) {
+      if (!r.ok) { alert("Error: " + (r.json.error || "unknown")); return; }
+      fetch("/api/render", { method: "POST" }).finally(function() {
+        alert("Gate evaluated for phase " + n + ": " + (r.json.gate_status || "?") + "\nBranch: " + (r.json.branch || ""));
+        location.reload();
+      });
+    })
+    .catch(function(err) { alert("Network error: " + err); });
+}
+
+// Run tests.
+function runTests() {
+  var btn = document.getElementById("run-tests-btn");
+  var spinner = document.getElementById("run-tests-spinner");
+  var output = document.getElementById("run-tests-output");
+  if (btn) btn.disabled = true;
+  if (spinner) spinner.style.display = "inline";
+  if (output) { output.style.display = "none"; output.textContent = ""; }
+  fetch("/api/run-tests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  })
+    .then(function(res) { return res.json(); })
+    .then(function(r) {
+      if (btn) btn.disabled = false;
+      if (spinner) spinner.style.display = "none";
+      if (output) {
+        output.style.display = "block";
+        var text = "";
+        if (r.error) {
+          text = "Error: " + r.error;
+        } else {
+          text = "Exit code: " + r.returncode + "\n\n" + (r.stdout || "") + (r.stderr ? "\nSTDERR:\n" + r.stderr : "");
+        }
+        output.textContent = text;
+      }
+    })
+    .catch(function(err) {
+      if (btn) btn.disabled = false;
+      if (spinner) spinner.style.display = "none";
+      if (output) { output.style.display = "block"; output.textContent = "Network error: " + err; }
+    });
 }
 </script>
 </body></html>

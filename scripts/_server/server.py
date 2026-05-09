@@ -9,6 +9,10 @@ v0.1.10: PDF-first reference flow (/api/reference-pdf); legacy BibTeX paste rena
 v0.1.12: /api/reference-pdf is now drop-and-go; pypdf extracts metadata from the PDF so no
 typed fields are required. Auto-generates bib_key. Sets _metadata_pending flag when extraction
 is incomplete.
+v0.3.0: schema v2 — workspace IS the model. All endpoints drop model scoping.
+  /api/observable, /api/visualization, /api/phase-plan, /api/phase-start, /api/phase-gate,
+  /api/run-tests now operate on top-level workspace state directly. Pending-visibility helper
+  added: unmerged stage/* branches surface entries with a "(pending review)" badge.
 """
 from __future__ import annotations
 import argparse
@@ -42,50 +46,24 @@ LOCK = Lock()
 # Git helpers
 # ---------------------------------------------------------------------------
 
-def _submodule_paths() -> set[str]:
-    """Return the set of submodule paths declared in .gitmodules (if any)."""
-    gm = WORKSPACE / ".gitmodules"
-    if not gm.exists():
-        return set()
-    paths = set()
-    for line in gm.read_text().splitlines():
-        line = line.strip()
-        if line.startswith("path = "):
-            paths.add(line.split("=", 1)[1].strip())
-    return paths
-
-
 def _is_generated_path(path: str) -> bool:
     """True if `path` is a generated report file (the dashboard rebuilds these
     on every page load, so they're chronically dirty and shouldn't block actions).
     """
-    if path.startswith("reports/"):
-        return True
-    # Per-model reports
-    if path.startswith("models/") and "/reports/" in path:
-        return True
-    return False
+    return path.startswith("reports/")
 
 
-def _dirty_excluding_submodules() -> str:
-    """Return the porcelain status with lines that don't block a workspace
-    action stripped:
-      - submodule pointer changes ('M models/foo')
-      - submodule internal changes (' m models/foo')
-      - generated report files (reports/*, models/*/reports/*) — derived state
-    """
+def _dirty_workspace() -> str:
+    """Return the porcelain status excluding generated report files."""
     status = subprocess.run(
         ["git", "status", "--porcelain"],
         cwd=WORKSPACE, capture_output=True, text=True, check=True,
     ).stdout
-    submodules = _submodule_paths()
     kept = []
     for raw in status.splitlines():
         if len(raw) < 4:
             continue
         path = raw[3:]
-        if path in submodules:
-            continue
         if _is_generated_path(path):
             continue
         kept.append(raw)
@@ -96,14 +74,9 @@ def _branched_action(branch_name: str, commit_message: str, action_fn) -> tuple[
     """Run action_fn on a fresh branch off main; commit; return to main.
 
     Returns (response_dict, http_status_code).
-
-    The pre-flight check ignores submodule pointer/internal changes — workspace-
-    level actions don't touch submodules, so a stale submodule pointer (common
-    after model-level actions) shouldn't block them. Submodule-level actions use
-    a separate helper that DOES enforce submodule cleanliness.
     """
-    # Pre-flight: refuse if dirty (excluding submodule lines).
-    status = _dirty_excluding_submodules()
+    # Pre-flight: refuse if dirty (excluding generated report files).
+    status = _dirty_workspace()
     if status.strip():
         return {"error": f"working tree dirty (uncommitted changes): {status[:300]}"}, 409
 
@@ -123,17 +96,9 @@ def _branched_action(branch_name: str, commit_message: str, action_fn) -> tuple[
         action_fn()  # raises on validation/lint failure
 
         subprocess.run(["git", "add", "-A"], cwd=WORKSPACE, check=True, capture_output=True)
-        # Unstage submodule pointer/internal changes — workspace-level actions
-        # don't own submodules and shouldn't sweep their pointer drift into this
-        # commit.
-        for sub in _submodule_paths():
-            subprocess.run(["git", "reset", "HEAD", "--", sub],
-                           cwd=WORKSPACE, check=False, capture_output=True)
         # Unstage generated reports — they're derived state, regenerated on
         # every page load; mixing them into action commits creates noise.
         subprocess.run(["git", "reset", "HEAD", "--", "reports/"],
-                       cwd=WORKSPACE, check=False, capture_output=True)
-        subprocess.run(["git", "reset", "HEAD", "--", "models/*/reports/"],
                        cwd=WORKSPACE, check=False, capture_output=True)
         # No-op-commit guard: if action_fn made no changes, abort cleanly.
         diff = subprocess.run(
@@ -173,221 +138,6 @@ def _branched_action(branch_name: str, commit_message: str, action_fn) -> tuple[
         return {"error": str(e)}, 500
 
 
-def _branched_action_submodule(
-    branch_name: str,
-    commit_message: str,
-    action_fn,
-    submodule_path: str,
-) -> tuple[dict, int]:
-    """Like _branched_action but for changes inside a git submodule.
-
-    Commits inside the submodule first, then updates the submodule pointer
-    in the workspace repo on a feature branch.
-
-    submodule_path: path relative to WORKSPACE (e.g. 'models/chromosome-rep1')
-    """
-    sub_dir = WORKSPACE / submodule_path
-
-    # Pre-flight: workspace root must be clean.
-    status = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=WORKSPACE, capture_output=True, text=True, check=True,
-    ).stdout
-    if status.strip():
-        return {"error": f"working tree dirty (uncommitted changes): {status[:300]}"}, 409
-
-    # Pre-flight: submodule must be clean too.
-    sub_status = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=sub_dir, capture_output=True, text=True, check=True,
-    ).stdout
-    if sub_status.strip():
-        return {
-            "error": f"submodule '{submodule_path}' has uncommitted changes: {sub_status[:300]}"
-        }, 409
-
-    # Refuse if branch already exists in workspace.
-    existing = subprocess.run(
-        ["git", "branch", "--list", branch_name],
-        cwd=WORKSPACE, capture_output=True, text=True, check=True,
-    ).stdout
-    if existing.strip():
-        return {
-            "error": f"branch '{branch_name}' already exists; resolve in terminal first"
-        }, 409
-
-    try:
-        # Run the action (writes files inside the submodule).
-        action_fn()
-
-        # Commit inside the submodule.
-        subprocess.run(["git", "add", "-A"], cwd=sub_dir, check=True, capture_output=True)
-        sub_diff = subprocess.run(
-            ["git", "diff", "--cached", "--stat"],
-            cwd=sub_dir, capture_output=True, text=True, check=True,
-        ).stdout
-        if not sub_diff.strip():
-            # Nothing actually changed in the submodule.
-            return {"error": "action made no changes (already at this state?)"}, 409
-
-        subprocess.run([
-            "git", "-c", "user.email=pbg-template@local",
-                   "-c", "user.name=pbg-template",
-                   "commit", "-m", commit_message,
-        ], cwd=sub_dir, check=True, capture_output=True)
-        sub_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=sub_dir, capture_output=True, text=True, check=True,
-        ).stdout.strip()
-
-        # Now update the workspace repo: create branch, stage submodule pointer, commit.
-        subprocess.run(["git", "checkout", "-b", branch_name], cwd=WORKSPACE, check=True,
-                       capture_output=True)
-        subprocess.run(["git", "add", submodule_path], cwd=WORKSPACE, check=True,
-                       capture_output=True)
-        subprocess.run([
-            "git", "-c", "user.email=pbg-template@local",
-                   "-c", "user.name=pbg-template",
-                   "commit", "-m", commit_message,
-        ], cwd=WORKSPACE, check=True, capture_output=True)
-        ws_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=WORKSPACE, capture_output=True, text=True, check=True,
-        ).stdout.strip()
-
-        subprocess.run(["git", "checkout", "main"], cwd=WORKSPACE, check=True,
-                       capture_output=True)
-        # Restore submodule to what main's pointer expects.
-        subprocess.run(["git", "submodule", "update", "--", submodule_path],
-                       cwd=WORKSPACE, check=False, capture_output=True)
-
-        return {
-            "branch": branch_name,
-            "commit": ws_sha[:7],
-            "submodule_commit": sub_sha[:7],
-            "message": commit_message,
-        }, 200
-
-    except subprocess.CalledProcessError as e:
-        # Best-effort cleanup.
-        _cleanup_submodule_branch(branch_name, sub_dir, submodule_path)
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
-        return {"error": f"git error: {stderr[:300]}"}, 500
-    except Exception as e:
-        _cleanup_submodule_branch(branch_name, sub_dir, submodule_path)
-        return {"error": str(e)}, 500
-
-
-def _branched_action_submodule_with_ws(
-    branch_name: str,
-    commit_message: str,
-    action_fn,
-    ws_action_fn,
-    submodule_path: str,
-) -> tuple[dict, int]:
-    """Like _branched_action_submodule but also runs ws_action_fn (updates workspace.yaml).
-
-    action_fn: writes files inside the submodule.
-    ws_action_fn: updates workspace.yaml (run AFTER the workspace branch is created).
-    """
-    sub_dir = WORKSPACE / submodule_path
-
-    # Pre-flight: workspace root must be clean.
-    status = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=WORKSPACE, capture_output=True, text=True, check=True,
-    ).stdout
-    if status.strip():
-        return {"error": f"working tree dirty (uncommitted changes): {status[:300]}"}, 409
-
-    # Pre-flight: submodule must be clean.
-    sub_status = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=sub_dir, capture_output=True, text=True, check=True,
-    ).stdout
-    if sub_status.strip():
-        return {
-            "error": f"submodule '{submodule_path}' has uncommitted changes: {sub_status[:300]}"
-        }, 409
-
-    existing = subprocess.run(
-        ["git", "branch", "--list", branch_name],
-        cwd=WORKSPACE, capture_output=True, text=True, check=True,
-    ).stdout
-    if existing.strip():
-        return {
-            "error": f"branch '{branch_name}' already exists; resolve in terminal first"
-        }, 409
-
-    try:
-        action_fn()  # writes files inside the submodule
-
-        # Commit inside the submodule.
-        subprocess.run(["git", "add", "-A"], cwd=sub_dir, check=True, capture_output=True)
-        sub_diff = subprocess.run(
-            ["git", "diff", "--cached", "--stat"],
-            cwd=sub_dir, capture_output=True, text=True, check=True,
-        ).stdout
-        if not sub_diff.strip():
-            return {"error": "action made no changes in submodule (already at this state?)"}, 409
-
-        subprocess.run([
-            "git", "-c", "user.email=pbg-template@local",
-                   "-c", "user.name=pbg-template",
-                   "commit", "-m", commit_message,
-        ], cwd=sub_dir, check=True, capture_output=True)
-        sub_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=sub_dir, capture_output=True, text=True, check=True,
-        ).stdout.strip()
-
-        # Create workspace branch; run ws_action_fn; stage everything; commit.
-        subprocess.run(["git", "checkout", "-b", branch_name], cwd=WORKSPACE, check=True,
-                       capture_output=True)
-        ws_action_fn()  # updates workspace.yaml
-        subprocess.run(["git", "add", "-A"], cwd=WORKSPACE, check=True, capture_output=True)
-        subprocess.run([
-            "git", "-c", "user.email=pbg-template@local",
-                   "-c", "user.name=pbg-template",
-                   "commit", "-m", commit_message,
-        ], cwd=WORKSPACE, check=True, capture_output=True)
-        ws_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=WORKSPACE, capture_output=True, text=True, check=True,
-        ).stdout.strip()
-
-        subprocess.run(["git", "checkout", "main"], cwd=WORKSPACE, check=True,
-                       capture_output=True)
-        # Restore submodule to what main's pointer expects.
-        subprocess.run(["git", "submodule", "update", "--", submodule_path],
-                       cwd=WORKSPACE, check=False, capture_output=True)
-        return {
-            "branch": branch_name,
-            "commit": ws_sha[:7],
-            "submodule_commit": sub_sha[:7],
-            "message": commit_message,
-        }, 200
-
-    except subprocess.CalledProcessError as e:
-        _cleanup_submodule_branch(branch_name, sub_dir, submodule_path)
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
-        return {"error": f"git error: {stderr[:300]}"}, 500
-    except Exception as e:
-        _cleanup_submodule_branch(branch_name, sub_dir, submodule_path)
-        return {"error": str(e)}, 500
-
-
-def _cleanup_submodule_branch(branch_name: str, sub_dir: Path, submodule_path: str) -> None:
-    """Best-effort cleanup for submodule-branched actions."""
-    subprocess.run(["git", "checkout", "main"], cwd=WORKSPACE, check=False,
-                   capture_output=True)
-    subprocess.run(["git", "branch", "-D", branch_name], cwd=WORKSPACE, check=False,
-                   capture_output=True)
-    # Restore submodule to what main's pointer expects.
-    subprocess.run(["git", "submodule", "update", "--", submodule_path],
-                   cwd=WORKSPACE, check=False, capture_output=True)
-
-
 def _cleanup_branch(branch_name: str) -> None:
     """Best-effort: return to main and delete the branch."""
     subprocess.run(["git", "checkout", "main"], cwd=WORKSPACE, check=False,
@@ -403,21 +153,106 @@ def _safe_slug(s: str) -> str:
     return s[:40]
 
 
-def _model_submodule_path(model: str) -> str:
-    """Return the submodule path for a model (relative to workspace root).
+# ---------------------------------------------------------------------------
+# Pending visibility helper
+# ---------------------------------------------------------------------------
 
-    Checks workspace.yaml for submodule_path; falls back to 'models/<model>'.
-    The returned value is always relative to WORKSPACE.
+def _pending_entries() -> dict:
+    """Walk unmerged stage/* branches; diff against main's workspace.yaml.
+
+    Returns a dict keyed by panel name, each value a list of
+    {"entry": <dict>, "branch": <str>} objects for entries not on main.
+
+    Panels: observables, visualizations, phases, datasets, references_pdfs,
+            expert_docs, imports.
     """
     try:
-        ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
-        m_data = (ws.get("models") or {}).get(model, {})
-        sub_path = m_data.get("submodule_path", "")
-        if sub_path:
-            return sub_path
+        main_text = subprocess.run(
+            ["git", "show", "main:workspace.yaml"],
+            cwd=WORKSPACE, capture_output=True, text=True, check=True,
+        ).stdout
+        main_ws = yaml.safe_load(main_text) or {}
     except Exception:
-        pass
-    return f"models/{model}"
+        return {}
+
+    # Build uniqueness-key sets for main.
+    def _key_set(items, key):
+        return {item.get(key) for item in (items or []) if isinstance(item, dict)}
+
+    main_obs_names = _key_set(main_ws.get("observables"), "name")
+    main_viz_names = _key_set(main_ws.get("visualizations"), "name")
+    main_phase_ns = {p.get("n") for p in (main_ws.get("phases") or []) if isinstance(p, dict)}
+    main_ds_names = _key_set(main_ws.get("datasets"), "name")
+    main_pdf_keys = _key_set(main_ws.get("references_pdfs"), "bib_key")
+    main_edoc_names = _key_set(main_ws.get("expert_docs"), "name")
+    main_import_names = set((main_ws.get("imports") or {}).keys())
+
+    # Get all stage/* branches.
+    try:
+        raw = subprocess.run(
+            ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/stage/"],
+            cwd=WORKSPACE, capture_output=True, text=True, check=True,
+        ).stdout
+        stage_branches = [b.strip() for b in raw.splitlines() if b.strip()]
+    except Exception:
+        return {}
+
+    pending: dict = {
+        "observables": [],
+        "visualizations": [],
+        "phases": [],
+        "datasets": [],
+        "references_pdfs": [],
+        "expert_docs": [],
+        "imports": [],
+    }
+
+    for branch in stage_branches:
+        try:
+            branch_text = subprocess.run(
+                ["git", "show", f"{branch}:workspace.yaml"],
+                cwd=WORKSPACE, capture_output=True, text=True, check=True,
+            ).stdout
+            branch_ws = yaml.safe_load(branch_text) or {}
+        except Exception:
+            continue
+
+        # Find new observables.
+        for item in (branch_ws.get("observables") or []):
+            if isinstance(item, dict) and item.get("name") not in main_obs_names:
+                pending["observables"].append({"entry": item, "branch": branch})
+
+        # Find new visualizations.
+        for item in (branch_ws.get("visualizations") or []):
+            if isinstance(item, dict) and item.get("name") not in main_viz_names:
+                pending["visualizations"].append({"entry": item, "branch": branch})
+
+        # Find new phases.
+        for item in (branch_ws.get("phases") or []):
+            if isinstance(item, dict) and item.get("n") not in main_phase_ns:
+                pending["phases"].append({"entry": item, "branch": branch})
+
+        # Find new datasets.
+        for item in (branch_ws.get("datasets") or []):
+            if isinstance(item, dict) and item.get("name") not in main_ds_names:
+                pending["datasets"].append({"entry": item, "branch": branch})
+
+        # Find new reference PDFs.
+        for item in (branch_ws.get("references_pdfs") or []):
+            if isinstance(item, dict) and item.get("bib_key") not in main_pdf_keys:
+                pending["references_pdfs"].append({"entry": item, "branch": branch})
+
+        # Find new expert docs.
+        for item in (branch_ws.get("expert_docs") or []):
+            if isinstance(item, dict) and item.get("name") not in main_edoc_names:
+                pending["expert_docs"].append({"entry": item, "branch": branch})
+
+        # Find new imports.
+        for imp_name, imp_val in (branch_ws.get("imports") or {}).items():
+            if imp_name not in main_import_names:
+                pending["imports"].append({"entry": {"name": imp_name, **imp_val}, "branch": branch})
+
+    return pending
 
 
 # ---------------------------------------------------------------------------
@@ -439,12 +274,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_guidance()
         if self.path.startswith("/api/branches"):
             return self._serve_branches()
+        if self.path.startswith("/api/pending"):
+            return self._serve_pending()
         rel = self.path.lstrip("/")
         # Refuse path traversal and absolute paths.
         if ".." in rel.split("/") or rel.startswith("/"):
             self.send_response(403); self.end_headers(); return
-        # Resolve under the workspace root so per-model reports
-        # (e.g. /models/<name>/reports/index.html) are reachable.
         primary = WORKSPACE / rel
         if primary.is_file():
             return self._serve_file(primary, self._guess_mime(rel))
@@ -467,7 +302,6 @@ class Handler(BaseHTTPRequestHandler):
             # Legacy alias kept for backward compat (v0.1.9 and earlier).
             "/api/reference":          self._post_reference,
             "/api/expert-doc":         self._post_expert_doc,
-            "/api/acceptance":         self._post_acceptance,
             "/api/phase-plan":         self._post_phase_plan,
             "/api/phase-start":        self._post_phase_start,
             "/api/phase-gate":         self._post_phase_gate,
@@ -535,9 +369,9 @@ class Handler(BaseHTTPRequestHandler):
             if mode in ("reference",):
                 resp["next_terminal_step"] = f"git submodule add {source} external/{name}"
             elif mode == "in-place":
-                resp["next_terminal_step"] = f"git submodule add {source} models/{name}"
+                resp["next_terminal_step"] = f"git submodule add {source} external/{name}"
             else:
-                resp["next_terminal_step"] = "(fork-source: no submodule needed until you run /pbg-add-model --from-import)"
+                resp["next_terminal_step"] = "(fork-source: no submodule needed)"
             resp["note"] = (
                 "git submodule add is NOT performed by the server (requires terminal for network/auth). "
                 "Run 'next_terminal_step' from your workspace root to complete the import."
@@ -564,12 +398,10 @@ class Handler(BaseHTTPRequestHandler):
         url = body.get("url", "").strip()
 
         if file_b64:
-            # Drag-drop upload mode.
             if not filename:
                 return self._json({"error": "filename is required when file_b64 is provided"}, 400)
             dest_rel = f"datasets/{_safe_slug(name)}/{filename}"
             entry["path"] = dest_rel
-            # sha256 computed in action() after write
         elif path:
             entry["path"] = path
         elif url:
@@ -592,8 +424,6 @@ class Handler(BaseHTTPRequestHandler):
                 sha = _save_upload(file_b64, dest)
                 entry["sha256"] = sha
             elif path and not file_b64:
-                # Legacy source_path copy: also compute sha256.
-                import shutil as _shutil
                 src = Path(path)
                 if not src.is_absolute():
                     src = WORKSPACE / path
@@ -613,7 +443,6 @@ class Handler(BaseHTTPRequestHandler):
             if datasets is None:
                 datasets = []
                 ws["datasets"] = datasets
-            # Avoid duplicate names.
             for existing in datasets:
                 if isinstance(existing, dict) and existing.get("name") == name:
                     raise ValueError(f"dataset '{name}' already registered")
@@ -623,27 +452,17 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(*_branched_action(branch, commit_msg, action))
 
     def _post_reference_pdf(self, body: dict):
-        """Drop-and-go PDF reference flow (v0.1.12).
-
-        Only pdf_b64 is required. All metadata fields (bib_key, title, authors, year,
-        journal, doi) are optional — the server extracts them from the PDF's embedded
-        metadata using pypdf. If extraction is incomplete, the entry is created with
-        _metadata_pending: true and a _pending_<ts> bib_key as fallback.
-
-        Optional: journal, doi, claim_mappings (list of claim IDs).
-        """
+        """Drop-and-go PDF reference flow (v0.1.12)."""
         pdf_b64 = body.get("pdf_b64", "").strip()
         if not pdf_b64:
             return self._json({"error": "pdf_b64 is required"}, 400)
 
-        # Extract metadata from PDF bytes.
         import base64 as _base64
         raw_pdf = _base64.b64decode(pdf_b64)
         _ws_add_to_sys_path()
         from scripts._lib.pdf_metadata import extract_pdf_metadata, auto_bib_key, build_bibtex
         extracted = extract_pdf_metadata(raw_pdf)
 
-        # Merge: typed-by-user > extracted > empty.
         title = (body.get("title") or "").strip() or extracted.get("title", "")
         authors_input = (body.get("authors") or "").strip()
         if authors_input:
@@ -671,7 +490,6 @@ class Handler(BaseHTTPRequestHandler):
             not title or not authors or not year or bib_key.startswith("_pending")
         )
 
-        # Normalise claim_mappings: accept list of claim IDs or comma-separated string.
         claim_mappings_raw = body.get("claim_mappings", [])
         if isinstance(claim_mappings_raw, str):
             claim_ids: list[str] = [c.strip() for c in claim_mappings_raw.split(",") if c.strip()]
@@ -693,16 +511,13 @@ class Handler(BaseHTTPRequestHandler):
             pdf_dest_rel = f"references/papers/{bib_key}.pdf"
             pdf_dest = WORKSPACE / pdf_dest_rel
 
-            # Validate bib_key uniqueness in papers.bib.
             if bib_file.exists():
                 existing_text = bib_file.read_text()
                 if re.search(rf"@\w+\{{{re.escape(bib_key)},", existing_text):
                     raise ValueError(f"BibTeX key '{bib_key}' already exists in papers.bib")
 
-            # Save PDF.
             sha = _save_upload(pdf_b64, pdf_dest)
 
-            # Build BibTeX entry (may be sparse if metadata_pending).
             bibtex_entry = build_bibtex(bib_key, title, authors, year, journal, doi)
             bib_file.parent.mkdir(parents=True, exist_ok=True)
             existing_bib = bib_file.read_text() if bib_file.exists() else ""
@@ -711,7 +526,6 @@ class Handler(BaseHTTPRequestHandler):
                     f.write("\n")
                 f.write(bibtex_entry + "\n")
 
-            # Append to references_pdfs in workspace.yaml.
             from scripts._lib.workspace_yaml import load_workspace, save_workspace
             ws_file = WORKSPACE / "workspace.yaml"
             ws = load_workspace(ws_file)
@@ -726,7 +540,6 @@ class Handler(BaseHTTPRequestHandler):
                 refs_pdfs.append(entry)
             save_workspace(ws_file, ws)
 
-            # Update claims.yaml if claim IDs provided.
             if claim_ids:
                 import yaml as _yaml
                 existing_claims: dict = {}
@@ -745,7 +558,6 @@ class Handler(BaseHTTPRequestHandler):
         response, status = _branched_action(branch, commit_msg, action)
         response["bib_key"] = bib_key
         response["metadata_pending"] = metadata_pending
-        # Return extracted metadata (minus the raw dump) for transparency.
         response["extracted"] = {k: v for k, v in extracted.items() if k != "raw"}
         return self._json(response, status)
 
@@ -754,18 +566,15 @@ class Handler(BaseHTTPRequestHandler):
         bibtex_text = body.get("bibtex_text", "").strip()
         claim_mappings_raw = body.get("claim_mappings", {})
         pdf_b64 = body.get("pdf_b64", "").strip()
-        pdf_filename = body.get("pdf_filename", "").strip()
 
         if not bibtex_text:
             return self._json({"error": "bibtex_text is required"}, 400)
 
-        # Parse bib key from @Type{key, ...}
         m = re.search(r"@\w+\{([^,\s]+)", bibtex_text)
         if not m:
             return self._json({"error": "could not parse BibTeX key from bibtex_text"}, 400)
         bibkey = m.group(1).strip()
 
-        # Parse claim_mappings: accept dict or "claim:key, claim:key" string.
         if isinstance(claim_mappings_raw, str):
             claim_mappings: dict = {}
             for pair in claim_mappings_raw.split(","):
@@ -785,7 +594,6 @@ class Handler(BaseHTTPRequestHandler):
             bib_file = WORKSPACE / "references" / "papers.bib"
             claims_file = WORKSPACE / "references" / "claims.yaml"
 
-            # Check bib key uniqueness.
             if bib_file.exists():
                 existing_text = bib_file.read_text()
                 if f"{{{bibkey}," in existing_text or f"{{{bibkey} " in existing_text:
@@ -810,13 +618,11 @@ class Handler(BaseHTTPRequestHandler):
                 claims_file.parent.mkdir(parents=True, exist_ok=True)
                 claims_file.write_text(_yaml.safe_dump(existing_claims, sort_keys=False))
 
-            # Optional: save the accompanying PDF.
             if pdf_b64:
                 pdf_dest_rel = f"references/papers/{bibkey}.pdf"
                 pdf_dest = WORKSPACE / pdf_dest_rel
                 sha = _save_upload(pdf_b64, pdf_dest)
 
-                # Append to references_pdfs in workspace.yaml.
                 _ws_add_to_sys_path()
                 from scripts._lib.workspace_yaml import load_workspace, save_workspace
                 ws_file = WORKSPACE / "workspace.yaml"
@@ -825,7 +631,6 @@ class Handler(BaseHTTPRequestHandler):
                 if refs_pdfs is None:
                     refs_pdfs = []
                     ws["references_pdfs"] = refs_pdfs
-                # Avoid duplicates.
                 if not any(e.get("bib_key") == bibkey for e in refs_pdfs):
                     refs_pdfs.append({"bib_key": bibkey, "path": pdf_dest_rel, "sha256": sha})
                 save_workspace(ws_file, ws)
@@ -833,17 +638,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(*_branched_action(branch, commit_msg, action))
 
     def _post_expert_doc(self, body: dict):
-        """Register an expert document (PDF, lab notes, etc.) in workspace.yaml.
-
-        Body fields (v0.1.9: accepts either file_b64+filename OR source_path):
-          name         (required) — short label, used as filename stem
-          file_b64     (new) — base64-encoded file content (drag-drop upload)
-          filename     (new) — original filename, used to derive extension
-          source_path  (legacy) — absolute or workspace-relative path to file on disk
-          description  (optional)
-          contributor  (optional)
-          claims_supported (optional list or comma-separated string)
-        """
+        """Register an expert document in workspace.yaml."""
         import shutil as _shutil
         import time as _time
 
@@ -860,7 +655,6 @@ class Handler(BaseHTTPRequestHandler):
         if not file_b64 and not source_path_raw:
             return self._json({"error": "either file_b64+filename or source_path is required"}, 400)
 
-        # Parse claims_supported.
         if isinstance(claims_raw, str):
             claims_supported = [c.strip() for c in claims_raw.split(",") if c.strip()]
         elif isinstance(claims_raw, list):
@@ -869,14 +663,12 @@ class Handler(BaseHTTPRequestHandler):
             claims_supported = []
 
         if file_b64:
-            # Drag-drop upload mode: derive extension from filename.
             if not filename:
                 return self._json({"error": "filename is required when file_b64 is provided"}, 400)
             ext = Path(filename).suffix if Path(filename).suffix else ".pdf"
             dest_rel = f"references/expert/{_safe_slug(name)}{ext}"
             source_path = None
         else:
-            # Legacy source_path copy mode.
             source_path = Path(source_path_raw)
             if not source_path.is_absolute():
                 source_path = WORKSPACE / source_path
@@ -899,7 +691,6 @@ class Handler(BaseHTTPRequestHandler):
                 sha = _save_upload(file_b64, dest)
             else:
                 _shutil.copy2(str(source_path), str(dest))
-                # Compute sha256 for legacy copies too.
                 import hashlib as _hashlib
                 h = _hashlib.sha256()
                 with dest.open("rb") as fh:
@@ -907,7 +698,6 @@ class Handler(BaseHTTPRequestHandler):
                         h.update(chunk)
                 sha = h.hexdigest()
 
-            # Update workspace.yaml.
             _ws_add_to_sys_path()
             from scripts._lib.workspace_yaml import load_workspace, save_workspace
             ws_file = WORKSPACE / "workspace.yaml"
@@ -916,7 +706,6 @@ class Handler(BaseHTTPRequestHandler):
             if expert_docs is None:
                 expert_docs = []
                 ws["expert_docs"] = expert_docs
-            # Avoid duplicate names.
             for existing in expert_docs:
                 if isinstance(existing, dict) and existing.get("name") == name:
                     raise ValueError(f"expert doc '{name}' already registered")
@@ -932,60 +721,16 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._json(*_branched_action(branch, commit_msg, action))
 
-    def _post_acceptance(self, body: dict):
-        model = body.get("model", "").strip()
-        test_id = body.get("test_id", "").strip()
-        statement = body.get("statement", "").strip()
-        perturbation = body.get("perturbation", "").strip()
-        observable = body.get("observable", "").strip()
-
-        if not all([model, test_id, statement]):
-            return self._json({"error": "model, test_id, statement are required"}, 400)
-
-        submodule_path = _model_submodule_path(model)
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/6-acceptance-{_safe_slug(model)}-{_safe_slug(test_id)}-{epoch}"
-        commit_msg = f"feat(6): add acceptance test '{test_id}' for model '{model}'"
-
-        def action():
-            import yaml as _yaml
-            acceptance_file = WORKSPACE / "models" / model / "expert" / "acceptance.yaml"
-            acceptance_file.parent.mkdir(parents=True, exist_ok=True)
-            existing: list = []
-            if acceptance_file.exists():
-                try:
-                    existing = _yaml.safe_load(acceptance_file.read_text()) or []
-                except Exception:
-                    existing = []
-            # Check for duplicate test_id.
-            for t in existing:
-                if isinstance(t, dict) and t.get("id") == test_id:
-                    raise ValueError(f"acceptance test '{test_id}' already defined")
-            entry: dict = {
-                "id": test_id,
-                "desc": statement,
-                "status": "pending",
-            }
-            if perturbation:
-                entry["perturbation"] = perturbation
-            if observable:
-                entry["observable"] = observable
-            existing.append(entry)
-            acceptance_file.write_text(_yaml.safe_dump(existing, sort_keys=False))
-
-        return self._json(*_branched_action_submodule(branch, commit_msg, action, submodule_path))
-
     def _post_phase_plan(self, body: dict):
-        model = body.get("model", "").strip()
+        """Plan phases for the workspace (v0.3.0: no model param).
+
+        Body: {phases: [{n, name, objective?, prereq_phases?, acceptance_tests?}, ...]}
+        """
         phases_input = body.get("phases", [])
 
-        if not model:
-            return self._json({"error": "model is required"}, 400)
         if not isinstance(phases_input, list) or not phases_input:
             return self._json({"error": "phases must be a non-empty list"}, 400)
 
-        # Normalise phases list.
         phases: list[dict] = []
         for p in phases_input:
             if not isinstance(p, dict):
@@ -1004,130 +749,56 @@ class Handler(BaseHTTPRequestHandler):
                 "status": "planned",
             })
 
-        submodule_path = _model_submodule_path(model)
         import time as _time
         epoch = int(_time.time())
-        branch = f"stage/8-phase-plan-{_safe_slug(model)}-{epoch}"
-        commit_msg = f"feat(8): plan phases for model '{model}' (N={len(phases)})"
+        branch = f"stage/8-phase-plan-{epoch}"
+        commit_msg = f"feat(8): plan phases (N={len(phases)})"
 
-        # Phase plan touches both the submodule (phase-*.md files) and workspace.yaml.
-        # Strategy: write submodule files + workspace.yaml, commit submodule, then
-        # create workspace branch that updates workspace.yaml + submodule pointer.
         def action():
             _ws_add_to_sys_path()
             from scripts._lib.phase_files import create_initial_plan
-
-            phases_dir = WORKSPACE / "models" / model / "phases"
-            create_initial_plan(phases_dir, model, phases)
-
-        def ws_action():
-            _ws_add_to_sys_path()
             from scripts._lib.workspace_yaml import load_workspace, save_workspace
+
+            # Write phase-*.md files at workspace root phases/.
+            phases_dir = WORKSPACE / "phases"
+            create_initial_plan(phases_dir, "workspace", phases)
+
+            # Update top-level phases[] in workspace.yaml.
             ws_file = WORKSPACE / "workspace.yaml"
             ws = load_workspace(ws_file)
-            models_map = ws.setdefault("models", {})
-            if model not in models_map:
-                raise ValueError(f"model '{model}' not found in workspace.yaml")
-            # Store minimal phase list in workspace.yaml.
-            models_map[model]["phases"] = [
+            ws["phases"] = [
                 {"n": p["n"], "name": p["name"], "status": "planned"}
                 for p in phases
             ]
             save_workspace(ws_file, ws)
 
-        # Use the submodule variant for the submodule-level changes,
-        # then also update workspace.yaml on the same workspace branch.
-        sub_dir = WORKSPACE / submodule_path
-
-        # Pre-flight checks.
-        status = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=WORKSPACE, capture_output=True, text=True, check=True,
-        ).stdout
-        if status.strip():
-            return self._json({"error": f"working tree dirty: {status[:300]}"}, 409)
-        sub_status = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=sub_dir, capture_output=True, text=True, check=True,
-        ).stdout
-        if sub_status.strip():
-            return self._json({"error": f"submodule '{submodule_path}' dirty: {sub_status[:300]}"}, 409)
-        existing = subprocess.run(
-            ["git", "branch", "--list", branch],
-            cwd=WORKSPACE, capture_output=True, text=True, check=True,
-        ).stdout
-        if existing.strip():
-            return self._json({"error": f"branch '{branch}' already exists"}, 409)
-
-        try:
-            action()  # writes phase-*.md into submodule
-
-            # Commit in submodule.
-            subprocess.run(["git", "add", "-A"], cwd=sub_dir, check=True, capture_output=True)
-            sub_diff = subprocess.run(
-                ["git", "diff", "--cached", "--stat"],
-                cwd=sub_dir, capture_output=True, text=True, check=True,
-            ).stdout
-            if not sub_diff.strip():
-                return self._json({"error": "no phase files written to submodule"}, 409)
-            subprocess.run([
-                "git", "-c", "user.email=pbg-template@local",
-                       "-c", "user.name=pbg-template",
-                       "commit", "-m", commit_msg,
-            ], cwd=sub_dir, check=True, capture_output=True)
-
-            # Create workspace branch, update workspace.yaml + submodule pointer.
-            subprocess.run(["git", "checkout", "-b", branch], cwd=WORKSPACE, check=True,
-                           capture_output=True)
-            ws_action()  # updates workspace.yaml
-            subprocess.run(["git", "add", "-A"], cwd=WORKSPACE, check=True, capture_output=True)
-            subprocess.run([
-                "git", "-c", "user.email=pbg-template@local",
-                       "-c", "user.name=pbg-template",
-                       "commit", "-m", commit_msg,
-            ], cwd=WORKSPACE, check=True, capture_output=True)
-            ws_sha = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=WORKSPACE, capture_output=True, text=True, check=True,
-            ).stdout.strip()
-            subprocess.run(["git", "checkout", "main"], cwd=WORKSPACE, check=True,
-                           capture_output=True)
-            # Restore submodule to what main's pointer expects.
-            subprocess.run(["git", "submodule", "update", "--", submodule_path],
-                           cwd=WORKSPACE, check=False, capture_output=True)
-            return self._json({"branch": branch, "commit": ws_sha[:7], "message": commit_msg}, 200)
-
-        except subprocess.CalledProcessError as e:
-            _cleanup_submodule_branch(branch, sub_dir, submodule_path)
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
-            return self._json({"error": f"git error: {stderr[:300]}"}, 500)
-        except Exception as e:
-            _cleanup_submodule_branch(branch, sub_dir, submodule_path)
-            return self._json({"error": str(e)}, 500)
+        return self._json(*_branched_action(branch, commit_msg, action))
 
     def _post_phase_start(self, body: dict):
-        model = body.get("model", "").strip()
-        n = body.get("n")
+        """Start a phase for the workspace (v0.3.0: no model param).
 
-        if not model or n is None:
-            return self._json({"error": "model and n are required"}, 400)
+        Body: {n: <int>}
+        """
+        n = body.get("n")
+        if n is None:
+            return self._json({"error": "n is required"}, 400)
         n = int(n)
 
-        submodule_path = _model_submodule_path(model)
         import time as _time
         epoch = int(_time.time())
-        branch = f"stage/9-phase-{_safe_slug(model)}-{n}-start-{epoch}"
-        commit_msg = f"feat(9): start phase {n} for model '{model}'"
+        branch = f"stage/9-phase-{n}-start-{epoch}"
+        commit_msg = f"feat(9): start phase {n}"
 
         def action():
             _ws_add_to_sys_path()
             from scripts._lib.phase_md import parse_phase_md, render_phase_md
             from scripts._lib.phase_gate import generate_test_module
+            from scripts._lib.workspace_yaml import load_workspace, save_workspace
 
-            phases_dir = WORKSPACE / "models" / model / "phases"
+            phases_dir = WORKSPACE / "phases"
             phase_file = phases_dir / f"phase-{n}.md"
             if not phase_file.exists():
-                raise FileNotFoundError(f"phase-{n}.md not found for model '{model}'")
+                raise FileNotFoundError(f"phase-{n}.md not found at {phase_file}")
 
             fm, body_text = parse_phase_md(phase_file.read_text())
 
@@ -1138,58 +809,55 @@ class Handler(BaseHTTPRequestHandler):
                     prev_fm, _ = parse_phase_md(prev_file.read_text())
                     if not prev_fm.get("gate_passed", False):
                         raise ValueError(
-                            f"phase {n-1} has not passed its gate "
-                            f"(gate_passed={prev_fm.get('gate_passed')}). "
+                            f"phase {n-1} has not passed its gate. "
                             "Evaluate the gate for the previous phase first."
                         )
 
             fm["status"] = "in_progress"
             phase_file.write_text(render_phase_md(fm, body_text))
 
-            # Generate test stubs.
-            test_out = WORKSPACE / "models" / model / "tests" / "test_phases.py"
+            # Generate test stubs at workspace root tests/.
+            test_out = WORKSPACE / "tests" / "test_phases.py"
             generate_test_module(fm, test_out)
 
-        def ws_action():
-            _ws_add_to_sys_path()
-            from scripts._lib.workspace_yaml import load_workspace, save_workspace
+            # Update workspace.yaml top-level phases[].
             ws_file = WORKSPACE / "workspace.yaml"
             ws = load_workspace(ws_file)
-            for phase_entry in (ws.get("models", {}).get(model, {}).get("phases") or []):
+            for phase_entry in (ws.get("phases") or []):
                 if phase_entry.get("n") == n:
                     phase_entry["status"] = "in_progress"
                     break
             save_workspace(ws_file, ws)
 
-        return self._json(*_branched_action_submodule_with_ws(
-            branch, commit_msg, action, ws_action, submodule_path
-        ))
+        return self._json(*_branched_action(branch, commit_msg, action))
 
     def _post_phase_gate(self, body: dict):
-        model = body.get("model", "").strip()
-        n = body.get("n")
+        """Evaluate a phase gate for the workspace (v0.3.0: no model param).
 
-        if not model or n is None:
-            return self._json({"error": "model and n are required"}, 400)
+        Body: {n: <int>}
+        """
+        n = body.get("n")
+        if n is None:
+            return self._json({"error": "n is required"}, 400)
         n = int(n)
 
-        submodule_path = _model_submodule_path(model)
         import time as _time
         epoch = int(_time.time())
-        branch = f"stage/9-phase-{_safe_slug(model)}-{n}-gate-{epoch}"
-        commit_msg = f"feat(9): evaluate gate for phase {n} of '{model}'"
+        branch = f"stage/9-phase-{n}-gate-{epoch}"
+        commit_msg = f"feat(9): evaluate gate for phase {n}"
 
-        gate_status = {"status": "gate_pending"}  # mutable container for status
+        gate_status = {"status": "gate_pending"}
 
         def action():
             _ws_add_to_sys_path()
             from scripts._lib.phase_md import parse_phase_md, render_phase_md
             from scripts._lib.phase_gate import evaluate_gate
+            from scripts._lib.workspace_yaml import load_workspace, save_workspace
 
-            phases_dir = WORKSPACE / "models" / model / "phases"
+            phases_dir = WORKSPACE / "phases"
             phase_file = phases_dir / f"phase-{n}.md"
             if not phase_file.exists():
-                raise FileNotFoundError(f"phase-{n}.md not found for model '{model}'")
+                raise FileNotFoundError(f"phase-{n}.md not found at {phase_file}")
 
             fm, body_text = parse_phase_md(phase_file.read_text())
             result = evaluate_gate(fm)
@@ -1204,64 +872,50 @@ class Handler(BaseHTTPRequestHandler):
             gate_status["status"] = fm["status"]
             phase_file.write_text(render_phase_md(fm, body_text))
 
-        def ws_action():
-            _ws_add_to_sys_path()
-            from scripts._lib.workspace_yaml import load_workspace, save_workspace
+            # Update workspace.yaml.
             ws_file = WORKSPACE / "workspace.yaml"
             ws = load_workspace(ws_file)
-            for phase_entry in (ws.get("models", {}).get(model, {}).get("phases") or []):
+            for phase_entry in (ws.get("phases") or []):
                 if phase_entry.get("n") == n:
                     phase_entry["status"] = gate_status["status"]
                     break
             save_workspace(ws_file, ws)
 
-        resp, code = _branched_action_submodule_with_ws(
-            branch, commit_msg, action, ws_action, submodule_path
-        )
+        resp, code = _branched_action(branch, commit_msg, action)
         if code == 200:
             resp["gate_status"] = gate_status["status"]
         return self._json(resp, code)
 
     def _post_observable(self, body: dict):
-        """Register an observable in workspace.yaml for a model (v0.2.0).
+        """Register an observable in workspace.yaml (v0.3.0: top-level, no model).
 
-        Body fields:
-          model       (required) — model name key in workspace.yaml
-          name        (required) — short label for the observable
-          store_path  (required) — dotted path into the composite document (e.g. chromosome.DnaA_count)
-          units       (optional)
-          description (optional)
+        Body: {name, store_path, units?, description?}
         """
-        model = body.get("model", "").strip()
         name = body.get("name", "").strip()
         store_path = body.get("store_path", "").strip()
         units = body.get("units", "").strip() or None
         description = body.get("description", "").strip() or None
 
-        if not all([model, name, store_path]):
-            return self._json({"error": "model, name, store_path are required"}, 400)
+        if not all([name, store_path]):
+            return self._json({"error": "name and store_path are required"}, 400)
 
         import time as _time
         epoch = int(_time.time())
-        branch = f"stage/setup-observable-{_safe_slug(model)}-{_safe_slug(name)}-{epoch}"
-        commit_msg = f"feat(setup): add observable '{name}' to model '{model}'"
+        branch = f"stage/setup-observable-{_safe_slug(name)}-{epoch}"
+        commit_msg = f"feat(setup): add observable '{name}'"
 
         def action():
             _ws_add_to_sys_path()
             from scripts._lib.workspace_yaml import load_workspace, save_workspace
             ws_file = WORKSPACE / "workspace.yaml"
             ws = load_workspace(ws_file)
-            models_map = ws.get("models") or {}
-            if model not in models_map:
-                raise ValueError(f"model '{model}' not found in workspace.yaml")
-            observables = models_map[model].setdefault("observables", [])
+            observables = ws.setdefault("observables", [])
             if observables is None:
                 observables = []
-                models_map[model]["observables"] = observables
-            # Avoid duplicate names.
+                ws["observables"] = observables
             for existing in observables:
                 if isinstance(existing, dict) and existing.get("name") == name:
-                    raise ValueError(f"observable '{name}' already registered for model '{model}'")
+                    raise ValueError(f"observable '{name}' already registered")
             entry: dict = {"name": name, "store_path": store_path}
             if units:
                 entry["units"] = units
@@ -1273,23 +927,17 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(*_branched_action(branch, commit_msg, action))
 
     def _post_visualization(self, body: dict):
-        """Register a visualization in workspace.yaml for a model (v0.2.0).
+        """Register a visualization in workspace.yaml (v0.3.0: top-level, no model).
 
-        Body fields:
-          model        (required) — model name key in workspace.yaml
-          name         (required) — short label for the visualization
-          type         (required) — one of: time-series, phase-space, heatmap, histogram
-          observables  (required) — list of observable names (must be registered for this model)
-          config       (optional) — arbitrary object (e.g. {y_label: "DnaA (molecules)"})
+        Body: {name, type, observables, config?}
         """
-        model = body.get("model", "").strip()
         name = body.get("name", "").strip()
         viz_type = body.get("type", "").strip()
         obs_list = body.get("observables", [])
         config = body.get("config") or {}
 
-        if not all([model, name, viz_type]):
-            return self._json({"error": "model, name, type are required"}, 400)
+        if not all([name, viz_type]):
+            return self._json({"error": "name and type are required"}, 400)
         if viz_type not in ("time-series", "phase-space", "heatmap", "histogram"):
             return self._json({"error": "type must be one of: time-series, phase-space, heatmap, histogram"}, 400)
         if not isinstance(obs_list, list) or not obs_list:
@@ -1297,36 +945,33 @@ class Handler(BaseHTTPRequestHandler):
 
         import time as _time
         epoch = int(_time.time())
-        branch = f"stage/setup-viz-{_safe_slug(model)}-{_safe_slug(name)}-{epoch}"
-        commit_msg = f"feat(setup): add visualization '{name}' to model '{model}'"
+        branch = f"stage/setup-viz-{_safe_slug(name)}-{epoch}"
+        commit_msg = f"feat(setup): add visualization '{name}'"
 
         def action():
             _ws_add_to_sys_path()
             from scripts._lib.workspace_yaml import load_workspace, save_workspace
             ws_file = WORKSPACE / "workspace.yaml"
             ws = load_workspace(ws_file)
-            models_map = ws.get("models") or {}
-            if model not in models_map:
-                raise ValueError(f"model '{model}' not found in workspace.yaml")
-            # Validate observable references.
+
+            # Validate observable references against top-level observables.
             registered_obs = {
-                o.get("name") for o in (models_map[model].get("observables") or [])
+                o.get("name") for o in (ws.get("observables") or [])
                 if isinstance(o, dict)
             }
             missing = [o for o in obs_list if o not in registered_obs]
             if missing:
                 raise ValueError(
-                    f"observables not registered for model '{model}': {missing}. "
-                    f"Register them first via /api/observable."
+                    f"observables not registered: {missing}. "
+                    "Register them first via /api/observable."
                 )
-            visualizations = models_map[model].setdefault("visualizations", [])
+            visualizations = ws.setdefault("visualizations", [])
             if visualizations is None:
                 visualizations = []
-                models_map[model]["visualizations"] = visualizations
-            # Avoid duplicate names.
+                ws["visualizations"] = visualizations
             for existing in visualizations:
                 if isinstance(existing, dict) and existing.get("name") == name:
-                    raise ValueError(f"visualization '{name}' already registered for model '{model}'")
+                    raise ValueError(f"visualization '{name}' already registered")
             entry: dict = {"name": name, "type": viz_type, "observables": list(obs_list)}
             if config:
                 entry["config"] = config
@@ -1336,12 +981,11 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(*_branched_action(branch, commit_msg, action))
 
     def _post_run_tests(self, body: dict):
-        """Run pytest for a model. Returns JSON with returncode, stdout, stderr."""
-        model = body.get("model", "").strip()
-        if not model:
-            return self._json({"error": "model is required"}, 400)
+        """Run pytest for the workspace (v0.3.0: no model param).
 
-        test_dir = WORKSPACE / "models" / model / "tests"
+        Returns JSON with returncode, stdout, stderr.
+        """
+        test_dir = WORKSPACE / "tests"
         cmd = [sys.executable, "-m", "pytest", "-v", str(test_dir)]
         try:
             result = subprocess.run(
@@ -1349,7 +993,6 @@ class Handler(BaseHTTPRequestHandler):
                 capture_output=True, text=True, timeout=120,
             )
             return self._json({
-                "model": model,
                 "returncode": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
@@ -1360,19 +1003,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": str(e)}, 500)
 
     def _post_render(self, body: dict):
-        """Re-render workspace + all model dashboards. Used as post-action refresh trigger."""
+        """Re-render workspace dashboard."""
         try:
             _ws_add_to_sys_path()
-            from scripts._lib.report import render_workspace_report, render_model_report
-            import yaml as _yaml
+            from scripts._lib.report import render_workspace_report
             render_workspace_report(WORKSPACE)
-            ws = _yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
-            for model_name in (ws.get("models") or {}):
-                try:
-                    render_model_report(model_name, WORKSPACE)
-                except Exception as e:
-                    # Non-fatal — log and continue.
-                    print(f"[render] model '{model_name}' error: {e}", flush=True)
             return self._json({"ok": True}, 200)
         except Exception as e:
             return self._json({"error": str(e)}, 500)
@@ -1384,14 +1019,12 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_branches(self):
         """Return list of stage/* branches with last-commit info."""
         try:
-            # Get all branches starting with stage/
             raw = subprocess.run(
                 ["git", "branch", "--list", "stage/*"],
                 cwd=WORKSPACE, capture_output=True, text=True, check=True,
             ).stdout
             stage_branches = [b.strip().lstrip("* ") for b in raw.splitlines() if b.strip()]
 
-            # Get current branch.
             current = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                 cwd=WORKSPACE, capture_output=True, text=True, check=True,
@@ -1400,7 +1033,6 @@ class Handler(BaseHTTPRequestHandler):
             branches = []
             for bname in stage_branches:
                 try:
-                    # Get last commit sha, subject, date.
                     log = subprocess.run(
                         ["git", "log", "-1", "--format=%H|%s|%ci", bname],
                         cwd=WORKSPACE, capture_output=True, text=True, check=True,
@@ -1410,7 +1042,6 @@ class Handler(BaseHTTPRequestHandler):
                     subject = parts[1] if len(parts) > 1 else ""
                     date_str = parts[2] if len(parts) > 2 else ""
 
-                    # Commits ahead of main.
                     ahead_raw = subprocess.run(
                         ["git", "rev-list", "--count", f"main..{bname}"],
                         cwd=WORKSPACE, capture_output=True, text=True,
@@ -1430,6 +1061,13 @@ class Handler(BaseHTTPRequestHandler):
                     branches.append({"name": bname, "last_commit": {}, "ahead_of_main": 0})
 
             return self._json({"branches": branches, "current": current}, 200)
+        except Exception as e:
+            return self._json({"error": str(e)}, 500)
+
+    def _serve_pending(self):
+        """Return pending entries from unmerged stage/* branches."""
+        try:
+            return self._json(_pending_entries(), 200)
         except Exception as e:
             return self._json({"error": str(e)}, 500)
 
@@ -1525,7 +1163,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def _ws_add_to_sys_path() -> None:
     """Ensure workspace scripts/ is importable (for scripts._lib.* imports)."""
-    scripts_parent = str(WORKSPACE)  # so `import scripts._lib.*` works
+    scripts_parent = str(WORKSPACE)
     if scripts_parent not in sys.path:
         sys.path.insert(0, scripts_parent)
 

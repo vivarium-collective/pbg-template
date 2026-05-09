@@ -1,13 +1,17 @@
-schema_version: 1
+schema_version: 2
 name: {{ workspace_name }}
 created: "{{ today }}"
 plugin_version: {{ plugin_version }}
+package_path: pbg_{{ workspace_name | replace("-", "_") }}
+pbg_processes: []
 stages:
   workspace_bootstrap:
     status: complete
     pr: null
     completed: "{{ today }}"
-models: {}
+phases: []
+observables: []
+visualizations: []
 datasets: []
 references_bib: references/papers.bib
 server:

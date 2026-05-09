@@ -4,10 +4,12 @@
   "type": "object",
   "required": ["schema_version", "name", "created", "plugin_version", "stages"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "name": {"type": "string", "minLength": 1},
     "created": {"type": "string", "format": "date"},
     "plugin_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "package_path": {"type": "string"},
+    "pbg_processes": {"type": "array", "items": {"type": "string"}},
     "stages": {
       "type": "object",
       "required": ["workspace_bootstrap"],
@@ -15,9 +17,17 @@
         "workspace_bootstrap": {"$ref": "#/definitions/stageStatus"}
       }
     },
-    "models": {
-      "type": "object",
-      "additionalProperties": {"$ref": "#/definitions/model"}
+    "phases": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/phase"}
+    },
+    "observables": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/observable"}
+    },
+    "visualizations": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/visualization"}
     },
     "datasets": {
       "type": "array",
@@ -51,32 +61,6 @@
         "completed": {"type": ["string", "null"]}
       }
     },
-    "model": {
-      "type": "object",
-      "required": ["submodule_path", "remote", "pbg_processes", "stages"],
-      "properties": {
-        "submodule_path": {"type": "string"},
-        "remote": {"type": "string"},
-        "pbg_processes": {"type": "array", "items": {"type": "string"}},
-        "stages": {
-          "type": "object",
-          "additionalProperties": {"$ref": "#/definitions/stageStatus"}
-        },
-        "phases": {
-          "type": "array",
-          "items": {"$ref": "#/definitions/phase"}
-        },
-        "observables": {
-          "type": "array",
-          "items": {"$ref": "#/definitions/observable"}
-        },
-        "visualizations": {
-          "type": "array",
-          "items": {"$ref": "#/definitions/visualization"}
-        },
-        "external": {"type": "boolean"}
-      }
-    },
     "import": {
       "type": "object",
       "required": ["source", "ref", "mode"],
@@ -97,6 +81,8 @@
         "status": {"enum": ["planned", "in_progress", "gate_pending", "complete"]},
         "pr": {"type": ["integer", "null"]},
         "gate_passed": {"type": "boolean"},
+        "opened_pr": {"type": ["integer", "null"]},
+        "prereq_phases": {"type": "array", "items": {"type": "integer"}},
         "source_artifact": {
           "type": "object",
           "properties": {

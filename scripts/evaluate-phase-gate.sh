@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # Stage 9..N: evaluate the Phase Gate for a phase.
 # Reads acceptance_tests[*].status from the phase frontmatter and decides pass/fail.
+# v0.3.0: operates on phases/ at workspace root (no per-model scoping).
 set -euo pipefail
 
 WS_ROOT="$(pwd)"
 [ -f "$WS_ROOT/workspace.yaml" ] || { echo "ERROR: workspace.yaml not found" >&2; exit 1; }
 
-MODEL="${1:-}"
-N="${2:-}"
-if [ -z "$MODEL" ] || [ -z "$N" ]; then
-  echo "usage: scripts/evaluate-phase-gate.sh <model-name> <n>" >&2
+N="${1:-}"
+if [ -z "$N" ]; then
+  echo "usage: scripts/evaluate-phase-gate.sh <n>" >&2
   exit 1
 fi
 
-PHASE_MD="$WS_ROOT/models/$MODEL/phases/phase-$N.md"
+PHASE_MD="$WS_ROOT/phases/phase-$N.md"
 [ -f "$PHASE_MD" ] || { echo "ERROR: $PHASE_MD does not exist" >&2; exit 1; }
 
 python3 -c "
@@ -39,11 +39,11 @@ else:
 
 phase_md.write_text(render_phase_md(fm, body))
 
-# Mirror to workspace.yaml
+# Mirror to workspace.yaml top-level phases[]
 ws = load_workspace(Path('$WS_ROOT/workspace.yaml'))
-phases = ws['models']['$MODEL'].setdefault('phases', [])
+phases = ws.get('phases') or []
 for p in phases:
-    if p['n'] == $N:
+    if p.get('n') == $N:
         p['status'] = fm['status']
         p['gate_passed'] = fm['gate_passed']
         break

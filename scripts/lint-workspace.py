@@ -39,23 +39,16 @@ def main() -> None:
     if not WS_FILE.exists():
         _fail(f"{WS_FILE} not found — run inside a workspace")
     ws = yaml.safe_load(WS_FILE.read_text())
+
+    # Schema version guard: fail clearly for v1 workspaces.
+    schema_ver = ws.get("schema_version")
+    if schema_ver != 2:
+        _fail(
+            f"workspace.yaml is schema v{schema_ver}; "
+            "run `python3 scripts/_migrate_v1_to_v2.py` to migrate to v2 before linting."
+        )
+
     Draft7Validator(_schema("workspace.schema.json"), format_checker=FormatChecker()).validate(ws)
-
-    declared = set((ws.get("models") or {}).keys())
-
-    # Submodule integrity (only check if any models are declared)
-    gitmodules = WS_ROOT / ".gitmodules"
-    if declared:
-        if not gitmodules.exists():
-            _fail(".gitmodules missing but models declared")
-        gm = gitmodules.read_text()
-        for m in declared:
-            if f"models/{m}" not in gm:
-                _fail(f".gitmodules has no entry for models/{m}")
-        for m in declared:
-            path = WS_ROOT / "models" / m
-            if not path.exists():
-                _fail(f"declared model '{m}' has no submodule directory at {path}")
 
     # Datasets
     for d in ws.get("datasets", []):
@@ -127,13 +120,11 @@ def main() -> None:
                 if actual != sha:
                     _fail(f"references_pdfs '{bib_key}' sha256 mismatch (recorded={sha[:16]}…, actual={actual[:16]}…)")
 
-    # Phase frontmatter integrity per model
+    # Phase frontmatter integrity: scan phases/ at workspace root (v2: no per-model nesting).
     phase_validator = Draft7Validator(_schema("phase.schema.json"))
     fm_re = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
-    for m_name in declared:
-        phases_dir = WS_ROOT / "models" / m_name / "phases"
-        if not phases_dir.is_dir():
-            continue
+    phases_dir = WS_ROOT / "phases"
+    if phases_dir.is_dir():
         for f in sorted(phases_dir.glob("phase-*.md")):
             text = f.read_text().replace("\r\n", "\n")
             mo = fm_re.match(text)

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # Stage 9..N: open phase <n> for implementation.
 # Marks status: in_progress and generates tests/test_phases.py from the frontmatter.
+# v0.3.0: operates on phases/ at workspace root (no per-model scoping).
 set -euo pipefail
 
 WS_ROOT="$(pwd)"
 [ -f "$WS_ROOT/workspace.yaml" ] || { echo "ERROR: workspace.yaml not found; run from workspace root" >&2; exit 1; }
 
-MODEL="${1:-}"
-N="${2:-}"
-if [ -z "$MODEL" ] || [ -z "$N" ]; then
-  echo "usage: scripts/start-phase.sh <model-name> <n>" >&2
+N="${1:-}"
+if [ -z "$N" ]; then
+  echo "usage: scripts/start-phase.sh <n>" >&2
   exit 1
 fi
 
-PHASE_MD="$WS_ROOT/models/$MODEL/phases/phase-$N.md"
+PHASE_MD="$WS_ROOT/phases/phase-$N.md"
 [ -f "$PHASE_MD" ] || { echo "ERROR: $PHASE_MD does not exist (run scripts/add-phase-plan.sh first)" >&2; exit 1; }
 
 python3 -c "
@@ -38,12 +38,12 @@ if $N > 1:
 fm['status'] = 'in_progress'
 phase_md.write_text(render_phase_md(fm, body))
 
-# Generate tests/test_phases.py
-tests_dir = Path('$WS_ROOT/models/$MODEL/tests')
+# Generate tests/test_phases.py at workspace root
+tests_dir = Path('$WS_ROOT/tests')
 tests_dir.mkdir(parents=True, exist_ok=True)
 generate_test_module(fm, tests_dir / 'test_phases.py')
 print(f'phase $N opened; status: in_progress; tests/test_phases.py generated')
 "
 
-echo "✓ phase $N of $MODEL is open. Implement the test bodies in models/$MODEL/tests/test_phases.py and update each acceptance_tests[*].status in the frontmatter as they pass."
-echo "When ready, run: scripts/evaluate-phase-gate.sh $MODEL $N"
+echo "✓ Phase $N is open. Implement the test bodies in tests/test_phases.py and update each acceptance_tests[*].status in the frontmatter as they pass."
+echo "When ready, run: scripts/evaluate-phase-gate.sh $N"
