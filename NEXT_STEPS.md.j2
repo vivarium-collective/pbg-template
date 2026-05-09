@@ -151,8 +151,15 @@ and serves it locally. The dashboard's top panel ("NEXT STEP") detects your
 current stage from `workspace.yaml` and shows the next command to run, with a
 copy-to-clipboard button.
 
+The dashboard includes a top-level workspace summary. Per-model deep dives
+(phase tracker, process registry, type registry, browsable composite document)
+render at `models/<name>/reports/index.html` when you run with `--all`:
+
+    python3 scripts/render-dashboard.py --all
+    bash scripts/serve.sh   # also calls --all
+
 The dashboard:
-- Re-renders on `bash scripts/serve.sh` or `python3 scripts/render-dashboard.py`
+- Re-renders on `bash scripts/serve.sh` or `python3 scripts/render-dashboard.py --all`
   (run after any state change to refresh).
 - Works fully offline; no plugin install required.
 - Stops cleanly with Ctrl-C.

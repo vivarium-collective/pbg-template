@@ -1,11 +1,19 @@
-"""Render reports/index.html for the workspace dashboard (Wave 2, v0.1.4).
+"""Render reports/index.html for the workspace dashboard and per-model deep dives.
 
-Per-model dashboards are not included in v0.1.4 — only the workspace report.
-Public API: render_workspace_report(ws_root=None, *, today=None) -> Path
+v0.1.4: workspace report only.
+v0.1.6: adds per-model report (phase tracker, registries, browsable PBG document).
+
+Public API:
+  render_workspace_report(ws_root=None, *, today=None) -> Path
+  render_model_report(model_name, ws_root=None, *, today=None) -> Path
 """
 from __future__ import annotations
 
+import importlib
+import json
 import shutil
+import sys
+import warnings
 from datetime import date
 from pathlib import Path
 
@@ -98,6 +106,107 @@ def _copy_assets(target_dir: Path) -> None:
         shutil.copy2(client_js, target_dir / "client.js")
 
 
+def _load_model_registry(slug: str, model_dir: Path) -> tuple[dict, str | None]:
+    """Try to import pbg_<slug>.core and call build_core()/registry_snapshot().
+
+    Returns (registry_dict, warning_or_None).
+    registry_dict has keys 'processes' (list[str]) and 'types' (list[str]).
+    """
+    # Ensure model dir is on sys.path so a local (not-installed) package can be found.
+    model_dir_str = str(model_dir)
+    injected = model_dir_str not in sys.path
+    if injected:
+        sys.path.insert(0, model_dir_str)
+    try:
+        core = importlib.import_module(f"pbg_{slug}.core")
+        build_core = getattr(core, "build_core", None)
+        registry_snapshot = getattr(core, "registry_snapshot", None)
+        if build_core is None or registry_snapshot is None:
+            return {"processes": [], "types": []}, (
+                f"pbg_{slug}.core imported but missing build_core() or registry_snapshot()."
+            )
+        build_core()
+        snap = registry_snapshot()
+        # Normalise: accept list of strings or list of dicts with 'name' key.
+        def _names(items):
+            if not items:
+                return []
+            if isinstance(items[0], str):
+                return list(items)
+            return [it.get("name", str(it)) for it in items]
+        return {
+            "processes": _names(snap.get("processes", [])),
+            "types": _names(snap.get("types", [])),
+        }, None
+    except ModuleNotFoundError:
+        warning = (
+            f"Package pbg_{slug} is not importable — registry shown as empty. "
+            f"Install it in the workspace venv or run /pbg-pull-processes."
+        )
+        return {"processes": [], "types": []}, warning
+    except Exception as exc:
+        warning = f"pbg_{slug}.core raised {type(exc).__name__}: {exc}"
+        return {"processes": [], "types": []}, warning
+    finally:
+        if injected and model_dir_str in sys.path:
+            sys.path.remove(model_dir_str)
+
+
+def _load_model_document(slug: str, model_dir: Path) -> dict:
+    """Try to call pbg_<slug>.document.build_document(); return {} on any error."""
+    model_dir_str = str(model_dir)
+    injected = model_dir_str not in sys.path
+    if injected:
+        sys.path.insert(0, model_dir_str)
+    try:
+        doc_mod = importlib.import_module(f"pbg_{slug}.document")
+        build_document = getattr(doc_mod, "build_document", None)
+        if build_document is None:
+            return {}
+        return build_document() or {}
+    except Exception:
+        return {}
+    finally:
+        if injected and model_dir_str in sys.path:
+            sys.path.remove(model_dir_str)
+
+
+def _read_phases(model_dir: Path) -> list[dict]:
+    """Read all phases/phase-*.md files; parse frontmatter; sort by phase number."""
+    phases_dir = model_dir / "phases"
+    if not phases_dir.exists():
+        return []
+    phase_files = sorted(phases_dir.glob("phase-*.md"))
+    phases = []
+    for pf in phase_files:
+        try:
+            from .phase_md import parse_phase_md
+            fm, _ = parse_phase_md(pf.read_text())
+            phases.append(fm)
+        except Exception:
+            # If parsing fails (e.g. schema mismatch), fall back to raw YAML
+            try:
+                import re
+                text = pf.read_text().replace("\r\n", "\n")
+                m = re.match(r"\A---\n(.*?)\n---", text, re.DOTALL)
+                if m:
+                    fm = yaml.safe_load(m.group(1)) or {}
+                    phases.append(fm)
+            except Exception:
+                pass
+    # Sort by 'phase' key (int); fall back to 'n' for compatibility.
+    def _phase_num(p):
+        return int(p.get("phase", p.get("n", 0)))
+    phases.sort(key=_phase_num)
+    # Normalise key: ensure both 'n' and 'phase' point to the same number.
+    for p in phases:
+        if "phase" in p and "n" not in p:
+            p["n"] = p["phase"]
+        elif "n" in p and "phase" not in p:
+            p["phase"] = p["n"]
+    return phases
+
+
 def render_workspace_report(ws_root: Path | None = None, *, today: str | None = None) -> Path:
     """Build <ws_root>/reports/index.html from workspace.yaml + decisions log."""
     ws_root = ws_root or _ws_root()
@@ -122,5 +231,58 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         imports=ws.get("imports", {}),
         decisions=decisions,
         next_step=hint,
+    ))
+    return out
+
+
+def render_model_report(
+    model_name: str,
+    ws_root: Path | None = None,
+    *,
+    today: str | None = None,
+) -> Path:
+    """Build models/<model_name>/reports/index.html.
+
+    Handles import fallback: if pbg_<slug> can't be imported, renders with an
+    empty registry and a visible warning in the HTML.
+    """
+    ws_root = ws_root or _ws_root()
+    today = today or date.today().isoformat()
+
+    ws = yaml.safe_load((ws_root / "workspace.yaml").read_text())
+    models = ws.get("models") or {}
+    if model_name not in models:
+        raise RuntimeError(
+            f"Model '{model_name}' not found in workspace.yaml. "
+            f"Available models: {list(models.keys())}"
+        )
+
+    slug = model_name.replace("-", "_")
+    model_dir = ws_root / "models" / model_name
+
+    registry, registry_warning = _load_model_registry(slug, model_dir)
+    pbg_doc = _load_model_document(slug, model_dir)
+
+    # Read phases from phase-*.md files; fall back to workspace.yaml phases list.
+    phases = _read_phases(model_dir)
+    if not phases:
+        # Fallback: use whatever is in workspace.yaml (may be an empty list)
+        phases = models[model_name].get("phases") or []
+
+    template_dir = ws_root / "scripts" / "_templates"
+    env = _env(template_dir)
+    tpl = env.get_template("model_index.html.j2")
+
+    out = ws_root / "models" / model_name / "reports" / "index.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _copy_assets(ws_root / "models" / model_name / "reports" / "assets")
+
+    out.write_text(tpl.render(
+        model_name=model_name,
+        generated_at=today,
+        phases=phases,
+        registry=registry,
+        registry_warning=registry_warning,
+        pbg_doc_json=json.dumps(pbg_doc, indent=2, default=str),
     ))
     return out

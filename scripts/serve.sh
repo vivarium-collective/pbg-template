@@ -6,8 +6,8 @@ set -euo pipefail
 WS_ROOT="$(pwd)"
 [ -f "$WS_ROOT/workspace.yaml" ] || { echo "ERROR: run from workspace root" >&2; exit 1; }
 
-# Render the dashboard once
-python3 "$WS_ROOT/scripts/render-dashboard.py"
+# Render the workspace dashboard and all per-model reports
+python3 "$WS_ROOT/scripts/render-dashboard.py" --all
 
 # Pick a free port
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')

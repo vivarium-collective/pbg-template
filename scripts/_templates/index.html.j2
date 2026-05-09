@@ -26,11 +26,12 @@
 {% endif %}
 <div class="panel"><h2>Models</h2>
 {% if models %}
-<table><thead><tr><th>Model</th><th>Stages complete</th><th>Phases</th></tr></thead><tbody>
+<table><thead><tr><th>Model</th><th>Stages complete</th><th>Phases</th><th>Deep dive</th></tr></thead><tbody>
 {% for name, m in models.items() %}
 <tr><td><code>{{ name }}</code></td>
 <td>{{ m.stages|length }} / 7</td>
-<td>{{ (m.phases or [])|length }}</td></tr>
+<td>{{ (m.phases or [])|length }}</td>
+<td><a href="../models/{{ name }}/reports/index.html">deep dive &rarr;</a></td></tr>
 {% endfor %}
 </tbody></table>
 {% else %}<p>No models yet. <code>/pbg-add-model &lt;name&gt;</code></p>{% endif %}
