@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "phase-N.md frontmatter",
+  "type": "object",
+  "required": ["phase", "name", "status", "prereq_phases", "gate_passed", "acceptance_tests"],
+  "properties": {
+    "phase": {"type": "integer", "minimum": 1},
+    "name": {"type": "string", "minLength": 1},
+    "status": {"enum": ["planned", "in_progress", "gate_pending", "complete"]},
+    "prereq_phases": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+    "gate_passed": {"type": "boolean"},
+    "opened_pr": {"type": ["integer", "null"]},
+    "acceptance_tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "desc", "status"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^phase-[0-9]+\\.t[0-9]+$"},
+          "desc": {"type": "string"},
+          "status": {"enum": ["pending", "passing", "failing"]}
+        }
+      }
+    },
+    "parameters_added": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {
+          "name": {"type": "string"},
+          "value": {},
+          "unit": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "deliverables": {
+      "type": "object",
+      "properties": {
+        "code_diff": {"type": "string"},
+        "plots": {"type": "array", "items": {"type": "string"}},
+        "test_report": {"type": "string"}
+      }
+    },
+    "open_questions": {"type": "array", "items": {"type": "string"}}
+  }
+}

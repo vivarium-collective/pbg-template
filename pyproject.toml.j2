@@ -1,0 +1,17 @@
+[project]
+name = "{{ workspace_name }}"
+version = "0.0.0"
+description = "Process-bigraph research workspace"
+requires-python = ">=3.11"
+dependencies = [
+    "process-bigraph",
+    "bigraph-schema",
+    "bigraph-viz",
+    "pyyaml>=6.0",
+    "jsonschema>=4.21",
+    "matplotlib",
+    "plotly",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]

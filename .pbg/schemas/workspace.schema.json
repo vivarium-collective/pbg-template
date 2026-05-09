@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "workspace.yaml",
+  "type": "object",
+  "required": ["schema_version", "name", "created", "plugin_version", "stages"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "name": {"type": "string", "minLength": 1},
+    "created": {"type": "string", "format": "date"},
+    "plugin_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "stages": {
+      "type": "object",
+      "required": ["workspace_bootstrap"],
+      "properties": {
+        "workspace_bootstrap": {"$ref": "#/definitions/stageStatus"}
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/definitions/model"}
+    },
+    "datasets": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/dataset"}
+    },
+    "references_bib": {"type": "string"},
+    "server": {
+      "type": "object",
+      "properties": {"enabled": {"type": "boolean"}}
+    }
+  },
+  "definitions": {
+    "stageStatus": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["planned", "in_progress", "complete"]},
+        "pr": {"type": ["integer", "null"]},
+        "completed": {"type": ["string", "null"]}
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["submodule_path", "remote", "pbg_processes", "stages"],
+      "properties": {
+        "submodule_path": {"type": "string"},
+        "remote": {"type": "string"},
+        "pbg_processes": {"type": "array", "items": {"type": "string"}},
+        "stages": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/definitions/stageStatus"}
+        },
+        "phases": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/phase"}
+        }
+      }
+    },
+    "phase": {
+      "type": "object",
+      "required": ["n", "name", "status"],
+      "properties": {
+        "n": {"type": "integer", "minimum": 1},
+        "name": {"type": "string"},
+        "status": {"enum": ["planned", "in_progress", "gate_pending", "complete"]},
+        "pr": {"type": ["integer", "null"]},
+        "gate_passed": {"type": "boolean"}
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "required": ["name", "claims"],
+      "properties": {
+        "name": {"type": "string"},
+        "path": {"type": ["string", "null"]},
+        "url": {"type": ["string", "null"]},
+        "sha256": {"type": ["string", "null"]},
+        "claims": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

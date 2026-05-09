@@ -1,0 +1,7 @@
+.venv/
+.pbg/server/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+reports/assets/cache/
