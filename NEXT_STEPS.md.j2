@@ -89,10 +89,8 @@ bash scripts/evaluate-phase-gate.sh <n>
 
 ## Two paths
 
-- **With Claude Code + the [pbg-superpowers plugin](https://github.com/vivarium-collective/pbg-superpowers):**
-  every action is a `/pbg-*` skill.
-- **Without the plugin:** the dashboard's `bash scripts/serve.sh` is the primary UI;
-  or use the shell scripts in `scripts/` directly.
+- **Browser dashboard** (`bash scripts/serve.sh`) is the primary UI for loading inputs, registering observables and visualizations, and tracking phases. No plugin needed.
+- **Claude Code + the [pbg-superpowers plugin](https://github.com/vivarium-collective/pbg-superpowers)** complements the dashboard with `/pbg-phase <n>` for the iterative phase-building work that benefits from Claude's help — writing process code, integrating mechanisms from expert docs, dispatching `/pbg-expert` to wrap a missing simulator. The plugin's other skills (`/pbg-workspace`, `/pbg-server`, `/pbg-report`) automate the surrounding plumbing.
 
 ## Config files to know
 
