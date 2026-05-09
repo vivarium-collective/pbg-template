@@ -309,6 +309,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     references_count = _count_bib_entries(ws_root)
     datasets = ws.get("datasets") or []
     expert_docs = ws.get("expert_docs") or []
+    references_pdfs = ws.get("references_pdfs") or []
     stage_progression = _stage_progression(ws)
     out.write_text(tpl.render(
         workspace_name=ws["name"],
@@ -317,6 +318,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         imports=ws.get("imports", {}),
         datasets=datasets,
         references_count=references_count,
+        references_pdfs=references_pdfs,
         decisions=decisions,
         next_step=hint,
         expert_docs=expert_docs,

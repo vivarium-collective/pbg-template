@@ -35,6 +35,10 @@
     "expert_docs": {
       "type": "array",
       "items": {"$ref": "#/definitions/expertDoc"}
+    },
+    "references_pdfs": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/referencePdf"}
     }
   },
   "definitions": {
@@ -104,9 +108,19 @@
       "properties": {
         "name": {"type": "string", "minLength": 1},
         "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": ["string", "null"]},
         "description": {"type": ["string", "null"]},
         "contributor": {"type": ["string", "null"]},
         "claims_supported": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "referencePdf": {
+      "type": "object",
+      "required": ["bib_key", "path", "sha256"],
+      "properties": {
+        "bib_key": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "minLength": 1}
       }
     }
   }

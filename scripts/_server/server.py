@@ -2,9 +2,13 @@
 
 v0.1.7: adds mutating POST endpoints with auto-branch/commit, /api/branches, /api/run-tests,
 and /api/render for post-action page reload.
+v0.1.9: drag-drop file uploads (base64) + sha256 reproducibility for datasets, references PDFs,
+and expert docs.
 """
 from __future__ import annotations
 import argparse
+import base64
+import hashlib
 import json
 import re
 import subprocess
@@ -15,6 +19,14 @@ from pathlib import Path
 from threading import Lock
 
 import yaml
+
+
+def _save_upload(file_b64: str, target_path: Path) -> str:
+    """Decode base64-encoded file content, write to target_path, return sha256."""
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    raw = base64.b64decode(file_b64)
+    target_path.write_bytes(raw)
+    return hashlib.sha256(raw).hexdigest()
 
 
 WORKSPACE: Path = Path("/")  # set by main()
@@ -471,9 +483,20 @@ class Handler(BaseHTTPRequestHandler):
             claims = []
 
         entry: dict = {"name": name, "claims": claims}
+
+        file_b64 = body.get("file_b64", "").strip()
+        filename = body.get("filename", "").strip()
         path = body.get("path", "").strip()
         url = body.get("url", "").strip()
-        if path:
+
+        if file_b64:
+            # Drag-drop upload mode.
+            if not filename:
+                return self._json({"error": "filename is required when file_b64 is provided"}, 400)
+            dest_rel = f"datasets/{_safe_slug(name)}/{filename}"
+            entry["path"] = dest_rel
+            # sha256 computed in action() after write
+        elif path:
             entry["path"] = path
         elif url:
             entry["url"] = url
@@ -481,7 +504,7 @@ class Handler(BaseHTTPRequestHandler):
             if sha256:
                 entry["sha256"] = sha256
         else:
-            return self._json({"error": "either path or url is required"}, 400)
+            return self._json({"error": "either file_b64, path, or url is required"}, 400)
 
         import time as _time
         epoch = int(_time.time())
@@ -489,6 +512,25 @@ class Handler(BaseHTTPRequestHandler):
         commit_msg = f"feat(4): register dataset '{name}'"
 
         def action():
+            nonlocal entry
+            if file_b64:
+                dest = WORKSPACE / entry["path"]
+                sha = _save_upload(file_b64, dest)
+                entry["sha256"] = sha
+            elif path and not file_b64:
+                # Legacy source_path copy: also compute sha256.
+                import shutil as _shutil
+                src = Path(path)
+                if not src.is_absolute():
+                    src = WORKSPACE / path
+                if src.exists() and src.is_file():
+                    import hashlib as _hashlib
+                    h = _hashlib.sha256()
+                    with src.open("rb") as f:
+                        for chunk in iter(lambda: f.read(65536), b""):
+                            h.update(chunk)
+                    entry["sha256"] = h.hexdigest()
+
             _ws_add_to_sys_path()
             from scripts._lib.workspace_yaml import load_workspace, save_workspace
             ws_file = WORKSPACE / "workspace.yaml"
@@ -509,6 +551,8 @@ class Handler(BaseHTTPRequestHandler):
     def _post_reference(self, body: dict):
         bibtex_text = body.get("bibtex_text", "").strip()
         claim_mappings_raw = body.get("claim_mappings", {})
+        pdf_b64 = body.get("pdf_b64", "").strip()
+        pdf_filename = body.get("pdf_filename", "").strip()
 
         if not bibtex_text:
             return self._json({"error": "bibtex_text is required"}, 400)
@@ -564,14 +608,36 @@ class Handler(BaseHTTPRequestHandler):
                 claims_file.parent.mkdir(parents=True, exist_ok=True)
                 claims_file.write_text(_yaml.safe_dump(existing_claims, sort_keys=False))
 
+            # Optional: save the accompanying PDF.
+            if pdf_b64:
+                pdf_dest_rel = f"references/papers/{bibkey}.pdf"
+                pdf_dest = WORKSPACE / pdf_dest_rel
+                sha = _save_upload(pdf_b64, pdf_dest)
+
+                # Append to references_pdfs in workspace.yaml.
+                _ws_add_to_sys_path()
+                from scripts._lib.workspace_yaml import load_workspace, save_workspace
+                ws_file = WORKSPACE / "workspace.yaml"
+                ws = load_workspace(ws_file)
+                refs_pdfs = ws.setdefault("references_pdfs", [])
+                if refs_pdfs is None:
+                    refs_pdfs = []
+                    ws["references_pdfs"] = refs_pdfs
+                # Avoid duplicates.
+                if not any(e.get("bib_key") == bibkey for e in refs_pdfs):
+                    refs_pdfs.append({"bib_key": bibkey, "path": pdf_dest_rel, "sha256": sha})
+                save_workspace(ws_file, ws)
+
         return self._json(*_branched_action(branch, commit_msg, action))
 
     def _post_expert_doc(self, body: dict):
         """Register an expert document (PDF, lab notes, etc.) in workspace.yaml.
 
-        Body fields:
+        Body fields (v0.1.9: accepts either file_b64+filename OR source_path):
           name         (required) — short label, used as filename stem
-          source_path  (required) — absolute or workspace-relative path to file on disk
+          file_b64     (new) — base64-encoded file content (drag-drop upload)
+          filename     (new) — original filename, used to derive extension
+          source_path  (legacy) — absolute or workspace-relative path to file on disk
           description  (optional)
           contributor  (optional)
           claims_supported (optional list or comma-separated string)
@@ -580,6 +646,8 @@ class Handler(BaseHTTPRequestHandler):
         import time as _time
 
         name = body.get("name", "").strip()
+        file_b64 = body.get("file_b64", "").strip()
+        filename = body.get("filename", "").strip()
         source_path_raw = body.get("source_path", "").strip()
         description = body.get("description", "").strip() or None
         contributor = body.get("contributor", "").strip() or None
@@ -587,17 +655,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if not name:
             return self._json({"error": "name is required"}, 400)
-        if not source_path_raw:
-            return self._json({"error": "source_path is required"}, 400)
-
-        # Resolve source path (absolute or workspace-relative).
-        source_path = Path(source_path_raw)
-        if not source_path.is_absolute():
-            source_path = WORKSPACE / source_path
-        if not source_path.exists():
-            return self._json({"error": f"source_path does not exist: {source_path}"}, 400)
-        if not source_path.is_file():
-            return self._json({"error": f"source_path is not a regular file: {source_path}"}, 400)
+        if not file_b64 and not source_path_raw:
+            return self._json({"error": "either file_b64+filename or source_path is required"}, 400)
 
         # Parse claims_supported.
         if isinstance(claims_raw, str):
@@ -607,9 +666,24 @@ class Handler(BaseHTTPRequestHandler):
         else:
             claims_supported = []
 
-        # Determine destination extension (default .pdf).
-        ext = source_path.suffix if source_path.suffix else ".pdf"
-        dest_rel = f"references/expert/{_safe_slug(name)}{ext}"
+        if file_b64:
+            # Drag-drop upload mode: derive extension from filename.
+            if not filename:
+                return self._json({"error": "filename is required when file_b64 is provided"}, 400)
+            ext = Path(filename).suffix if Path(filename).suffix else ".pdf"
+            dest_rel = f"references/expert/{_safe_slug(name)}{ext}"
+            source_path = None
+        else:
+            # Legacy source_path copy mode.
+            source_path = Path(source_path_raw)
+            if not source_path.is_absolute():
+                source_path = WORKSPACE / source_path
+            if not source_path.exists():
+                return self._json({"error": f"source_path does not exist: {source_path}"}, 400)
+            if not source_path.is_file():
+                return self._json({"error": f"source_path is not a regular file: {source_path}"}, 400)
+            ext = source_path.suffix if source_path.suffix else ".pdf"
+            dest_rel = f"references/expert/{_safe_slug(name)}{ext}"
 
         epoch = int(_time.time())
         branch = f"stage/5-expert-doc-{_safe_slug(name)}-{epoch}"
@@ -618,7 +692,18 @@ class Handler(BaseHTTPRequestHandler):
         def action():
             dest = WORKSPACE / dest_rel
             dest.parent.mkdir(parents=True, exist_ok=True)
-            _shutil.copy2(str(source_path), str(dest))
+
+            if file_b64:
+                sha = _save_upload(file_b64, dest)
+            else:
+                _shutil.copy2(str(source_path), str(dest))
+                # Compute sha256 for legacy copies too.
+                import hashlib as _hashlib
+                h = _hashlib.sha256()
+                with dest.open("rb") as fh:
+                    for chunk in iter(lambda: fh.read(65536), b""):
+                        h.update(chunk)
+                sha = h.hexdigest()
 
             # Update workspace.yaml.
             _ws_add_to_sys_path()
@@ -633,7 +718,7 @@ class Handler(BaseHTTPRequestHandler):
             for existing in expert_docs:
                 if isinstance(existing, dict) and existing.get("name") == name:
                     raise ValueError(f"expert doc '{name}' already registered")
-            entry: dict = {"name": name, "path": dest_rel}
+            entry: dict = {"name": name, "path": dest_rel, "sha256": sha}
             if description:
                 entry["description"] = description
             if contributor:

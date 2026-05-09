@@ -48,3 +48,31 @@ img{max-width:100%}
 .stage-track .step.todo{background:#f3f4f6;color:#888}
 .stage-track .step.partial{background:#fef3c7}
 .stage-track .step.next{background:#fff7e6;border:2px solid #f5b042;color:#a86b00;font-weight:600}
+.drop-zone{
+  border:2px dashed #c0c0c0;
+  border-radius:6px;
+  padding:24px;
+  text-align:center;
+  color:#666;
+  background:rgba(0,0,0,0.02);
+  margin:8px 0;
+  cursor:pointer;
+  transition:all 0.15s ease;
+}
+.drop-zone.drag-over{
+  border-color:#3a8;
+  background:rgba(58,168,136,0.08);
+  color:#3a8;
+}
+.drop-zone .file-info{
+  font-family:ui-monospace,Menlo,monospace;
+  font-size:0.85em;
+  color:#333;
+  margin-top:8px;
+}
+.drop-zone .file-hash{
+  font-family:ui-monospace,Menlo,monospace;
+  font-size:0.75em;
+  color:#888;
+  word-break:break-all;
+}

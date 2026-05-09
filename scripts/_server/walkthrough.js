@@ -1,4 +1,4 @@
-// walkthrough.js — v0.1.7: interactive forms, auto-branch/commit, branch timeline.
+// walkthrough.js — v0.1.9: drag-drop uploads + sha256; v0.1.7: interactive forms.
 (function () {
   "use strict";
 
@@ -178,6 +178,93 @@
   }
 
   // -------------------------------------------------------------------------
+  // Drop-zone helper (v0.1.9)
+  // -------------------------------------------------------------------------
+
+  /**
+   * setupDropZone(zoneId, storeKey)
+   *
+   * Attaches drag-drop behaviour to the element with id=zoneId.
+   * On drop:
+   *   1. Reads the first file as a DataURL.
+   *   2. Strips the data:*;base64, prefix to get pure base64.
+   *   3. Computes a browser-side sha256 (transparency only; server recomputes).
+   *   4. Updates the drop zone with filename + size + hash.
+   *   5. Stores {file_b64, filename} in _dropZoneStore[storeKey].
+   */
+  var _dropZoneStore = {};
+
+  function setupDropZone(zoneId, storeKey) {
+    var zone = document.getElementById(zoneId);
+    if (!zone) return;
+
+    function prevent(e) { e.preventDefault(); e.stopPropagation(); }
+
+    zone.addEventListener("dragenter", function(e) { prevent(e); zone.classList.add("drag-over"); });
+    zone.addEventListener("dragover",  function(e) { prevent(e); zone.classList.add("drag-over"); });
+    zone.addEventListener("dragleave", function(e) { prevent(e); zone.classList.remove("drag-over"); });
+    zone.addEventListener("drop", function(e) {
+      prevent(e);
+      zone.classList.remove("drag-over");
+      var file = e.dataTransfer.files[0];
+      if (!file) return;
+      _readFile(file, zone, storeKey);
+    });
+
+    // Also allow click-to-select (creates a hidden file input).
+    zone.addEventListener("click", function() {
+      var inp = document.createElement("input");
+      inp.type = "file";
+      inp.style.display = "none";
+      inp.onchange = function() {
+        if (inp.files && inp.files[0]) {
+          _readFile(inp.files[0], zone, storeKey);
+        }
+      };
+      document.body.appendChild(inp);
+      inp.click();
+      setTimeout(function() { document.body.removeChild(inp); }, 30000);
+    });
+  }
+
+  function _readFile(file, zone, storeKey) {
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var dataUrl = ev.target.result;
+      // Strip "data:<mime>;base64," prefix.
+      var comma = dataUrl.indexOf(",");
+      var b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+
+      // Browser-side sha256 for transparency.
+      var rawBytes = _b64ToUint8Array(b64);
+      crypto.subtle.digest("SHA-256", rawBytes).then(function(hashBuf) {
+        var hashArr = Array.from(new Uint8Array(hashBuf));
+        var hashHex = hashArr.map(function(b) { return b.toString(16).padStart(2, "0"); }).join("");
+
+        _dropZoneStore[storeKey] = { file_b64: b64, filename: file.name };
+
+        var sizeKb = (file.size / 1024).toFixed(1);
+        var infoEl = zone.querySelector(".file-info");
+        var hashEl = zone.querySelector(".file-hash");
+        if (infoEl) infoEl.textContent = file.name + " (" + sizeKb + " KB)";
+        if (hashEl) hashEl.textContent = "sha256: " + hashHex;
+        zone.style.borderColor = "#3a8";
+        zone.querySelector && (zone.querySelectorAll(".drop-hint").forEach(function(h) { h.style.display = "none"; }));
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function _b64ToUint8Array(b64) {
+    var binary = atob(b64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  // -------------------------------------------------------------------------
   // Expose globals
   // -------------------------------------------------------------------------
 
@@ -186,6 +273,8 @@
   window.submitForm = submitForm;
   window.loadBranches = loadBranches;
   window.runTests = runTests;
+  window.setupDropZone = setupDropZone;
+  window._dropZoneStore = _dropZoneStore;
 
   // -------------------------------------------------------------------------
   // Copy-command button (legacy walkthrough-panel support)

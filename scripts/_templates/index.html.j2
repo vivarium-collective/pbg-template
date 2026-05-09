@@ -130,7 +130,18 @@
 <div class="panel">
   <h2>References <span class="stage-label">Stage 5</span></h2>
   <p class="stage-explainer">BibTeX bibliography + claim &rarr; paper mapping. Adds entries to <code>references/papers.bib</code> and <code>references/claims.yaml</code>.</p>
-  <p>Entries in <code>references/papers.bib</code>: <strong>{{ references_count }}</strong></p>
+  <p>Entries in <code>references/papers.bib</code>: <strong>{{ references_count }}</strong> &nbsp;&middot;&nbsp; PDFs committed: <strong>{{ (references_pdfs or [])|length }}</strong></p>
+  {% if references_pdfs %}
+  <table style="font-size:0.86em;margin-bottom:10px"><thead><tr><th>Bib key</th><th>Path</th><th>SHA256 (trunc)</th></tr></thead><tbody>
+  {% for pdf in references_pdfs %}
+  <tr>
+    <td><code>{{ pdf.bib_key }}</code></td>
+    <td><a href="/{{ pdf.path }}">{{ pdf.path }}</a></td>
+    <td><code>{{ pdf.sha256[:8] }}&hellip;</code></td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+  {% endif %}
   <button class="action-btn" onclick="openModal('modal-reference')">+ Add BibTeX reference</button>
 </div>
 
@@ -203,18 +214,15 @@
     <h3>Add dataset</h3>
     <form id="form-dataset" onsubmit="event.preventDefault(); _submitDataset(this)">
       <label>Name *<input name="name" placeholder="e.g. bremer-1996" required></label>
-      <label>Source type
-        <select name="_src_type" onchange="_toggleDatasetSource(this)">
-          <option value="path">Local path</option>
-          <option value="url">URL</option>
-        </select>
-      </label>
-      <div id="ds-path-row">
-        <label>Path<input name="path" placeholder="datasets/bremer-1996/data.csv"></label>
+      <label style="margin-bottom:4px">Drop the data file here <small>(or skip if URL-based)</small></label>
+      <div id="ds-drop-zone" class="drop-zone">
+        <span class="drop-hint">Drag &amp; drop data file here, or click to select</span>
+        <div class="file-info"></div>
+        <div class="file-hash"></div>
       </div>
-      <div id="ds-url-row" style="display:none">
-        <label>URL<input name="url" placeholder="https://example.com/data.csv"></label>
-        <label>SHA256 (optional)<input name="sha256" placeholder="abc123..."></label>
+      <div id="ds-url-row" style="margin-top:8px">
+        <label>URL <small>(required if no file dropped)</small><input name="url" placeholder="https://example.com/data.csv"></label>
+        <label>SHA256 (required with URL)<input name="sha256" placeholder="abc123..."></label>
       </div>
       <label>Claims (comma-separated claim IDs)<input name="claims" placeholder="growth-rate-vs-medium, ribo-fraction"></label>
       <div class="form-error"></div>
@@ -228,7 +236,7 @@
   <div class="modal-box">
     <button class="modal-close" onclick="closeModal('modal-reference')">&times;</button>
     <h3>Add BibTeX reference</h3>
-    <form id="form-reference" onsubmit="event.preventDefault(); submitForm(this, '/api/reference')">
+    <form id="form-reference" onsubmit="event.preventDefault(); _submitReference(this)">
       <label>BibTeX entry *
         <textarea name="bibtex_text" placeholder="@article{Bremer1996,
   author = {Bremer, H. and Dennis, P.},
@@ -239,6 +247,12 @@
       <label>Claim mappings (optional, format: <code>claim-id:bibkey, ...</code>)
         <input name="claim_mappings" placeholder="growth-rate-vs-medium:Bremer1996">
       </label>
+      <label style="margin-bottom:4px">Optional: drop the paper PDF here</label>
+      <div id="ref-drop-zone" class="drop-zone">
+        <span class="drop-hint">Drag &amp; drop PDF here, or click to select (optional)</span>
+        <div class="file-info"></div>
+        <div class="file-hash"></div>
+      </div>
       <div class="form-error"></div>
       <button type="submit">Add reference</button>
     </form>
@@ -254,14 +268,17 @@
       Registers a local file (PDF, lab notes, etc.) in <code>workspace.yaml</code> and copies it to
       <code>references/expert/</code> on a new <code>stage/5-expert-doc-*</code> branch.
     </p>
-    <form id="form-expert-doc" onsubmit="event.preventDefault(); submitForm(this, '/api/expert-doc')">
+    <form id="form-expert-doc" onsubmit="event.preventDefault(); _submitExpertDoc(this)">
       <label>Name * <small>(short label, used as filename stem)</small>
         <input name="name" placeholder="e.g. ecoli-replication-review-2025" required>
       </label>
-      <label>Source path * <small>(absolute or workspace-relative path to file on disk)</small>
-        <input name="source_path" placeholder="/path/to/file.pdf" required>
-      </label>
-      <label>Description (optional)
+      <label style="margin-bottom:4px">Drop the expert document here * <small>(PDF / md / txt / &hellip;)</small></label>
+      <div id="expert-drop-zone" class="drop-zone">
+        <span class="drop-hint">Drag &amp; drop file here, or click to select</span>
+        <div class="file-info"></div>
+        <div class="file-hash"></div>
+      </div>
+      <label style="margin-top:8px">Description (optional)
         <textarea name="description" placeholder="Expert review of E. coli chromosome replication mechanism"></textarea>
       </label>
       <label>Contributor (optional)
@@ -280,22 +297,72 @@
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
 <script src="assets/walkthrough.js" onerror="/* walkthrough unavailable */"></script>
 <script>
-// Dataset form helpers
-function _toggleDatasetSource(sel) {
-  var isUrl = sel.value === 'url';
-  document.getElementById('ds-path-row').style.display = isUrl ? 'none' : 'block';
-  document.getElementById('ds-url-row').style.display = isUrl ? 'block' : 'none';
-}
+// Initialize drop zones once walkthrough.js is loaded.
+document.addEventListener("DOMContentLoaded", function() {
+  if (typeof setupDropZone === "function") {
+    setupDropZone("ds-drop-zone", "dataset");
+    setupDropZone("ref-drop-zone", "reference_pdf");
+    setupDropZone("expert-drop-zone", "expert_doc");
+  }
+});
+
+// Dataset form submission (v0.1.9: supports file_b64 or url).
 function _submitDataset(form) {
-  var srcType = form._src_type.value;
   submitForm(form, '/api/dataset', function(f) {
     var data = { name: f.name.value.trim(), claims: f.claims.value.trim() };
-    if (srcType === 'url') {
-      data.url = f.url.value.trim();
-      if (f.sha256.value.trim()) data.sha256 = f.sha256.value.trim();
+    var stored = (typeof _dropZoneStore !== "undefined") ? _dropZoneStore["dataset"] : null;
+    if (stored && stored.file_b64) {
+      data.file_b64 = stored.file_b64;
+      data.filename = stored.filename;
     } else {
-      data.path = f.path.value.trim();
+      var url = f.url.value.trim();
+      if (url) {
+        data.url = url;
+        if (f.sha256.value.trim()) data.sha256 = f.sha256.value.trim();
+      } else {
+        // Show error — neither file nor URL.
+        var errEl = form.querySelector(".form-error");
+        if (errEl) errEl.textContent = "Error: drop a file or enter a URL.";
+        return null;
+      }
     }
+    return data;
+  });
+}
+
+// Reference form submission (v0.1.9: optionally includes pdf_b64).
+function _submitReference(form) {
+  submitForm(form, '/api/reference', function(f) {
+    var data = {
+      bibtex_text: f.bibtex_text.value.trim(),
+      claim_mappings: f.claim_mappings.value.trim(),
+    };
+    var stored = (typeof _dropZoneStore !== "undefined") ? _dropZoneStore["reference_pdf"] : null;
+    if (stored && stored.file_b64) {
+      data.pdf_b64 = stored.file_b64;
+      data.pdf_filename = stored.filename;
+    }
+    return data;
+  });
+}
+
+// Expert doc form submission (v0.1.9: file_b64 required).
+function _submitExpertDoc(form) {
+  submitForm(form, '/api/expert-doc', function(f) {
+    var stored = (typeof _dropZoneStore !== "undefined") ? _dropZoneStore["expert_doc"] : null;
+    if (!stored || !stored.file_b64) {
+      var errEl = form.querySelector(".form-error");
+      if (errEl) errEl.textContent = "Error: please drop or select a file first.";
+      return null;
+    }
+    var data = {
+      name: f.name.value.trim(),
+      file_b64: stored.file_b64,
+      filename: stored.filename,
+    };
+    if (f.description && f.description.value.trim()) data.description = f.description.value.trim();
+    if (f.contributor && f.contributor.value.trim()) data.contributor = f.contributor.value.trim();
+    if (f.claims_supported && f.claims_supported.value.trim()) data.claims_supported = f.claims_supported.value.trim();
     return data;
   });
 }

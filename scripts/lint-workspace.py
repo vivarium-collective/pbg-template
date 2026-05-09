@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate workspace.yaml + cross-references. Exit non-zero on failure."""
 from __future__ import annotations
+import hashlib
 import json
 import re
 import sys
@@ -8,6 +9,14 @@ from pathlib import Path
 
 import yaml
 from jsonschema import Draft7Validator, FormatChecker, ValidationError
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 WS_ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +64,10 @@ def main() -> None:
             full = WS_ROOT / path
             if not full.exists():
                 _fail(f"dataset '{d['name']}' path missing: {path}")
+            elif sha:
+                actual = _sha256(full)
+                if actual != sha:
+                    _fail(f"dataset '{d['name']}' sha256 mismatch (recorded={sha[:16]}…, actual={actual[:16]}…)")
         elif url is not None:
             if not sha:
                 _fail(f"dataset '{d['name']}' has url but no sha256")
@@ -77,7 +90,7 @@ def main() -> None:
                 if key not in bib_keys:
                     _fail(f"claim '{claim}' references missing bib key '{key}'")
 
-    # Expert docs path existence
+    # Expert docs path existence + optional sha256 verification
     for doc in ws.get("expert_docs", []) or []:
         doc_path = doc.get("path", "")
         if doc_path:
@@ -87,6 +100,32 @@ def main() -> None:
                     f"expert_docs entry '{doc.get('name', '?')}' path missing: {doc_path} "
                     f"(expected at {full})"
                 )
+            sha = doc.get("sha256")
+            if sha:
+                actual = _sha256(full)
+                if actual != sha:
+                    _fail(f"expert_docs '{doc.get('name', '?')}' sha256 mismatch (recorded={sha[:16]}…, actual={actual[:16]}…)")
+
+    # References PDFs: always verify sha256 + bib_key cross-reference
+    bib = WS_ROOT / "references" / "papers.bib"
+    bib_keys: set = set()
+    if bib.exists():
+        bib_text = bib.read_text()
+        bib_keys = set(re.findall(r"@\w+\{([A-Za-z0-9_:-]+),", bib_text))
+    for pdf_entry in ws.get("references_pdfs", []) or []:
+        bib_key = pdf_entry.get("bib_key", "")
+        pdf_path = pdf_entry.get("path", "")
+        sha = pdf_entry.get("sha256", "")
+        if bib_key and bib_keys and bib_key not in bib_keys:
+            _fail(f"references_pdfs entry '{bib_key}' has no matching entry in papers.bib")
+        if pdf_path:
+            full = WS_ROOT / pdf_path
+            if not full.exists():
+                _fail(f"references_pdfs '{bib_key}' path missing: {pdf_path}")
+            elif sha:
+                actual = _sha256(full)
+                if actual != sha:
+                    _fail(f"references_pdfs '{bib_key}' sha256 mismatch (recorded={sha[:16]}…, actual={actual[:16]}…)")
 
     # Phase frontmatter integrity per model
     phase_validator = Draft7Validator(_schema("phase.schema.json"))
