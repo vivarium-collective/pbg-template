@@ -27,6 +27,10 @@
     "server": {
       "type": "object",
       "properties": {"enabled": {"type": "boolean"}}
+    },
+    "imports": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/definitions/import"}
     }
   },
   "definitions": {
@@ -53,7 +57,19 @@
         "phases": {
           "type": "array",
           "items": {"$ref": "#/definitions/phase"}
-        }
+        },
+        "external": {"type": "boolean"}
+      }
+    },
+    "import": {
+      "type": "object",
+      "required": ["source", "ref", "mode"],
+      "properties": {
+        "source": {"type": "string", "minLength": 1},
+        "ref": {"type": "string", "minLength": 1},
+        "mode": {"enum": ["reference", "fork-source", "in-place"]},
+        "path": {"type": ["string", "null"]},
+        "description": {"type": ["string", "null"]}
       }
     },
     "phase": {
