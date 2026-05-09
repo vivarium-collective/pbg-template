@@ -5,7 +5,7 @@ A standalone GitHub template for **process-bigraph research workspaces**.
 ## Two ways to use this
 
 ### Option A: GitHub "Use this template"
-Click **Use this template** on github.com/eagmon/pbg-template, then in your new repo:
+Click **Use this template** on github.com/vivarium-collective/pbg-template, then in your new repo:
 
     bash template-init.sh
 

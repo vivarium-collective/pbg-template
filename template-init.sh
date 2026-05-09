@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Renders .j2 files in the current directory using simple sed substitution.
-# For users who clicked "Use this template" on github.com/eagmon/pbg-template
+# For users who clicked "Use this template" on github.com/vivarium-collective/pbg-template
 # without installing the pbg-superpowers plugin.
 set -euo pipefail
 
