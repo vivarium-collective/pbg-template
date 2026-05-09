@@ -76,16 +76,57 @@ first GitHub commit shows real structure rather than an empty scaffold.
 Workflow CI (`.github/workflows/workspace-ci.yml`) runs lint + per-model
 pytest on every push.
 
-## Stages 3 – 9..N
+## Stages 3 – 9..N — driving each stage
 
-| Stage | What | SKILL.md |
-|---|---|---|
-| 3 | Pull required `pbg-*` wrappers; register them in `models/<name>/pbg_<slug>/core.py` | `pbg-pull-processes/SKILL.md` |
-| 4+5 | Add datasets to `datasets/_index.yaml`; references to `references/papers.bib` + `claims.yaml` | `pbg-data/SKILL.md` |
-| 6 | Capture expert expectations as `if X then Y` acceptance tests | `pbg-expert-input/SKILL.md` |
-| 7 | Build minimal end-to-end Composite; persist registry snapshot to `tests/registry-snapshot.json` | `pbg-baseline/SKILL.md` |
-| 8 | Lay out N phases using the Phase Template | `pbg-phase-plan/SKILL.md` |
-| 9..N | Implement each phase; run the Phase Gate before moving to the next | `pbg-phase/SKILL.md` |
+Each stage below has a shell script in `scripts/` that walks you through it
+without requiring the `pbg-superpowers` plugin. Run from the workspace root.
+
+### Stage 3 — pull processes *(plugin-only for now)*
+
+Pull required `pbg-*` wrappers and register them in `models/<name>/pbg_<slug>/core.py`.
+Use the plugin's `/pbg-pull-processes <model>` skill, or follow
+`pbg-superpowers/skills/pbg-pull-processes/SKILL.md` manually.
+
+### Stage 4 — datasets
+
+- [ ] `bash scripts/add-dataset.sh`
+      *(prompts: name, path/url, sha256 if url, claims served)*
+
+### Stage 5 — references
+
+- [ ] `bash scripts/add-reference.sh`
+      *(paste a BibTeX entry; optionally map its key to claim IDs)*
+
+### Stage 6 — expert input
+
+- [ ] `bash scripts/add-acceptance.sh`
+      *(captures one "if X, then Y" acceptance test for a model)*
+
+### Stage 7 — baseline *(plugin-only for now)*
+
+The baseline scaffolds a Composite from `pbg-composer`. Use the plugin's
+`/pbg-baseline <model>` skill, or follow `pbg-superpowers/skills/pbg-baseline/SKILL.md`
+manually.
+
+### Stage 8 — phase plan
+
+- [ ] `bash scripts/add-phase-plan.sh`
+      *(prompts: model name, N phases, name + objective per phase. Writes
+      `phases/plan.md` + `phases/phase-N.md` and updates workspace.yaml.)*
+
+### Stages 9..N — phase implementation
+
+- [ ] `bash scripts/start-phase.sh <model> <n>`
+      *(opens phase n; refuses if phase n-1 hasn't passed its gate. Generates
+      `tests/test_phases.py` placeholders from acceptance frontmatter.)*
+- [ ] Implement each test body; update each `acceptance_tests[*].status` in
+      the phase frontmatter as you go (`pending` → `passing` / `failing`).
+- [ ] `bash scripts/evaluate-phase-gate.sh <model> <n>` to mark the phase
+      complete when all acceptance tests pass.
+
+These scripts call vendored copies of the `pbg-superpowers` Python helpers
+(under `scripts/_lib/`) — same code path as the plugin, just runnable from
+inside the workspace.
 
 Full design: see `pbg-superpowers/docs/superpowers/specs/`.
 
@@ -94,9 +135,9 @@ Full design: see `pbg-superpowers/docs/superpowers/specs/`.
 - **With Claude Code + the [pbg-superpowers plugin](https://github.com/vivarium-collective/pbg-superpowers):**
   every stage above is a `/pbg-*` skill that walks the interactive flow and
   opens a clean PR.
-- **Without the plugin:** open the relevant `SKILL.md` and follow the
-  9-phase lifecycle manually. Run `python scripts/lint-workspace.py` after
-  every change.
+- **Without the plugin:** use the `scripts/` shell scripts above for stages
+  4–6, 8, 9..N. For stages 3 and 7, follow the relevant `SKILL.md` manually.
+  Run `python scripts/lint-workspace.py` after every change.
 
 ## Config files to know
 
