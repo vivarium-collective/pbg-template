@@ -207,6 +207,18 @@ def _read_phases(model_dir: Path) -> list[dict]:
     return phases
 
 
+def _count_bib_entries(ws_root: Path) -> int:
+    """Count @-entries in references/papers.bib."""
+    bib_file = ws_root / "references" / "papers.bib"
+    if not bib_file.exists():
+        return 0
+    try:
+        text = bib_file.read_text()
+        return sum(1 for line in text.splitlines() if line.strip().startswith("@"))
+    except Exception:
+        return 0
+
+
 def render_workspace_report(ws_root: Path | None = None, *, today: str | None = None) -> Path:
     """Build <ws_root>/reports/index.html from workspace.yaml + decisions log."""
     ws_root = ws_root or _ws_root()
@@ -224,11 +236,15 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     out.parent.mkdir(parents=True, exist_ok=True)
     _copy_assets(ws_root / "reports" / "assets")
     hint = _next_step_hint(ws)
+    references_count = _count_bib_entries(ws_root)
+    datasets = ws.get("datasets") or []
     out.write_text(tpl.render(
         workspace_name=ws["name"],
         generated_at=today,
         models=ws.get("models", {}),
         imports=ws.get("imports", {}),
+        datasets=datasets,
+        references_count=references_count,
         decisions=decisions,
         next_step=hint,
     ))
@@ -277,6 +293,15 @@ def render_model_report(
     out.parent.mkdir(parents=True, exist_ok=True)
     _copy_assets(ws_root / "models" / model_name / "reports" / "assets")
 
+    # Load acceptance tests from expert/acceptance.yaml if present.
+    acceptance_file = model_dir / "expert" / "acceptance.yaml"
+    acceptance_tests: list = []
+    if acceptance_file.exists():
+        try:
+            acceptance_tests = yaml.safe_load(acceptance_file.read_text()) or []
+        except Exception:
+            acceptance_tests = []
+
     out.write_text(tpl.render(
         model_name=model_name,
         generated_at=today,
@@ -284,5 +309,6 @@ def render_model_report(
         registry=registry,
         registry_warning=registry_warning,
         pbg_doc_json=json.dumps(pbg_doc, indent=2, default=str),
+        acceptance_tests=acceptance_tests,
     ))
     return out

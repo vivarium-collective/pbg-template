@@ -2,28 +2,109 @@
 <html lang="en"><head>
 <meta charset="UTF-8"><title>{{ workspace_name }}</title>
 <link rel="stylesheet" href="assets/style.css">
+<style>
+/* Modal overlay */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+.modal-box {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px 28px;
+  min-width: 360px;
+  max-width: 560px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  position: relative;
+}
+.modal-box h3 { margin-top: 0; }
+.modal-box label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 0.9em; }
+.modal-box input, .modal-box select, .modal-box textarea {
+  width: 100%; box-sizing: border-box;
+  border: 1px solid #ccc; border-radius: 4px;
+  padding: 6px 8px; font-size: 0.92em; margin-bottom: 12px;
+}
+.modal-box textarea { min-height: 90px; font-family: monospace; }
+.modal-box button[type=submit] {
+  background: #1976d2; color: #fff; border: none;
+  border-radius: 4px; padding: 8px 18px; cursor: pointer; font-size: 0.95em;
+}
+.modal-box button[type=submit]:disabled { opacity: 0.6; cursor: not-allowed; }
+.modal-close {
+  position: absolute; top: 10px; right: 14px;
+  background: none; border: none; font-size: 1.3em; cursor: pointer; color: #888;
+}
+.form-error { color: #c00; font-size: 0.9em; margin-top: 4px; min-height: 1.2em; }
+.action-btn {
+  margin-top: 10px; padding: 5px 12px;
+  border: 1px solid #1976d2; background: #e3f2fd;
+  border-radius: 4px; cursor: pointer; font-size: 0.88em;
+}
+.action-btn:hover { background: #bbdefb; }
+</style>
 </head><body>
 <header><h1>{{ workspace_name }}</h1>
-<p class="subtitle">Workspace dashboard · regenerated {{ generated_at }}</p></header>
+<p class="subtitle">Workspace dashboard &middot; regenerated {{ generated_at }}</p></header>
 <main>
 <div id="guidance" class="guidance panel"></div>
 {% if next_step %}
 <div class="panel" id="walkthrough-panel" style="background:linear-gradient(180deg,#fff7e6,#fff);border-color:#f5b042">
-  <div style="font-size:0.78em;letter-spacing:0.05em;color:#a86b00;font-weight:600;margin-bottom:6px">▸ NEXT STEP</div>
+  <div style="font-size:0.78em;letter-spacing:0.05em;color:#a86b00;font-weight:600;margin-bottom:6px">&#9658; NEXT STEP</div>
   <h2 style="margin-top:0">{{ next_step.label }}</h2>
   {% if next_step.details %}<p>{{ next_step.details }}</p>{% endif %}
   {% if next_step.command %}<pre style="background:rgba(0,0,0,0.05);padding:10px;border-radius:4px;white-space:pre-wrap"><code>{{ next_step.command }}</code></pre>{% endif %}
   <p class="subtitle">Full canonical flow in <code>NEXT_STEPS.md</code>.</p>
 </div>
 {% endif %}
-{% if imports %}
-<div class="panel"><h2>Imports</h2>
-<table><thead><tr><th>Name</th><th>Mode</th><th>Source</th></tr></thead><tbody>
-{% for name, imp in imports.items() %}
-<tr><td><code>{{ name }}</code></td><td>{{ imp.mode }}</td><td><code>{{ imp.source }}</code> @ <code>{{ imp.ref }}</code></td></tr>
-{% endfor %}
-</tbody></table></div>
-{% endif %}
+
+<!-- Imports panel -->
+<div class="panel">
+  <h2>Imports</h2>
+  {% if imports %}
+  <table><thead><tr><th>Name</th><th>Mode</th><th>Source</th></tr></thead><tbody>
+  {% for name, imp in imports.items() %}
+  <tr><td><code>{{ name }}</code></td><td>{{ imp.mode }}</td><td><code>{{ imp.source }}</code> @ <code>{{ imp.ref }}</code></td></tr>
+  {% endfor %}
+  </tbody></table>
+  {% else %}
+  <p style="color:#888;font-style:italic">No imports registered yet.</p>
+  {% endif %}
+  <button class="action-btn" onclick="openModal('modal-import')">+ Add import</button>
+</div>
+
+<!-- Datasets panel -->
+<div class="panel">
+  <h2>Datasets</h2>
+  {% if datasets %}
+  <table><thead><tr><th>Name</th><th>Source</th><th>Claims</th></tr></thead><tbody>
+  {% for ds in datasets %}
+  <tr>
+    <td><code>{{ ds.name }}</code></td>
+    <td><code>{% if ds.path %}{{ ds.path }}{% elif ds.url %}{{ ds.url }}{% endif %}</code></td>
+    <td>{{ (ds.claims or [])|join(', ') }}</td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+  {% else %}
+  <p style="color:#888;font-style:italic">No datasets registered yet.</p>
+  {% endif %}
+  <button class="action-btn" onclick="openModal('modal-dataset')">+ Add dataset</button>
+</div>
+
+<!-- References panel -->
+<div class="panel">
+  <h2>References</h2>
+  <p>Entries in <code>references/papers.bib</code>: <strong>{{ references_count }}</strong></p>
+  <button class="action-btn" onclick="openModal('modal-reference')">+ Add BibTeX reference</button>
+</div>
+
+<!-- Models panel -->
 <div class="panel"><h2>Models</h2>
 {% if models %}
 <table><thead><tr><th>Model</th><th>Stages complete</th><th>Phases</th><th>Deep dive</th></tr></thead><tbody>
@@ -36,12 +117,121 @@
 </tbody></table>
 {% else %}<p>No models yet. <code>/pbg-add-model &lt;name&gt;</code></p>{% endif %}
 </div>
-<div class="panel"><h2>Recent decisions</h2>
-{% if decisions %}<ul>{% for d in (decisions[-10:] | reverse) %}<li><strong>{{ d.skill }}</strong> · {{ d.timestamp }} — {{ d.summary }}</li>{% endfor %}</ul>
-{% else %}<p>No decisions logged yet.</p>{% endif %}
+
+<!-- Branch timeline panel -->
+<div class="panel">
+  <h2>Branch timeline</h2>
+  <p style="font-size:0.88em;color:#555">
+    Each action creates a feature branch. To open a PR, run from the terminal:<br>
+    <code style="font-size:0.95em">gh pr create --base main --head &lt;branch&gt;</code>
+  </p>
+  <div id="branch-timeline-body"><p style="color:#888;font-style:italic">Loading&hellip;</p></div>
 </div>
+
 </main>
+
+<!-- ============================================================ -->
+<!-- MODALS -->
+<!-- ============================================================ -->
+
+<!-- Import modal -->
+<div id="modal-import" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-import')">&times;</button>
+    <h3>Add import</h3>
+    <p style="font-size:0.85em;color:#555">
+      Registers the import in <code>workspace.yaml</code> on a new <code>stage/0.5-import-*</code> branch.
+      <strong>git submodule add</strong> is <em>not</em> performed here — run the terminal command shown after submit.
+    </p>
+    <form id="form-import" onsubmit="event.preventDefault(); submitForm(this, '/api/import')">
+      <label>Name *<input name="name" placeholder="e.g. v2ecoli" required></label>
+      <label>Source URL *<input name="source" placeholder="https://github.com/org/repo.git" required></label>
+      <label>Ref *<input name="ref" placeholder="main" required></label>
+      <label>Mode *
+        <select name="mode">
+          <option value="reference">reference (read-only submodule under external/)</option>
+          <option value="fork-source">fork-source (catalog only; no checkout)</option>
+          <option value="in-place">in-place (submodule under models/)</option>
+        </select>
+      </label>
+      <label>Description (optional)<input name="description" placeholder="Short description"></label>
+      <div class="form-error"></div>
+      <button type="submit">Register import</button>
+    </form>
+  </div>
+</div>
+
+<!-- Dataset modal -->
+<div id="modal-dataset" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-dataset')">&times;</button>
+    <h3>Add dataset</h3>
+    <form id="form-dataset" onsubmit="event.preventDefault(); _submitDataset(this)">
+      <label>Name *<input name="name" placeholder="e.g. bremer-1996" required></label>
+      <label>Source type
+        <select name="_src_type" onchange="_toggleDatasetSource(this)">
+          <option value="path">Local path</option>
+          <option value="url">URL</option>
+        </select>
+      </label>
+      <div id="ds-path-row">
+        <label>Path<input name="path" placeholder="datasets/bremer-1996/data.csv"></label>
+      </div>
+      <div id="ds-url-row" style="display:none">
+        <label>URL<input name="url" placeholder="https://example.com/data.csv"></label>
+        <label>SHA256 (optional)<input name="sha256" placeholder="abc123..."></label>
+      </div>
+      <label>Claims (comma-separated claim IDs)<input name="claims" placeholder="growth-rate-vs-medium, ribo-fraction"></label>
+      <div class="form-error"></div>
+      <button type="submit">Add dataset</button>
+    </form>
+  </div>
+</div>
+
+<!-- Reference modal -->
+<div id="modal-reference" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-reference')">&times;</button>
+    <h3>Add BibTeX reference</h3>
+    <form id="form-reference" onsubmit="event.preventDefault(); submitForm(this, '/api/reference')">
+      <label>BibTeX entry *
+        <textarea name="bibtex_text" placeholder="@article{Bremer1996,
+  author = {Bremer, H. and Dennis, P.},
+  title  = {...},
+  ...
+}" required></textarea>
+      </label>
+      <label>Claim mappings (optional, format: <code>claim-id:bibkey, ...</code>)
+        <input name="claim_mappings" placeholder="growth-rate-vs-medium:Bremer1996">
+      </label>
+      <div class="form-error"></div>
+      <button type="submit">Add reference</button>
+    </form>
+  </div>
+</div>
+
 <script src="assets/render-helpers.js"></script>
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
 <script src="assets/walkthrough.js" onerror="/* walkthrough unavailable */"></script>
+<script>
+// Dataset form helpers
+function _toggleDatasetSource(sel) {
+  var isUrl = sel.value === 'url';
+  document.getElementById('ds-path-row').style.display = isUrl ? 'none' : 'block';
+  document.getElementById('ds-url-row').style.display = isUrl ? 'block' : 'none';
+}
+function _submitDataset(form) {
+  var srcType = form._src_type.value;
+  submitForm(form, '/api/dataset', function(f) {
+    var data = { name: f.name.value.trim(), claims: f.claims.value.trim() };
+    if (srcType === 'url') {
+      data.url = f.url.value.trim();
+      if (f.sha256.value.trim()) data.sha256 = f.sha256.value.trim();
+    } else {
+      data.path = f.path.value.trim();
+    }
+    return data;
+  });
+}
+</script>
 </body></html>

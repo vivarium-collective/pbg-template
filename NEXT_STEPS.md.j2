@@ -164,6 +164,26 @@ The dashboard:
 - Works fully offline; no plugin install required.
 - Stops cleanly with Ctrl-C.
 
+The dashboard isn't just a status display — most stages can be driven from
+the browser. Each action creates its own feature branch (e.g.
+`stage/4-dataset-bremer-1996-1715284800`) so you can review the diff and open
+a PR from your terminal:
+
+    git log stage/4-dataset-bremer-1996-1715284800
+    git diff main..stage/4-dataset-bremer-1996-1715284800
+    gh pr create --base main --head stage/4-dataset-bremer-1996-1715284800
+
+The dashboard's Branch timeline shows every `stage/*` branch waiting for review.
+
+Actions available in the browser (v0.1.7+):
+- Register imports (stage 0.5)
+- Add datasets (stage 4)
+- Add BibTeX references (stage 5)
+- Add acceptance tests (stage 6)
+- Generate phase plans (stage 8)
+- Start phases and evaluate gates (stages 9+)
+- Run pytest for any model and see output inline
+
 ## Config files to know
 
 - `workspace.yaml` — canonical state (models registered, imports catalog, stage status per model)
