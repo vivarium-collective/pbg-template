@@ -8,6 +8,11 @@ WS_NAME_DEFAULT="$(basename "$PWD")"
 read -rp "workspace name [$WS_NAME_DEFAULT]: " WS_NAME
 WS_NAME="${WS_NAME:-$WS_NAME_DEFAULT}"
 
+if [[ ! "$WS_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "ERROR: workspace name must match [A-Za-z0-9._-]+" >&2
+  exit 1
+fi
+
 TODAY="$(date -u +%Y-%m-%d)"
 PLUGIN_VERSION="0.1.0"
 

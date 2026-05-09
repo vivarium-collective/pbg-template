@@ -51,11 +51,11 @@ def main() -> None:
     # Datasets
     for d in ws.get("datasets", []):
         path, url, sha = d.get("path"), d.get("url"), d.get("sha256")
-        if path:
+        if path is not None:
             full = WS_ROOT / path
             if not full.exists():
                 _fail(f"dataset '{d['name']}' path missing: {path}")
-        elif url:
+        elif url is not None:
             if not sha:
                 _fail(f"dataset '{d['name']}' has url but no sha256")
         else:
