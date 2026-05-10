@@ -145,6 +145,24 @@ def main() -> None:
         if isinstance(phase_entry, dict) and phase_entry.get("n") is not None:
             registered_phase_ns.add(int(phase_entry["n"]))
 
+    # Collect registered simulation names.
+    registered_sim_names: set = set()
+    for sim in ws.get("simulations", []) or []:
+        if not isinstance(sim, dict):
+            continue
+        sim_name = sim.get("name", "?")
+        registered_sim_names.add(sim_name)
+        # t_end > t_start
+        t_start = sim.get("t_start")
+        t_end = sim.get("t_end")
+        if t_start is not None and t_end is not None:
+            if float(t_end) <= float(t_start):
+                _fail(f"simulation '{sim_name}' has t_end ({t_end}) <= t_start ({t_start})")
+        # phases references
+        for n in sim.get("phases") or []:
+            if int(n) not in registered_phase_ns:
+                _fail(f"simulation '{sim_name}' references missing phase {n}")
+
     # Visualization phase references: each phases[*] must reference a registered phase.
     for viz in ws.get("visualizations", []) or []:
         if not isinstance(viz, dict):
@@ -154,6 +172,10 @@ def main() -> None:
         for n in viz_phases:
             if int(n) not in registered_phase_ns:
                 _fail(f"visualization '{viz_name}' references missing phase {n}")
+        # simulation reference
+        viz_sim = viz.get("simulation")
+        if viz_sim and registered_sim_names and viz_sim not in registered_sim_names:
+            _fail(f"visualization '{viz_name}' references missing simulation '{viz_sim}'")
 
     print("workspace lint: OK")
 

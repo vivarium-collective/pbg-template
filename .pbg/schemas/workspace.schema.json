@@ -29,6 +29,10 @@
       "type": "array",
       "items": {"$ref": "#/definitions/visualization"}
     },
+    "simulations": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/simulation"}
+    },
     "datasets": {
       "type": "array",
       "items": {"$ref": "#/definitions/dataset"}
@@ -110,7 +114,23 @@
         "type": {"enum": ["time-series", "phase-space", "heatmap", "histogram"]},
         "observables": {"type": "array", "items": {"type": "string"}},
         "phases": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+        "simulation": {"type": "string", "description": "Name of the simulation that produces the data; empty = any/global"},
         "config": {"type": "object"}
+      }
+    },
+    "simulation": {
+      "type": "object",
+      "required": ["name", "t_start", "t_end"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$"},
+        "description": {"type": "string"},
+        "t_start": {"type": "number", "minimum": 0},
+        "t_end": {"type": "number", "exclusiveMinimum": 0},
+        "initial_state": {"type": "object", "description": "Path-keyed initial values; structure free-form"},
+        "parameter_overrides": {"type": "object", "description": "Process-config overrides; structure free-form"},
+        "emitter_config": {"type": "object", "description": "Emitter settings (paths to record, sample interval, etc.)"},
+        "phases": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "Phase numbers this simulation belongs to (empty = global)"}
       }
     },
     "dataset": {

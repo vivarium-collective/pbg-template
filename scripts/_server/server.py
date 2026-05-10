@@ -309,8 +309,24 @@ class Handler(BaseHTTPRequestHandler):
             "/api/phase-gate":         self._post_phase_gate,
             "/api/observable":         self._post_observable,
             "/api/visualization":      self._post_visualization,
+            "/api/simulation":         self._post_simulation,
             "/api/run-tests":          self._post_run_tests,
             "/api/render":             self._post_render,
+        }
+        handler_fn = route_map.get(self.path)
+        if handler_fn is None:
+            return self._json({"error": "not found"}, 404)
+        handler_fn(body)
+
+    def do_DELETE(self):
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length).decode()) if length else {}
+        except json.JSONDecodeError as e:
+            return self._json({"error": f"invalid JSON: {e}"}, 400)
+
+        route_map = {
+            "/api/simulation": self._delete_simulation,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -931,15 +947,17 @@ class Handler(BaseHTTPRequestHandler):
     def _post_visualization(self, body: dict):
         """Register a visualization in workspace.yaml (v0.3.0: top-level, no model).
 
-        Body: {name, type, observables, config?, phases?}
+        Body: {name, type, observables, config?, phases?, simulation?}
         phases is an optional list of phase numbers this visualization applies to.
         Empty/missing = applies globally (all phases).
+        simulation is an optional simulation name this visualization is tied to.
         """
         name = (body.get("name") or "").strip()
         viz_type = (body.get("type") or "").strip()
         obs_list = body.get("observables", [])
         config = body.get("config") or {}
         phases_raw = body.get("phases", [])
+        simulation_name = (body.get("simulation") or "").strip() or None
 
         if not all([name, viz_type]):
             return self._json({"error": "name and type are required"}, 400)
@@ -990,6 +1008,18 @@ class Handler(BaseHTTPRequestHandler):
                         "Register them first via /api/phase-plan."
                     )
 
+            # Validate simulation reference if provided.
+            if simulation_name:
+                registered_sims = {
+                    s.get("name") for s in (ws.get("simulations") or [])
+                    if isinstance(s, dict)
+                }
+                if simulation_name not in registered_sims:
+                    raise ValueError(
+                        f"simulation '{simulation_name}' not registered. "
+                        "Register it first via /api/simulation."
+                    )
+
             visualizations = ws.setdefault("visualizations", [])
             if visualizations is None:
                 visualizations = []
@@ -1002,7 +1032,125 @@ class Handler(BaseHTTPRequestHandler):
                 entry["config"] = config
             if phases_list:
                 entry["phases"] = phases_list
+            if simulation_name:
+                entry["simulation"] = simulation_name
             visualizations.append(entry)
+            save_workspace(ws_file, ws)
+
+        return self._json(*_branched_action(branch, commit_msg, action))
+
+    def _post_simulation(self, body: dict):
+        """Register a simulation in workspace.yaml.
+
+        Body: {name, description?, t_start, t_end, initial_state?, parameter_overrides?,
+               emitter_config?, phases?}
+        """
+        import re as _re
+        name = (body.get("name") or "").strip()
+        description = (body.get("description") or "").strip() or None
+        t_start = body.get("t_start")
+        t_end = body.get("t_end")
+        initial_state = body.get("initial_state") or None
+        parameter_overrides = body.get("parameter_overrides") or None
+        emitter_config = body.get("emitter_config") or None
+        phases_raw = body.get("phases", [])
+
+        if not name:
+            return self._json({"error": "name is required"}, 400)
+        if not _re.match(r"^[a-zA-Z0-9_-]+$", name):
+            return self._json({"error": "name must match ^[a-zA-Z0-9_-]+$"}, 400)
+        if t_start is None or t_end is None:
+            return self._json({"error": "t_start and t_end are required"}, 400)
+        try:
+            t_start = float(t_start)
+            t_end = float(t_end)
+        except (TypeError, ValueError):
+            return self._json({"error": "t_start and t_end must be numbers"}, 400)
+        if t_start < 0:
+            return self._json({"error": "t_start must be >= 0"}, 400)
+        if t_end <= t_start:
+            return self._json({"error": "t_end must be > t_start"}, 400)
+        if not isinstance(phases_raw, list):
+            return self._json({"error": "phases must be a list of integers"}, 400)
+        try:
+            phases_list = [int(p) for p in phases_raw]
+        except (TypeError, ValueError):
+            return self._json({"error": "phases must be a list of integers"}, 400)
+
+        import time as _time
+        epoch = int(_time.time())
+        branch = f"stage/sim-{_safe_slug(name)}-{epoch}"
+        commit_msg = f"feat(setup): add simulation '{name}'"
+
+        def action():
+            _ws_add_to_sys_path()
+            from scripts._lib.workspace_yaml import load_workspace, save_workspace
+            ws_file = WORKSPACE / "workspace.yaml"
+            ws = load_workspace(ws_file)
+
+            # Validate phase references if provided.
+            if phases_list:
+                registered_phases = {
+                    p.get("n") for p in (ws.get("phases") or [])
+                    if isinstance(p, dict)
+                }
+                missing_phases = [n for n in phases_list if n not in registered_phases]
+                if missing_phases:
+                    raise ValueError(
+                        f"phases not registered: {missing_phases}. "
+                        "Register them first via /api/phase-plan."
+                    )
+
+            simulations = ws.setdefault("simulations", [])
+            if simulations is None:
+                simulations = []
+                ws["simulations"] = simulations
+            for existing in simulations:
+                if isinstance(existing, dict) and existing.get("name") == name:
+                    raise ValueError(f"simulation '{name}' already registered")
+            entry: dict = {"name": name, "t_start": t_start, "t_end": t_end}
+            if description:
+                entry["description"] = description
+            if initial_state is not None:
+                entry["initial_state"] = initial_state
+            if parameter_overrides is not None:
+                entry["parameter_overrides"] = parameter_overrides
+            if emitter_config is not None:
+                entry["emitter_config"] = emitter_config
+            if phases_list:
+                entry["phases"] = phases_list
+            simulations.append(entry)
+            save_workspace(ws_file, ws)
+
+        return self._json(*_branched_action(branch, commit_msg, action))
+
+    def _delete_simulation(self, body: dict):
+        """Remove a simulation from workspace.yaml.
+
+        Body: {name}
+        """
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._json({"error": "name is required"}, 400)
+
+        import time as _time
+        epoch = int(_time.time())
+        branch = f"stage/sim-rm-{_safe_slug(name)}-{epoch}"
+        commit_msg = f"feat(setup): remove simulation '{name}'"
+
+        def action():
+            _ws_add_to_sys_path()
+            from scripts._lib.workspace_yaml import load_workspace, save_workspace
+            ws_file = WORKSPACE / "workspace.yaml"
+            ws = load_workspace(ws_file)
+            simulations = ws.get("simulations") or []
+            new_sims = [s for s in simulations if not (isinstance(s, dict) and s.get("name") == name)]
+            if len(new_sims) == len(simulations):
+                raise ValueError(f"simulation '{name}' not found")
+            if new_sims:
+                ws["simulations"] = new_sims
+            else:
+                ws.pop("simulations", None)
             save_workspace(ws_file, ws)
 
         return self._json(*_branched_action(branch, commit_msg, action))

@@ -355,6 +355,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     imports = ws.get("imports") or {}
     observables = ws.get("observables") or []
     visualizations = ws.get("visualizations") or []
+    simulations = ws.get("simulations") or []
     package_path = ws.get("package_path")
 
     # Read phases from phase-*.md files; fall back to workspace.yaml phases list.
@@ -377,6 +378,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
 
     out.write_text(tpl.render(
         workspace_name=ws["name"],
+        workspace_description=ws.get("description", ""),
         generated_at=today,
         imports=imports,
         datasets=datasets,
@@ -387,6 +389,7 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         expert_docs=expert_docs,
         observables=observables,
         visualizations=visualizations,
+        simulations=simulations,
         phases=phases,
         current_phase=current_phase,
         phase_details=phase_details,

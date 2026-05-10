@@ -233,6 +233,87 @@
   window._postPhaseAction = _postPhaseAction;
 
   // -------------------------------------------------------------------------
+  // Menu navigation (v0.3.5)
+  // -------------------------------------------------------------------------
+
+  function _switchPage(pageId) {
+    pageId = pageId || 'workspace-inputs';
+    document.querySelectorAll('.page').forEach(function(s) { s.classList.remove('active'); });
+    document.querySelectorAll('.menu-link').forEach(function(a) { a.classList.remove('active'); });
+    var page = document.getElementById('page-' + pageId);
+    var link = document.querySelector('.menu-link[data-page="' + pageId + '"]');
+    if (page) page.classList.add('active');
+    if (link) link.classList.add('active');
+  }
+
+  function _initMenuNav() {
+    function fromHash() {
+      var h = (window.location.hash || '').replace(/^#/, '');
+      // phase anchors (#phase-N) auto-route to build-model page
+      if (/^phase-\d+$/.test(h)) {
+        _switchPage('build-model');
+        // let the browser scroll to the anchor naturally
+        return;
+      }
+      var validPages = ['workspace-inputs', 'setup', 'visualizations', 'build-model'];
+      _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
+    }
+    window.addEventListener('hashchange', fromHash);
+    fromHash();
+  }
+
+  window._switchPage = _switchPage;
+  window._initMenuNav = _initMenuNav;
+
+  // -------------------------------------------------------------------------
+  // Simulation CRUD (v0.3.5)
+  // -------------------------------------------------------------------------
+
+  function _parseJSONorNull(s) {
+    s = (s || '').trim();
+    if (!s) return null;
+    try { return JSON.parse(s); }
+    catch (e) { throw new Error("Invalid JSON: " + e.message); }
+  }
+
+  function _submitSimulation(form) {
+    try {
+      var data = {
+        name: form.sim_name.value.trim(),
+        description: form.description.value.trim() || null,
+        t_start: parseFloat(form.t_start.value),
+        t_end: parseFloat(form.t_end.value),
+        initial_state: _parseJSONorNull(form.initial_state.value),
+        parameter_overrides: _parseJSONorNull(form.parameter_overrides.value),
+        emitter_config: _parseJSONorNull(form.emitter_config.value),
+        phases: Array.from(form.querySelectorAll('input[name=phases]:checked'))
+                      .map(function(el) { return parseInt(el.value, 10); }),
+      };
+      submitForm(form, '/api/simulation', function() { return data; });
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  }
+
+  function _deleteSimulation(name) {
+    if (!confirm("Remove simulation '" + name + "'?")) return;
+    fetch('/api/simulation', {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        if (!parts[0]) { alert("Error: " + (parts[1].error || "unknown")); return; }
+        fetch('/api/render', {method: 'POST'}).finally(function() { location.reload(); });
+      });
+  }
+
+  window._submitSimulation = _submitSimulation;
+  window._deleteSimulation = _deleteSimulation;
+  window._parseJSONorNull = _parseJSONorNull;
+
+  // -------------------------------------------------------------------------
   // Run tests
   // -------------------------------------------------------------------------
 
@@ -377,6 +458,9 @@
   // -------------------------------------------------------------------------
 
   document.addEventListener("DOMContentLoaded", function () {
+    // Initialize menu navigation.
+    _initMenuNav();
+
     var panel = document.getElementById("walkthrough-panel");
     if (panel) {
       var pre = panel.querySelector("pre");
