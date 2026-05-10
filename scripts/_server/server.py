@@ -17,6 +17,10 @@ v0.3.7-A: /api/import-install — pip-install an import into the workspace venv;
   installed=True + install_path in workspace.yaml; invalidates registry cache.
 v0.4.1: /api/catalog (GET) + /api/catalog-install (POST) — Registry as package manager.
   Catalog browsing + one-click submodule add + pip install + pyproject.toml edit.
+v0.4.2: Visualization lifecycle — Create/Add/Commit.
+  /api/visualization-create (POST), /api/visualization-status (GET),
+  /api/visualization-add-to-project (POST), /api/visualization-commit-batch (POST).
+  description becomes the only required field alongside name; structured fields optional.
 """
 from __future__ import annotations
 import argparse
@@ -411,6 +415,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_catalog()
         if self.path.startswith("/api/work-status"):
             return self._get_work_status()
+        if self.path.startswith("/api/visualization-status"):
+            return self._get_visualization_status()
         rel = self.path.lstrip("/")
         # Refuse path traversal and absolute paths.
         if ".." in rel.split("/") or rel.startswith("/"):
@@ -442,8 +448,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/phase-start":        self._post_phase_start,
             "/api/phase-gate":         self._post_phase_gate,
             "/api/observable":         self._post_observable,
-            "/api/visualization":      self._post_visualization,
-            "/api/simulation":         self._post_simulation,
+            "/api/visualization":                self._post_visualization,
+            "/api/visualization-create":         self._post_visualization_create,
+            "/api/visualization-add-to-project": self._post_visualization_add_to_project,
+            "/api/visualization-commit-batch":   self._post_visualization_commit_batch,
+            "/api/simulation":                   self._post_simulation,
             "/api/run-tests":          self._post_run_tests,
             "/api/render":             self._post_render,
             "/api/work-start":         self._post_work_start,
@@ -465,7 +474,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": f"invalid JSON: {e}"}, 400)
 
         route_map = {
-            "/api/simulation": self._delete_simulation,
+            "/api/simulation":    self._delete_simulation,
+            "/api/visualization": self._delete_visualization,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -1057,26 +1067,38 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_visualization(self, body: dict):
-        """Register a visualization in workspace.yaml (v0.3.0: top-level, no model).
+        """Register a visualization in workspace.yaml (v0.4.2: name+description primary path).
 
-        Body: {name, type, observables, config?, phases?, simulation?}
-        phases is an optional list of phase numbers this visualization applies to.
-        Empty/missing = applies globally (all phases).
-        simulation is an optional simulation name this visualization is tied to.
+        Body (description-first, v0.4.2):
+            {name, description?}
+        Body (structured, legacy / backward-compat):
+            {name, type, observables, config?, phases?, simulation?}
+
+        Only `name` is required. When `type`/`observables` are omitted the visualization
+        enters the description-first lifecycle (Create → /pbg-viz skill → Add → Commit).
         """
         name = (body.get("name") or "").strip()
-        viz_type = (body.get("type") or "").strip()
-        obs_list = body.get("observables", [])
+        if not name:
+            return self._json({"error": "name is required"}, 400)
+        if not re.match(r"^[a-zA-Z0-9_-]+$", name):
+            return self._json({"error": "name must match ^[a-zA-Z0-9_-]+$"}, 400)
+
+        description = (body.get("description") or "").strip() or None
+        viz_type = (body.get("type") or "").strip() or None
+        obs_list = body.get("observables") or []
         config = body.get("config") or {}
-        phases_raw = body.get("phases", [])
+        phases_raw = body.get("phases") or []
         simulation_name = (body.get("simulation") or "").strip() or None
 
-        if not all([name, viz_type]):
-            return self._json({"error": "name and type are required"}, 400)
-        if viz_type not in ("time-series", "phase-space", "heatmap", "histogram"):
-            return self._json({"error": "type must be one of: time-series, phase-space, heatmap, histogram"}, 400)
-        if not isinstance(obs_list, list) or not obs_list:
-            return self._json({"error": "observables must be a non-empty list"}, 400)
+        # Structured path: if type or observables are provided, validate them fully.
+        if viz_type or obs_list:
+            if not viz_type:
+                return self._json({"error": "type is required when observables are specified"}, 400)
+            if viz_type not in ("time-series", "phase-space", "heatmap", "histogram"):
+                return self._json({"error": "type must be one of: time-series, phase-space, heatmap, histogram"}, 400)
+            if not isinstance(obs_list, list) or not obs_list:
+                return self._json({"error": "observables must be a non-empty list"}, 400)
+
         if not isinstance(phases_raw, list):
             return self._json({"error": "phases must be a list of integers"}, 400)
         try:
@@ -1092,17 +1114,18 @@ class Handler(BaseHTTPRequestHandler):
             ws_file = WORKSPACE / "workspace.yaml"
             ws = load_workspace(ws_file)
 
-            # Validate observable references against top-level observables.
-            registered_obs = {
-                o.get("name") for o in (ws.get("observables") or [])
-                if isinstance(o, dict)
-            }
-            missing = [o for o in obs_list if o not in registered_obs]
-            if missing:
-                raise ValueError(
-                    f"observables not registered: {missing}. "
-                    "Register them first via /api/observable."
-                )
+            # Only validate observable references when structured fields are provided.
+            if obs_list:
+                registered_obs = {
+                    o.get("name") for o in (ws.get("observables") or [])
+                    if isinstance(o, dict)
+                }
+                missing = [o for o in obs_list if o not in registered_obs]
+                if missing:
+                    raise ValueError(
+                        f"observables not registered: {missing}. "
+                        "Register them first via /api/observable."
+                    )
 
             # Validate phase references if phases provided.
             if phases_list:
@@ -1136,7 +1159,13 @@ class Handler(BaseHTTPRequestHandler):
             for existing in visualizations:
                 if isinstance(existing, dict) and existing.get("name") == name:
                     raise ValueError(f"visualization '{name}' already registered")
-            entry: dict = {"name": name, "type": viz_type, "observables": list(obs_list)}
+            entry: dict = {"name": name}
+            if description:
+                entry["description"] = description
+            if viz_type:
+                entry["type"] = viz_type
+            if obs_list:
+                entry["observables"] = list(obs_list)
             if config:
                 entry["config"] = config
             if phases_list:
@@ -1147,6 +1176,215 @@ class Handler(BaseHTTPRequestHandler):
             save_workspace(ws_file, ws)
 
         return self._json(*_active_branch_action(commit_msg, action))
+
+    def _post_visualization_create(self, body: dict):
+        """Write a .pbg/viz-requests/<name>.md file with the description and workspace context.
+
+        Body: {name: str}
+        Returns: {ok, request_path, skill_command, instructions}
+        """
+        name = (body.get("name") or "").strip()
+        if not name or not re.match(r"^[a-zA-Z0-9_-]+$", name):
+            return self._json({"error": "invalid name"}, 400)
+
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        viz = next((v for v in (ws_data.get("visualizations") or []) if v.get("name") == name), None)
+        if not viz:
+            return self._json({"error": f"visualization '{name}' not registered (Add it first)"}, 404)
+
+        description = viz.get("description") or ""
+        if not description.strip():
+            return self._json({"error": "visualization has no description — edit it first"}, 400)
+
+        req_dir = WORKSPACE / ".pbg" / "viz-requests"
+        req_dir.mkdir(parents=True, exist_ok=True)
+        req_path = req_dir / f"{name}.md"
+
+        # Build context for the skill
+        observables = ws_data.get("observables", []) or []
+        simulations = ws_data.get("simulations", []) or []
+        phases = ws_data.get("phases", []) or []
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+
+        obs_lines = "\n".join(
+            f'  - `{o["name"]}` (path: `{o["store_path"]}`'
+            + (f', units: {o["units"]}' if o.get("units") else "")
+            + ")"
+            for o in observables
+        ) or "  (none)"
+        sim_lines = "\n".join(
+            f'  - `{s["name"]}`: t={s["t_start"]}→{s["t_end"]}'
+            for s in simulations
+        ) or "  (none)"
+        phase_lines = "\n".join(
+            f'  - {p["n"]}: {p["name"]} ({p.get("status","planned")})'
+            for p in phases
+        ) or "  (none)"
+
+        content = f"""# Visualization request: {name}
+
+## Description (from user)
+
+{description}
+
+## Workspace context
+
+- Workspace package: `{pkg}`
+- Available observables:
+{obs_lines}
+- Available simulations:
+{sim_lines}
+- Phases:
+{phase_lines}
+
+## Instructions for the agent
+
+Write a Python function and save it to `.pbg/viz-responses/{name}.py`. The function:
+
+- Should be named `visualize` (no name suffix — the file path identifies it)
+- Takes one argument: `results: dict` — emitter output keyed by emitter path tuple, with values being lists of dicts `{{observable_name: value, ...}}`
+- Returns: HTML string (Plotly preferred) OR a base64 PNG (matplotlib fallback)
+- Must include a `_demo()` helper that returns the visualization run on synthetic data, so the dashboard preview can call it without real simulation results
+- Should pick the visualization library that best fits the description (Plotly for interactive, matplotlib for static)
+
+Output file structure:
+
+```python
+\"\"\"Generated visualization: {name}\"\"\"
+import plotly.graph_objects as go  # or matplotlib.pyplot, etc.
+
+def visualize(results: dict) -> str:
+    # ... build figure from results ...
+    return fig.to_html(full_html=False, include_plotlyjs='cdn')
+
+def _demo() -> str:
+    # Synthetic data matching the observable shape
+    fake_results = {{('emitter',): [{{...}}, ...]}}
+    return visualize(fake_results)
+
+if __name__ == "__main__":
+    import sys
+    sys.stdout.write(_demo())
+```
+"""
+        req_path.write_text(content)
+
+        return self._json({
+            "ok": True,
+            "request_path": str(req_path.relative_to(WORKSPACE)),
+            "skill_command": f"/pbg-viz {name}",
+            "instructions": (
+                f"Open Claude Code in this workspace and run `/pbg-viz {name}`. "
+                f"The skill will read {req_path.relative_to(WORKSPACE)}, generate a function, "
+                f"and save it to .pbg/viz-responses/{name}.py. "
+                f"Click Refresh below when ready."
+            ),
+        }, 200)
+
+    def _get_visualization_status(self):
+        """Return lifecycle status for a viz: described | requested | created | added | committed."""
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        name = (qs.get("name") or [""])[0]
+        if not name:
+            return self._json({"error": "missing name"}, 400)
+
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        viz = next((v for v in (ws_data.get("visualizations") or []) if v.get("name") == name), None)
+        if not viz:
+            return self._json({"status": "missing", "name": name}, 200)
+
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        response_path = WORKSPACE / ".pbg" / "viz-responses" / f"{name}.py"
+        staged_path = WORKSPACE / ".pbg" / "visualizations-staged" / f"{name}.py"
+        committed_path = WORKSPACE / pkg / "visualizations" / f"{name}.py"
+        request_path = WORKSPACE / ".pbg" / "viz-requests" / f"{name}.md"
+
+        if committed_path.exists():
+            status = "committed"
+        elif staged_path.exists():
+            status = "added"
+        elif response_path.exists():
+            status = "created"
+        elif request_path.exists():
+            status = "requested"
+        else:
+            status = "described"
+
+        return self._json({
+            "status": status,
+            "name": name,
+            "has_request": request_path.exists(),
+            "has_response": response_path.exists(),
+            "has_staged": staged_path.exists(),
+            "has_committed": committed_path.exists(),
+        }, 200)
+
+    def _post_visualization_add_to_project(self, body: dict):
+        """Copy .pbg/viz-responses/<name>.py to .pbg/visualizations-staged/<name>.py.
+
+        Does NOT commit (Commit is a separate action). Working tree stays clean
+        because both source and dest are gitignored.
+        """
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._json({"error": "missing name"}, 400)
+        src = WORKSPACE / ".pbg" / "viz-responses" / f"{name}.py"
+        if not src.exists():
+            return self._json({"error": f"no skill response yet — run /pbg-viz {name} first"}, 404)
+        dest_dir = WORKSPACE / ".pbg" / "visualizations-staged"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"{name}.py"
+        shutil.copy2(src, dest)
+        return self._json({"ok": True, "staged_path": str(dest.relative_to(WORKSPACE))}, 200)
+
+    def _post_visualization_commit_batch(self, body: dict):
+        """Move all staged visualizations to the workspace package + commit on active branch.
+
+        Body: {names?: list[str]} — if omitted, commits all staged.
+        """
+        staged_dir = WORKSPACE / ".pbg" / "visualizations-staged"
+        if not staged_dir.is_dir():
+            return self._json({"error": "no staged visualizations"}, 404)
+
+        requested = body.get("names")
+        available = sorted(p.stem for p in staged_dir.glob("*.py"))
+        if requested:
+            names = [n for n in requested if n in available]
+        else:
+            names = available
+        if not names:
+            return self._json({"error": "no staged visualizations match"}, 404)
+
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        target_dir = WORKSPACE / pkg / "visualizations"
+
+        moved_names = list(names)  # captured for closure
+
+        def action():
+            target_dir.mkdir(parents=True, exist_ok=True)
+            # Ensure __init__.py exists
+            init = target_dir / "__init__.py"
+            if not init.exists():
+                init.write_text("")
+            for n in moved_names:
+                src = staged_dir / f"{n}.py"
+                dest = target_dir / f"{n}.py"
+                shutil.copy2(src, dest)
+                src.unlink()  # remove staged copy
+
+        commit_msg = (
+            f"feat(viz): commit {len(moved_names)} visualization(s): {', '.join(moved_names)}"
+            if len(moved_names) > 1
+            else f"feat(viz): commit {moved_names[0]}"
+        )
+        resp, code = _active_branch_action(commit_msg, action)
+
+        if code == 200:
+            resp["ok"] = True
+            resp["committed"] = moved_names
+        return self._json(resp, code)
 
     def _post_simulation(self, body: dict):
         """Register a simulation in workspace.yaml.
@@ -1278,6 +1516,34 @@ class Handler(BaseHTTPRequestHandler):
                 ws["simulations"] = new_sims
             else:
                 ws.pop("simulations", None)
+            save_workspace(ws_file, ws)
+
+        return self._json(*_active_branch_action(commit_msg, action))
+
+    def _delete_visualization(self, body: dict):
+        """Remove a visualization from workspace.yaml.
+
+        Body: {name}
+        """
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._json({"error": "name is required"}, 400)
+
+        commit_msg = f"feat(setup): remove visualization '{name}'"
+
+        def action():
+            _ws_add_to_sys_path()
+            from scripts._lib.workspace_yaml import load_workspace, save_workspace
+            ws_file = WORKSPACE / "workspace.yaml"
+            ws = load_workspace(ws_file)
+            visualizations = ws.get("visualizations") or []
+            new_vizs = [v for v in visualizations if not (isinstance(v, dict) and v.get("name") == name)]
+            if len(new_vizs) == len(visualizations):
+                raise ValueError(f"visualization '{name}' not found")
+            if new_vizs:
+                ws["visualizations"] = new_vizs
+            else:
+                ws.pop("visualizations", None)
             save_workspace(ws_file, ws)
 
         return self._json(*_active_branch_action(commit_msg, action))

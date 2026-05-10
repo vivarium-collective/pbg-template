@@ -786,4 +786,133 @@
       .replace(/"/g, "&quot;");
   }
 
+  // -------------------------------------------------------------------------
+  // Visualization lifecycle (v0.4.2)
+  // -------------------------------------------------------------------------
+
+  function _vizRefreshStatus(name) {
+    fetch('/api/visualization-status?name=' + encodeURIComponent(name))
+      .then(function(r) { return r.json(); })
+      .then(function(s) {
+        var el = document.getElementById('viz-status-' + name);
+        if (!el) return;
+        el.textContent = s.status;
+        el.className = 'status-pill viz-status-' + s.status;
+      });
+  }
+  function _vizRefreshAll() {
+    document.querySelectorAll('[id^="viz-status-"]').forEach(function(el) {
+      var name = el.id.substring('viz-status-'.length);
+      _vizRefreshStatus(name);
+    });
+  }
+  window._vizRefreshAll = _vizRefreshAll;
+
+  function _vizCreate(name) {
+    fetch('/api/visualization-create', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(pair) {
+        var ok = pair[0], json = pair[1];
+        if (!ok) { alert('Create failed: ' + (json.error || 'unknown')); return; }
+        var msg =
+          'Request written to ' + json.request_path + '\n\n' +
+          json.instructions + '\n\n' +
+          "Click 'Refresh status' below when the skill finishes.";
+        alert(msg);
+        _vizPollUntilCreated(name, 0);
+      });
+  }
+  window._vizCreate = _vizCreate;
+
+  function _vizPollUntilCreated(name, attempts) {
+    if (attempts > 60) return;  // ~2 minutes
+    fetch('/api/visualization-status?name=' + encodeURIComponent(name))
+      .then(function(r) { return r.json(); })
+      .then(function(s) {
+        _vizRefreshStatus(name);
+        if (s.has_response) return;  // Done
+        setTimeout(function() { _vizPollUntilCreated(name, attempts + 1); }, 2000);
+      });
+  }
+
+  function _vizAddToProject(name) {
+    fetch('/api/visualization-add-to-project', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(pair) {
+        var ok = pair[0], json = pair[1];
+        if (!ok) { alert('Add to project failed: ' + (json.error || 'unknown')); return; }
+        _vizRefreshStatus(name);
+      });
+  }
+  window._vizAddToProject = _vizAddToProject;
+
+  function _vizCommit(names) {
+    if (!confirm('Commit ' + names.length + ' visualization(s) to the active branch?')) return;
+    fetch('/api/visualization-commit-batch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({names: names}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(pair) {
+        var ok = pair[0], json = pair[1];
+        if (!ok) { alert('Commit failed: ' + (json.error || 'unknown')); return; }
+        alert('Committed: ' + (json.committed || []).join(', '));
+        fetch('/api/render', {method: 'POST'}).finally(function() { location.reload(); });
+      });
+  }
+  window._vizCommit = _vizCommit;
+
+  function _vizCommitAll() {
+    fetch('/api/visualization-commit-batch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(pair) {
+        var ok = pair[0], json = pair[1];
+        if (!ok) { alert('Commit-all failed: ' + (json.error || 'unknown')); return; }
+        alert('Committed: ' + (json.committed || []).join(', '));
+        fetch('/api/render', {method: 'POST'}).finally(function() { location.reload(); });
+      });
+  }
+  window._vizCommitAll = _vizCommitAll;
+
+  function _vizPreview(name) {
+    alert(
+      'Preview not yet implemented (planned v0.4.3). For now, open\n' +
+      '.pbg/viz-responses/' + name + '.py\n' +
+      'and run: python3 .pbg/viz-responses/' + name + '.py | head'
+    );
+  }
+  window._vizPreview = _vizPreview;
+
+  function _vizRemove(name) {
+    if (!confirm("Remove visualization '" + name + "'?")) return;
+    fetch('/api/visualization', {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(pair) {
+        var ok = pair[0], json = pair[1];
+        if (!ok) { alert('Remove failed: ' + (json.error || 'unknown')); return; }
+        fetch('/api/render', {method: 'POST'}).finally(function() { location.reload(); });
+      });
+  }
+  window._vizRemove = _vizRemove;
+
+  // Auto-refresh viz statuses on page load
+  window.addEventListener('DOMContentLoaded', function() { setTimeout(_vizRefreshAll, 200); });
+
 })();

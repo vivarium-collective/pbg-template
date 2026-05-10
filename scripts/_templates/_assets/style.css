@@ -189,3 +189,12 @@ img{max-width:100%}
   border-radius:999px; font-size:0.78em;
 }
 .module-action{ margin-top:auto }
+
+/* ── Visualization lifecycle (v0.4.2) ─────────────────────────────────── */
+.viz-status-described{ background:#e5e7eb; color:#374151 }
+.viz-status-requested{ background:#fef3c7; color:#92400e }
+.viz-status-created{ background:#dbeafe; color:#1e40af }
+.viz-status-added{ background:#fed7aa; color:#9a3412 }
+.viz-status-committed{ background:#d1fae5; color:#065f46 }
+.viz-actions{ display:flex; gap:6px; flex-wrap:wrap }
+.viz-description{ max-width:480px; color:#374151; font-size:0.92em }

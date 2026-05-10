@@ -116,13 +116,15 @@
     },
     "visualization": {
       "type": "object",
-      "required": ["name", "type", "observables"],
+      "required": ["name"],
+      "additionalProperties": false,
       "properties": {
-        "name": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$"},
+        "description": {"type": "string"},
         "type": {"enum": ["time-series", "phase-space", "heatmap", "histogram"]},
         "observables": {"type": "array", "items": {"type": "string"}},
         "phases": {"type": "array", "items": {"type": "integer", "minimum": 1}},
-        "simulation": {"type": "string", "description": "Name of the simulation that produces the data; empty = any/global"},
+        "simulation": {"type": "string"},
         "config": {"type": "object"}
       }
     },

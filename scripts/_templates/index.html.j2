@@ -274,20 +274,28 @@
 <!-- ===== PAGE: VISUALIZATIONS ===== -->
 <section id="page-visualizations" class="page" data-page="visualizations">
   <h2 class="page-title">Visualizations</h2>
-  <p class="page-lead">Charts that render observable trajectories from simulations. Each visualization can be scoped to specific phases and/or a specific simulation.</p>
+  <p class="page-lead">Charts rendered from observable trajectories. Describe what to plot, then use the Create/Add/Commit lifecycle to generate and version the function.</p>
 
   <div class="panel">
     <h3>Visualizations</h3>
-    <p class="panel-lead">Define charts now; they will be populated when you run the model.</p>
+    <p class="panel-lead">Add a visualization by name + description. Click <strong>Create</strong> to invoke <code>/pbg-viz</code>, <strong>Add to project</strong> to stage it, then <strong>Commit</strong> to save it on the active branch.</p>
+    <div style="margin-bottom:8px">
+      <button class="action-btn" onclick="_vizCommitAll()">Commit all staged</button>
+    </div>
     {% if visualizations %}
-    <table><thead><tr><th>Name</th><th>Type</th><th>Observables</th><th>Phases</th><th>Simulation</th></tr></thead><tbody>
+    <table><thead><tr><th>Name</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead><tbody>
     {% for viz in visualizations %}
-    <tr>
-      <td><strong>{{ viz.name }}</strong></td>
-      <td><code>{{ viz.type }}</code></td>
-      <td>{{ viz.observables | join(', ') }}</td>
-      <td>{% if viz.phases %}{{ viz.phases | join(', ') }}{% else %}<em>all</em>{% endif %}</td>
-      <td>{% if viz.simulation %}<code>{{ viz.simulation }}</code>{% else %}<em>any</em>{% endif %}</td>
+    <tr id="viz-row-{{ viz.name }}">
+      <td><code>{{ viz.name }}</code>{% if viz.type %}<br><small style="color:#888">{{ viz.type }}{% if viz.observables %}: {{ viz.observables | join(', ') }}{% endif %}</small>{% endif %}</td>
+      <td class="viz-description">{% if viz.description %}{{ viz.description }}{% else %}<em style="color:#888">No description{% if viz.type %} (legacy){% endif %}</em>{% endif %}</td>
+      <td><span class="status-pill" id="viz-status-{{ viz.name }}">…</span></td>
+      <td class="viz-actions">
+        {% if viz.description %}<button class="btn-mini" onclick="_vizCreate('{{ viz.name }}')">Create</button>{% endif %}
+        <button class="btn-mini" onclick="_vizAddToProject('{{ viz.name }}')">Add to project</button>
+        <button class="btn-mini" onclick="_vizCommit(['{{ viz.name }}'])">Commit</button>
+        <button class="btn-mini" onclick="_vizPreview('{{ viz.name }}')">Preview</button>
+        <button class="btn-mini" onclick="_vizRemove('{{ viz.name }}')" style="color:#c00">Remove</button>
+      </td>
     </tr>
     {% endfor %}
     </tbody></table>
@@ -673,37 +681,20 @@
   <div class="modal-box">
     <button class="modal-close" onclick="closeModal('modal-visualization')">&times;</button>
     <h3>Add visualization</h3>
-    <p style="font-size:0.85em;color:#555">Define a chart that renders registered observables.</p>
-    <form id="form-visualization" onsubmit="event.preventDefault(); _submitVisualization(this)">
-      <label>Name * <small>(e.g. dnaA-trajectory)</small><input name="viz_name" placeholder="dnaA-trajectory" required></label>
-      <label>Type *
-        <select name="viz_type">
-          <option value="time-series">time-series</option>
-          <option value="phase-space">phase-space</option>
-          <option value="heatmap">heatmap</option>
-          <option value="histogram">histogram</option>
-        </select>
+    <form id="form-visualization" onsubmit="event.preventDefault(); submitForm(this, '/api/visualization', function(f){
+      return {
+        name: f.viz_name.value.trim(),
+        description: f.description.value.trim() || null,
+      };
+    })">
+      <label>Name <input name="viz_name" pattern="^[a-zA-Z0-9_-]+$" required placeholder="e.g. baseline-trajectory"></label>
+      <label>Description (natural language &mdash; describe what to plot)
+        <textarea name="description" rows="4" required
+                  placeholder="e.g. 'A time-series of free_DnaA concentration over the baseline simulation, with a horizontal line at the binding threshold of 50 molecules.'"></textarea>
       </label>
-      <label>Observables * <small>(comma-separated observable names)</small><input name="viz_observables" placeholder="DnaA, cell_mass" required></label>
-      <label>Y-axis label (optional, for time-series)<input name="y_label" placeholder="DnaA (molecules)"></label>
-      <label>Simulation (optional &mdash; leave blank to apply to any)
-        <select name="simulation">
-          <option value="">— any —</option>
-          {% for s in simulations %}<option value="{{ s.name }}">{{ s.name }}</option>{% endfor %}
-        </select>
-      </label>
-      <fieldset style="border:1px solid #ddd;border-radius:4px;padding:10px;margin-bottom:12px">
-        <legend style="font-size:0.88em;font-weight:600">Applies to phases (leave all unchecked = applies globally)</legend>
-        {% for p in phases %}
-        <label style="display:inline-block; margin-right:12px; font-weight:normal">
-          <input type="checkbox" name="phases" value="{{ p.n }}">
-          Phase {{ p.n }}: {{ p.name }}
-        </label>
-        {% endfor %}
-        {% if not phases %}<em style="color:#888;font-size:0.88em">No phases registered yet &mdash; visualization will apply globally.</em>{% endif %}
-      </fieldset>
+      <p style="font-size:0.85em;color:#555">After adding, click <strong>Create</strong> to invoke the <code>/pbg-viz</code> skill which generates the function.</p>
       <div class="form-error"></div>
-      <button type="submit">Add visualization</button>
+      <button type="submit" class="action-btn">Add visualization</button>
     </form>
   </div>
 </div>
@@ -859,23 +850,15 @@ function _submitExpertDoc(form) {
   });
 }
 
-// Visualization form submission.
+// Visualization form submission — v0.4.2: name + description only.
+// (The submitForm call is now inline in the form's onsubmit attribute.)
+// Kept as no-op for backward compat with any external callers.
 function _submitVisualization(form) {
   submitForm(form, '/api/visualization', function(f) {
-    var obs_raw = f.viz_observables.value.trim();
-    var obs_list = obs_raw.split(",").map(function(s) { return s.trim(); }).filter(Boolean);
-    var data = {
+    return {
       name: f.viz_name.value.trim(),
-      type: f.viz_type.value,
-      observables: obs_list,
+      description: f.description ? (f.description.value.trim() || null) : null,
     };
-    var yLabel = f.y_label.value.trim();
-    if (yLabel) data.config = { y_label: yLabel };
-    var phasesChecked = Array.from(form.querySelectorAll('input[name=phases]:checked'))
-                              .map(function(el){ return parseInt(el.value, 10); });
-    data.phases = phasesChecked;
-    data.simulation = f.simulation.value || null;
-    return data;
   });
 }
 

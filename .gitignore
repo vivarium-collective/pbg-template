@@ -1,6 +1,9 @@
 .venv/
 .pbg/server/
 .pbg/state.json
+.pbg/viz-requests/
+.pbg/viz-responses/
+.pbg/visualizations-staged/
 __pycache__/
 *.pyc
 *.egg-info/
