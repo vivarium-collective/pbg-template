@@ -65,49 +65,55 @@ try:
     from {package_name}.core import build_core
     core = build_core()
 
+    # Processes (and other linkable components) live in core.link_registry,
+    # a dict keyed by both short names ('Composite') and fully-qualified
+    # names ('process_bigraph.composite.Composite'). Dedupe by class identity
+    # and prefer the short name.
     processes = []
-    # Try multiple APIs defensively.
-    try:
-        proc_names = sorted(core.process_registry.list())
-    except Exception:
+    seen_classes = {{}}
+    link_reg = getattr(core, 'link_registry', {{}}) or {{}}
+    for name, cls in link_reg.items():
+        cls_id = id(cls)
+        is_qualified = '.' in name
+        if cls_id in seen_classes:
+            # already saw this class; only update if current name is shorter (preferred)
+            existing = seen_classes[cls_id]
+            if not is_qualified and '.' in processes[existing]['name']:
+                processes[existing]['aliases'].append(processes[existing]['name'])
+                processes[existing]['name'] = name
+            else:
+                processes[existing]['aliases'].append(name)
+            continue
         try:
-            proc_names = sorted(core.process_registry.registry.keys())
-        except Exception:
-            proc_names = []
-    for name in proc_names:
-        try:
-            cls = core.process_registry.access(name)
             addr = f"{{cls.__module__}}.{{cls.__qualname__}}"
-            schema_preview = ""
-            if hasattr(cls, 'config_schema'):
-                try:
-                    schema_preview = json.dumps(cls.config_schema, default=str)[:200]
-                except Exception:
-                    schema_preview = ""
-        except Exception as e:
-            addr = f"<error: {{e}}>"
-            schema_preview = ""
-        processes.append({{"name": name, "address": addr, "schema_preview": schema_preview}})
-
-    types = []
-    # Try multiple APIs defensively.
-    try:
-        type_names = sorted(core.types())
-    except Exception:
-        try:
-            type_names = sorted(core.type_registry.list())
         except Exception:
+            addr = str(cls)
+        schema_preview = ""
+        if hasattr(cls, 'config_schema'):
             try:
-                type_names = sorted(core.type_registry.registry.keys())
+                schema_preview = json.dumps(cls.config_schema, default=str)[:200]
             except Exception:
-                type_names = []
-    for name in type_names:
+                schema_preview = ""
+        seen_classes[cls_id] = len(processes)
+        processes.append({{
+            "name": name,
+            "address": addr,
+            "schema_preview": schema_preview,
+            "aliases": [],
+        }})
+    # Re-sort by name so output is deterministic; promote short names.
+    processes.sort(key=lambda p: ('.' in p['name'], p['name']))
+
+    # Types: core.registry is a dict of registered type schemas.
+    types = []
+    type_reg = getattr(core, 'registry', {{}}) or {{}}
+    for name in sorted(type_reg.keys()):
         try:
             td = core.access(name)
-            schema_preview = json.dumps(td, default=str)[:200] if td else ""
+            preview = str(td)[:200] if td is not None else ""
         except Exception as e:
-            schema_preview = f"<error: {{e}}>"
-        types.append({{"name": name, "schema_preview": schema_preview}})
+            preview = f"<error: {{e}}>"
+        types.append({{"name": name, "schema_preview": preview}})
 
     print(json.dumps({{"processes": processes, "types": types}}))
 except ImportError as e:
