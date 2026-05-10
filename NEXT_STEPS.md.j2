@@ -1,116 +1,112 @@
 # Next steps for {{ workspace_name }}
 
 This workspace IS the model. You build it incrementally through phases.
+Most work happens in the **dashboard** — five tabs, each with the
+buttons you need. Skills (Claude Code) are the alternative for
+code-writing tasks.
 
-## Setup (now)
+```
+bash scripts/serve.sh   # opens browser at http://localhost:<port>
+```
 
-- [ ] `git init && git add -A && git commit -m "feat(stage-0): workspace bootstrap"`
+## 0 — One-time setup
+
 - [ ] Create the venv: `uv venv .venv`
-- [ ] **Activate it** in your shell: `source .venv/bin/activate`
-      *(every new shell needs this; subsequent commands assume the venv is active)*
+- [ ] Activate it: `source .venv/bin/activate`
 - [ ] Install workspace deps: `uv pip install -e ".[dev]"`
 - [ ] Lint: `python3 scripts/lint-workspace.py` should print `workspace lint: OK`
+- [ ] Commit + (eventually) push: `git init && git add -A && git commit -m "feat: workspace bootstrap"`
 
-> **Push to GitHub later.** Push once you have some structure to show.
-> `gh repo create <org>/{{ workspace_name }} --public --source=. --remote=origin --push`
+## The 5 dashboard tabs
 
-## Workspace inputs (load anytime)
+| Tab | What it's for | Key buttons |
+|---|---|---|
+| **Workspace inputs** | External resources you bring in | + Import · + Dataset · + Reference (PDF) · + Expert doc · **Install** (per import) |
+| **Simulation Setup** | What to track + how to run | + Add observable · + Add simulation |
+| **Visualizations** | How to render trajectories | + Add visualization (Plotly chart configs) |
+| **Registry** | Live `build_core()` introspection | Refresh registry — shows discoverable processes + types |
+| **Build Model** | Iterative phases of model development | + Add phase · Start phase · Evaluate gate (per phase) |
 
-Researchers keep loading inputs throughout a project. None of these are
-sequential stages.
+A persistent **Branch timeline** below the tabs shows every stage branch
+the dashboard has produced. Each row has Copy gh / Copy git merge / Show diff
+buttons to land the change.
 
-- **Imports** — external models you reference, fork, or operate-in-place against
-- **Datasets** — experimental data the model compares against
-- **References** — paper PDFs (drop a PDF; pypdf auto-extracts metadata)
-- **Expert knowledge** — curated PDFs, lab notes, expert reviews
+## 1 — Workspace inputs (any time)
 
-Each + Add creates a feature branch you review and PR.
+Inputs aren't a sequential stage — load them whenever they're useful.
 
-### Imports (optional)
+- **Imports** — external `pbg-*` packages. Register via `+ Import`, then
+  click **Install** to `pip install -e <path>` into the workspace venv.
+  Once installed, `allocate_core()` auto-discovers their processes via
+  [bigraph-schema's discovery convention][discovery]. They appear in the
+  Registry tab.
+- **Datasets** — experimental data the model validates against. Drag-drop a file.
+- **References** — paper PDFs. Drop the file; pypdf extracts metadata; bibtex auto-generates.
+- **Expert docs** — lab notes, curated reviews, working drafts. Drag-drop a PDF.
 
-If your project builds on an existing model, register it in one of three modes:
+Each `+ Add` lands on a `stage/*` branch you can merge from the Branch timeline.
 
-- **reference** — read-only checkout under `external/<name>/`
-- **fork-source** — catalog-only; no checkout
-- **in-place** — full checkout under `external/<name>/`
+## 2 — Simulation Setup
 
-```
-# plugin path
-/pbg-import-models <name> --source <url> --ref <ref> --mode reference
+- **Observables** — paths in the composite document you'll track
+  (e.g. `chromosome.DnaA_count`).
+- **Simulations** — run configs: name, t_start, t_end, initial_state,
+  parameter_overrides, emitter_config, optionally scoped to specific phases
+  and to specific Processes from the Registry.
 
-# no-plugin path
-# Edit workspace.yaml.imports directly, then:
-git submodule add <source> external/<name>
-```
+## 3 — Visualizations
 
-## Setup the model
+Configs for charts that render observable trajectories. Each visualization
+can scope to specific phases and/or a specific simulation.
 
-Pick what the model tracks and how to render it:
+## 4 — Registry
 
-- **Observables** — state variables you'll track (e.g. `chromosome.DnaA_count`)
-- **Visualizations** — how to render them (time-series / phase-space / heatmap / histogram)
+Live snapshot of `build_core()` — every Process and Type currently
+discoverable. After installing an import, click **Refresh registry** to
+see new processes appear. Empty registry usually means the venv isn't
+set up or the import isn't pip-installed.
 
-```
-# plugin path
-/pbg-add-observable
-/pbg-add-visualization
+## 5 — Build Model (the phases)
 
-# dashboard path
-bash scripts/serve.sh
-# use the + Add observable / + Add visualization buttons in the Setup section
-```
+Each phase is a small unit of model development:
 
-## Build phases
+- An **objective** + a **Phase Gate** (acceptance criteria)
+- A cited **source artifact** (expert doc / dataset / reference)
+- New mechanisms wired into the composite (processes, wires, store paths)
+- **Acceptance tests** that exercise the new mechanism
+- A landed **PR** when the gate passes
 
-Phases are the iterative model-development steps. Each phase:
+Click `+ Add phase` to create one. Each phase has its own panel below
+the tracker — clicking a pill scrolls to it. Action buttons:
 
-- Has an objective and a Phase Gate
-- Cites a source artifact (expert doc / dataset / reference)
-- Adds mechanisms to the composite via processes
-- Includes acceptance tests
-- Lands as its own PR
+- **Start phase** (planned → in_progress) — branches and scaffolds
+- **Evaluate gate** (in_progress → complete or back to in_progress)
 
-```
-# Generate mechanism plan (dashboard or terminal)
-bash scripts/add-phase-plan.sh
+If you're using Claude Code, `/pbg-phase <n>` walks the phase iteratively:
+opens the phase panel, drives the implementation, runs the gate.
 
-# Start a mechanism phase
-bash scripts/start-phase.sh <n>
+## Two paths to the same workspace
 
-# Evaluate the gate when done
-bash scripts/evaluate-phase-gate.sh <n>
-```
-
-## Run
-
-- `bash scripts/serve.sh` — local dashboard with all of the above
-- `pytest -v tests/` — runs the test suite
-- `python3 scripts/render-dashboard.py` — re-render the static dashboard
-
-## Two paths
-
-- **Browser dashboard** (`bash scripts/serve.sh`) is the primary UI for loading inputs, registering observables and visualizations, and tracking phases. No plugin needed.
-- **Claude Code + the [pbg-superpowers plugin](https://github.com/vivarium-collective/pbg-superpowers)** complements the dashboard with `/pbg-phase <n>` for the iterative phase-building work that benefits from Claude's help — writing process code, integrating mechanisms from expert docs, dispatching `/pbg-expert` to wrap a missing simulator. The plugin's other skills (`/pbg-workspace`, `/pbg-server`, `/pbg-report`) automate the surrounding plumbing.
+- **Browser dashboard** is the primary UI. Pure-CLI workflows are supported
+  via `python3 scripts/lint-workspace.py` + direct YAML edits, but the
+  buttons handle branch-creation and PR setup for you.
+- **Claude Code + [pbg-superpowers]** adds skills for the work that benefits
+  from Claude: `/pbg-phase <n>` (drive a phase), `/pbg-expert <tool>` (wrap
+  a new simulator), `/pbg-composer` (compose pbg-* wrappers). The dashboard
+  and the skills share the same `workspace.yaml`.
 
 ## Config files to know
 
-- `workspace.yaml` — canonical state (observables, visualizations, phases, imports, datasets, …)
-- `docs/decisions.yaml` — append-only design log
+- `workspace.yaml` — canonical state (observables, simulations, visualizations, phases, imports, datasets, …)
 - `references/{papers.bib, claims.yaml}` — bibliography + claim → paper mapping
-- `.pbg/schemas/` — workspace + phase JSON schemas (used by `lint-workspace.py`)
-
-## Schema migration
-
-If you have a v1 workspace (with `models[]`), run:
-
-```
-python3 scripts/_migrate_v1_to_v2.py
-```
-
-This lifts the first model's phases/observables/visualizations to the top level and bumps `schema_version` to 2.
+- `.pbg/schemas/workspace.schema.json` — JSON schema (lint enforces it)
+- `phases/phase-<n>.md` — per-phase spec (frontmatter + body)
 
 ## When stuck
 
-1. Run `python3 scripts/lint-workspace.py` — most workspace-shape issues surface here.
-2. Open the relevant `SKILL.md` in `pbg-superpowers/skills/`.
+1. `python3 scripts/lint-workspace.py` — most workspace-shape issues surface here.
+2. Look at the **Next step** banner at the top of the dashboard — it points at the right tab.
 3. File an issue at <https://github.com/vivarium-collective/pbg-superpowers/issues>.
+
+[discovery]: https://github.com/vivarium-collective/pbg-superpowers/blob/main/docs/conventions/discovery.md
+[pbg-superpowers]: https://github.com/vivarium-collective/pbg-superpowers
