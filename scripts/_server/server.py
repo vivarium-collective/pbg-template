@@ -13,6 +13,8 @@ v0.3.0: schema v2 — workspace IS the model. All endpoints drop model scoping.
   /api/observable, /api/visualization, /api/phase-plan, /api/phase-start, /api/phase-gate,
   /api/run-tests now operate on top-level workspace state directly. Pending-visibility helper
   added: unmerged stage/* branches surface entries with a "(pending review)" badge.
+v0.3.7-A: /api/import-install — pip-install an import into the workspace venv; marks
+  installed=True + install_path in workspace.yaml; invalidates registry cache.
 """
 from __future__ import annotations
 import argparse
@@ -419,6 +421,7 @@ class Handler(BaseHTTPRequestHandler):
         route_map = {
             "/api/click":              self._post_click,
             "/api/import":             self._post_import,
+            "/api/import-install":     self._post_import_install,
             "/api/dataset":            self._post_dataset,
             "/api/reference-pdf":      self._post_reference_pdf,
             "/api/reference-bibtex":   self._post_reference,
@@ -1321,6 +1324,81 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "pytest timed out after 120s"}, 500)
         except Exception as e:
             return self._json({"error": str(e)}, 500)
+
+    def _post_import_install(self, body: dict):
+        """Pip-install an import into the workspace venv.
+
+        Body: {name: str, target?: str}.
+        `target` overrides the default install path (workspace.yaml.imports[name].path).
+        """
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._json({"error": "missing name"}, 400)
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        imports = ws_data.get("imports", {})
+        if name not in imports:
+            return self._json({"error": f"import '{name}' not registered"}, 404)
+
+        entry = imports[name]
+        target = (body.get("target") or "").strip() or entry.get("path") or ""
+        if not target:
+            return self._json({"error": "no install target — set 'path' in import or pass 'target' in body"}, 400)
+
+        # Resolve path relative to workspace (unless it's a URL/VCS spec).
+        if not target.startswith(("http://", "https://", "git+")):
+            abs_target = (WORKSPACE / target).resolve()
+            if not abs_target.exists():
+                return self._json({"error": f"path does not exist: {abs_target}"}, 404)
+            target = str(abs_target)
+
+        # Find pip in venv.
+        venv_pip = WORKSPACE / ".venv" / "bin" / "pip"
+        if not venv_pip.exists():
+            return self._json({"error": ".venv/bin/pip not found — run `python -m venv .venv` in the workspace"}, 500)
+
+        # Run pip install -e (outside the branch action so errors surface before git work).
+        try:
+            result = subprocess.run(
+                [str(venv_pip), "install", "-e", target],
+                cwd=WORKSPACE, capture_output=True, text=True, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            return self._json({"error": "pip install timed out after 120s"}, 500)
+        except Exception as pip_err:
+            return self._json({"error": f"pip install error: {pip_err}"}, 500)
+
+        log_excerpt = (result.stdout + "\n" + result.stderr).strip()[-2000:]
+        if result.returncode != 0:
+            return self._json({"error": "pip install failed", "log": log_excerpt}, 500)
+
+        # Mark installed in workspace.yaml on a stage branch.
+        install_target = target  # captured for closure
+
+        def action():
+            _ws_add_to_sys_path()
+            from scripts._lib.workspace_yaml import load_workspace, save_workspace
+            ws_file = WORKSPACE / "workspace.yaml"
+            ws = load_workspace(ws_file)
+            ws.setdefault("imports", {}).setdefault(name, {})["installed"] = True
+            ws["imports"][name]["install_path"] = install_target
+            save_workspace(ws_file, ws)
+
+        import time as _time
+        epoch = int(_time.time())
+        branch_name = f"stage/sim-import-install-{_safe_slug(name)}-{epoch}"
+        commit_msg = f"chore(import): pip install {name} into venv"
+
+        resp, code = _branched_action(branch_name, commit_msg, action)
+
+        # Invalidate registry cache so next /api/registry call sees fresh data.
+        global _REGISTRY_CACHE
+        _REGISTRY_CACHE["data"] = None
+
+        if code == 200:
+            resp["ok"] = True
+            resp["log"] = log_excerpt[-500:]
+
+        return self._json(resp, code)
 
     def _post_render(self, body: dict):
         """Re-render workspace dashboard."""

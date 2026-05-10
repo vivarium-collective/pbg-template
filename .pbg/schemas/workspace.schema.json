@@ -73,7 +73,15 @@
         "ref": {"type": "string", "minLength": 1},
         "mode": {"enum": ["reference", "fork-source", "in-place"]},
         "path": {"type": ["string", "null"]},
-        "description": {"type": ["string", "null"]}
+        "description": {"type": ["string", "null"]},
+        "installed": {
+          "type": "boolean",
+          "description": "True if this import has been pip-installed into the workspace venv (so allocate_core() will discover its processes)"
+        },
+        "install_path": {
+          "type": ["string", "null"],
+          "description": "Path or URL spec used for pip install -e (e.g. external/v2ecoli or a remote URL spec)"
+        }
       }
     },
     "phase": {

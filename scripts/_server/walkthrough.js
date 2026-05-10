@@ -1,4 +1,4 @@
-// walkthrough.js — v0.3.6: Registry tab, simulation processes picker; v0.1.9: drag-drop uploads + sha256; v0.1.7: interactive forms.
+// walkthrough.js — v0.3.7-A: _installImport (pip-install button); v0.3.6: Registry tab, simulation processes picker; v0.1.9: drag-drop uploads + sha256; v0.1.7: interactive forms.
 (function () {
   "use strict";
 
@@ -391,6 +391,41 @@
   window._submitSimulation = _submitSimulation;
   window._deleteSimulation = _deleteSimulation;
   window._parseJSONorNull = _parseJSONorNull;
+
+  // -------------------------------------------------------------------------
+  // Import install (v0.3.7-A)
+  // -------------------------------------------------------------------------
+
+  function _installImport(name) {
+    if (!confirm("Pip install '" + name + "' into workspace venv?\nThis runs `.venv/bin/pip install -e <path>` and may take a minute.")) return;
+    var btn = event.target;
+    btn.disabled = true;
+    btn.textContent = "Installing…";
+    fetch('/api/import-install', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], json = parts[1];
+        if (!ok) {
+          alert("Install failed:\n\n" + (json.error || 'unknown') + "\n\n" + (json.log || ''));
+          btn.disabled = false;
+          btn.textContent = "Install";
+          return;
+        }
+        alert("Installed.\nBranch: " + json.branch + "\n\nRegistry will refresh; new processes may appear after pip-cached subprocess restarts.");
+        // Drop registry cache, switch to Registry tab so user sees the change.
+        window._registryLoaded = false;
+        fetch('/api/render', {method: 'POST'}).finally(function() {
+          location.hash = '#registry';
+          location.reload();
+        });
+      })
+      .catch(function(err) { alert("Network error: " + err); btn.disabled = false; });
+  }
+  window._installImport = _installImport;
 
   // -------------------------------------------------------------------------
   // Run tests
