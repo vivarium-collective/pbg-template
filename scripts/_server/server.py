@@ -337,11 +337,11 @@ class Handler(BaseHTTPRequestHandler):
           git submodule add <source> external/<name>   # for reference / in-place
         The response includes the exact command to run.
         """
-        name = body.get("name", "").strip()
-        source = body.get("source", "").strip()
-        ref = body.get("ref", "").strip()
-        mode = body.get("mode", "").strip()
-        description = body.get("description", "").strip() or None
+        name = (body.get("name") or "").strip()
+        source = (body.get("source") or "").strip()
+        ref = (body.get("ref") or "").strip()
+        mode = (body.get("mode") or "").strip()
+        description = (body.get("description") or "").strip() or None
 
         if not all([name, source, ref, mode]):
             return self._json({"error": "name, source, ref, mode are required"}, 400)
@@ -379,7 +379,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(resp, code)
 
     def _post_dataset(self, body: dict):
-        name = body.get("name", "").strip()
+        name = (body.get("name") or "").strip()
         if not name:
             return self._json({"error": "name is required"}, 400)
         claims_raw = body.get("claims", "")
@@ -393,9 +393,9 @@ class Handler(BaseHTTPRequestHandler):
         entry: dict = {"name": name, "claims": claims}
 
         file_b64 = body.get("file_b64", "").strip()
-        filename = body.get("filename", "").strip()
-        path = body.get("path", "").strip()
-        url = body.get("url", "").strip()
+        filename = (body.get("filename") or "").strip()
+        path = (body.get("path") or "").strip()
+        url = (body.get("url") or "").strip()
 
         if file_b64:
             if not filename:
@@ -563,7 +563,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _post_reference(self, body: dict):
         """Legacy BibTeX-paste reference flow (now also served as /api/reference-bibtex)."""
-        bibtex_text = body.get("bibtex_text", "").strip()
+        bibtex_text = (body.get("bibtex_text") or "").strip()
         claim_mappings_raw = body.get("claim_mappings", {})
         pdf_b64 = body.get("pdf_b64", "").strip()
 
@@ -642,12 +642,12 @@ class Handler(BaseHTTPRequestHandler):
         import shutil as _shutil
         import time as _time
 
-        name = body.get("name", "").strip()
+        name = (body.get("name") or "").strip()
         file_b64 = body.get("file_b64", "").strip()
-        filename = body.get("filename", "").strip()
-        source_path_raw = body.get("source_path", "").strip()
-        description = body.get("description", "").strip() or None
-        contributor = body.get("contributor", "").strip() or None
+        filename = (body.get("filename") or "").strip()
+        source_path_raw = (body.get("source_path") or "").strip()
+        description = (body.get("description") or "").strip() or None
+        contributor = (body.get("contributor") or "").strip() or None
         claims_raw = body.get("claims_supported", [])
 
         if not name:
@@ -891,10 +891,10 @@ class Handler(BaseHTTPRequestHandler):
 
         Body: {name, store_path, units?, description?}
         """
-        name = body.get("name", "").strip()
-        store_path = body.get("store_path", "").strip()
-        units = body.get("units", "").strip() or None
-        description = body.get("description", "").strip() or None
+        name = (body.get("name") or "").strip()
+        store_path = (body.get("store_path") or "").strip()
+        units = (body.get("units") or "").strip() or None
+        description = (body.get("description") or "").strip() or None
 
         if not all([name, store_path]):
             return self._json({"error": "name and store_path are required"}, 400)
@@ -931,8 +931,8 @@ class Handler(BaseHTTPRequestHandler):
 
         Body: {name, type, observables, config?}
         """
-        name = body.get("name", "").strip()
-        viz_type = body.get("type", "").strip()
+        name = (body.get("name") or "").strip()
+        viz_type = (body.get("type") or "").strip()
         obs_list = body.get("observables", [])
         config = body.get("config") or {}
 
