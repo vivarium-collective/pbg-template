@@ -97,6 +97,12 @@
 <!-- ===== WORKSPACE INPUTS ===== -->
 <h2 class="section-header">Workspace inputs</h2>
 <p class="section-lead">Inputs the model builds on. Add and refresh anytime &mdash; there&rsquo;s no canonical &ldquo;completed&rdquo; state.</p>
+<p class="stage-explainer">
+  Inputs you add via the panels below land on feature branches first
+  (no immediate write to <code>main</code>). They show with a
+  <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span> badge until
+  you merge or open a PR &mdash; see the <strong>Branch timeline</strong> panel.
+</p>
 
 <!-- Imports panel -->
 <div class="panel">
@@ -109,7 +115,7 @@
   {% endfor %}
   {% for p in (pending.imports or []) %}
   <tr>
-    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td>{{ p.entry.mode or '' }}</td>
     <td><code>{{ p.entry.source or '' }}</code></td>
   </tr>
@@ -120,7 +126,7 @@
   <table><thead><tr><th>Name</th><th>Mode</th><th>Source</th></tr></thead><tbody>
   {% for p in pending.imports %}
   <tr>
-    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td>{{ p.entry.mode or '' }}</td>
     <td><code>{{ p.entry.source or '' }}</code></td>
   </tr>
@@ -147,7 +153,7 @@
   {% endfor %}
   {% for p in (pending.datasets or []) %}
   <tr>
-    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td><code>{{ p.entry.path or p.entry.url or '' }}</code></td>
     <td>{{ (p.entry.claims or [])|join(', ') }}</td>
   </tr>
@@ -158,7 +164,7 @@
   <table><thead><tr><th>Name</th><th>Source</th><th>Claims</th></tr></thead><tbody>
   {% for p in pending.datasets %}
   <tr>
-    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.name }}</code> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td><code>{{ p.entry.path or p.entry.url or '' }}</code></td>
     <td>{{ (p.entry.claims or [])|join(', ') }}</td>
   </tr>
@@ -186,7 +192,7 @@
   {% endfor %}
   {% for p in (pending.references_pdfs or []) %}
   <tr>
-    <td><code>{{ p.entry.bib_key }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.bib_key }}</code> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td>{{ p.entry.path or '' }}</td>
     <td><code>{{ (p.entry.sha256 or '')[:8] }}&hellip;</code></td>
   </tr>
@@ -196,7 +202,7 @@
   <table style="font-size:0.86em;margin-bottom:10px"><thead><tr><th>Bib key</th><th>Path</th><th>SHA256 (trunc)</th></tr></thead><tbody>
   {% for p in pending.references_pdfs %}
   <tr>
-    <td><code>{{ p.entry.bib_key }}</code> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><code>{{ p.entry.bib_key }}</code> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td>{{ p.entry.path or '' }}</td>
     <td><code>{{ (p.entry.sha256 or '')[:8] }}&hellip;</code></td>
   </tr>
@@ -223,7 +229,7 @@
   {% endfor %}
   {% for p in (pending.expert_docs or []) %}
   <tr>
-    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td>{{ p.entry.path or '' }}</td>
     <td>{{ p.entry.description or '' }}</td>
     <td>{{ p.entry.contributor or '' }}</td>
@@ -235,7 +241,7 @@
   <table><thead><tr><th>Name</th><th>File</th><th>Description</th></tr></thead><tbody>
   {% for p in pending.expert_docs %}
   <tr>
-    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td>{{ p.entry.path or '' }}</td>
     <td>{{ p.entry.description or '' }}</td>
   </tr>
@@ -267,7 +273,7 @@
   {% endfor %}
   {% for p in (pending.observables or []) %}
   <tr>
-    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td><code>{{ p.entry.store_path }}</code></td>
     <td>{{ p.entry.units or '' }}</td>
     <td>{{ p.entry.description or '' }}</td>
@@ -279,7 +285,7 @@
   <table><thead><tr><th>Name</th><th>Store path</th><th>Units</th></tr></thead><tbody>
   {% for p in pending.observables %}
   <tr>
-    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td><code>{{ p.entry.store_path }}</code></td>
     <td>{{ p.entry.units or '' }}</td>
   </tr>
@@ -296,30 +302,33 @@
   <h2>Visualizations</h2>
   <p class="stage-explainer">Charts that render observable trajectories. Define them now; they will be populated when you run the model.</p>
   {% if visualizations %}
-  <table><thead><tr><th>Name</th><th>Type</th><th>Observables</th></tr></thead><tbody>
+  <table><thead><tr><th>Name</th><th>Type</th><th>Observables</th><th>Phases</th></tr></thead><tbody>
   {% for viz in visualizations %}
   <tr>
     <td><strong>{{ viz.name }}</strong></td>
     <td><code>{{ viz.type }}</code></td>
     <td>{{ viz.observables | join(', ') }}</td>
+    <td>{% if viz.phases %}{{ viz.phases | join(', ') }}{% else %}<em>all</em>{% endif %}</td>
   </tr>
   {% endfor %}
   {% for p in (pending.visualizations or []) %}
   <tr>
-    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td><code>{{ p.entry.type }}</code></td>
     <td>{{ (p.entry.observables or []) | join(', ') }}</td>
+    <td>{% if p.entry.phases %}{{ p.entry.phases | join(', ') }}{% else %}<em>all</em>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody></table>
   {% elif pending.visualizations %}
   <p style="color:#888;font-style:italic">No visualizations on main yet.</p>
-  <table><thead><tr><th>Name</th><th>Type</th><th>Observables</th></tr></thead><tbody>
+  <table><thead><tr><th>Name</th><th>Type</th><th>Observables</th><th>Phases</th></tr></thead><tbody>
   {% for p in pending.visualizations %}
   <tr>
-    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
+    <td><strong>{{ p.entry.name }}</strong> <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span><br><small style="color:#888">branch: {{ p.branch }}</small></td>
     <td><code>{{ p.entry.type }}</code></td>
     <td>{{ (p.entry.observables or []) | join(', ') }}</td>
+    <td>{% if p.entry.phases %}{{ p.entry.phases | join(', ') }}{% else %}<em>all</em>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody></table>
@@ -335,27 +344,25 @@
 
 <div class="panel">
   <h2>Phase tracker</h2>
-  {% if phases %}
-  <div class="tracker">
-  {% for p in phases %}
-  <div class="pill {{ p.status }}">
-    <strong>{{ p.n }} &middot; {{ p.name }}</strong><br>{{ p.status }}
-    {% if p.source_artifact %}
-    <span class="source-artifact-tag">based on: {{ p.source_artifact.kind }} &lsquo;{{ p.source_artifact.ref }}&rsquo;</span>
-    {% endif %}
-    {% if p.status == 'planned' %}
-    <br><button class="pill-btn" onclick="phaseStart({{ p.n }})">Start</button>
-    {% elif p.status in ('in_progress', 'gate_pending') %}
-    <br><button class="pill-btn" onclick="phaseGate({{ p.n }})">Evaluate gate</button>
-    {% elif p.status == 'complete' %}
-    <br><button class="pill-btn" onclick="phaseGate({{ p.n }})">Re-evaluate</button>
-    {% endif %}
+  {% if current_phase %}
+  <div class="current-phase-banner">
+    <strong>Currently on Phase {{ current_phase.n }}: {{ current_phase.name }}</strong>
+    <span class="status-pill {{ current_phase.status }}">{{ current_phase.status }}</span>
   </div>
+  {% endif %}
+  {% if phases %}
+  <div class="phase-tracker">
+  {% for p in phases %}
+  <a class="pill {{ p.status }}{% if current_phase and p.n == current_phase.n %} current{% endif %}"
+     href="#phase-{{ p.n }}">
+    <strong>{{ p.n }} &middot; {{ p.name }}</strong><br>
+    <small>{{ p.status }}</small>
+  </a>
   {% endfor %}
   {% for p in (pending.phases or []) %}
   <div class="pill planned">
     <strong>{{ p.entry.n }} &middot; {{ p.entry.name }}</strong>
-    <span class="pending-review-badge">pending review</span>
+    <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span>
     <br><small style="color:#888">branch: {{ p.branch }}</small>
   </div>
   {% endfor %}
@@ -363,11 +370,11 @@
   {% else %}
   {% if pending.phases %}
   <p style="color:#888;font-style:italic">No phases on main yet.</p>
-  <div class="tracker">
+  <div class="phase-tracker">
   {% for p in pending.phases %}
   <div class="pill planned">
     <strong>{{ p.entry.n }} &middot; {{ p.entry.name }}</strong>
-    <span class="pending-review-badge">pending review</span>
+    <span class="pending-review-badge" title="Lives on a feature branch — click 'Branch timeline' below to merge or open a PR">pending review</span>
     <br><small style="color:#888">branch: {{ p.branch }}</small>
   </div>
   {% endfor %}
@@ -382,26 +389,82 @@
   {% endif %}
 </div>
 
-<!-- Per-phase detail for completed phases -->
-{% for p in phases if p.status == 'complete' %}
-<div class="panel">
-  <h3>Phase {{ p.n }} &middot; {{ p.name }} &mdash; complete</h3>
-  {% if p.source_artifact %}
-  <p class="source-artifact-tag">Source: {{ p.source_artifact.kind }} &lsquo;{{ p.source_artifact.ref }}&rsquo;</p>
+<!-- ===== PHASE DETAILS ===== -->
+<h2 class="section-header">Phase details</h2>
+<p class="section-lead">Click a pill above to navigate to a phase. Each phase shows its full description, applicable visualizations, and acceptance status.</p>
+
+{% for pd in phase_details %}
+<div class="panel phase-detail" id="phase-{{ pd.n }}">
+  <h3>Phase {{ pd.n }}: {{ pd.frontmatter.name }}
+    <span class="status-pill {{ pd.frontmatter.status }}">{{ pd.frontmatter.status }}</span>
+  </h3>
+
+  {% if pd.frontmatter.source_artifact %}
+  <p class="source-artifact">Based on
+    <strong>{{ pd.frontmatter.source_artifact.kind }}</strong>:
+    <code>{{ pd.frontmatter.source_artifact.ref }}</code>
+  </p>
   {% endif %}
-  {% if p.deliverables and p.deliverables.plots %}
-  {% for plot in p.deliverables.plots %}
-  <img src="../phases/{{ plot }}" alt="">
-  {% endfor %}
+
+  <details {% if pd.frontmatter.status == 'in_progress' %}open{% endif %}>
+    <summary><strong>Body</strong> &mdash; objective, expected behavior, gate</summary>
+    <div class="phase-body markdown-body">{{ pd.body | safe }}</div>
+  </details>
+
+  <div class="phase-detail-section">
+    <strong>Applicable visualizations</strong>
+    {% set applicable_viz = visualizations | selectattr('phases', 'defined') | list %}
+    {% set global_viz = [] %}
+    {% for v in visualizations %}
+      {% if not v.phases or v.phases | length == 0 %}
+        {% set _ = global_viz.append(v) %}
+      {% endif %}
+    {% endfor %}
+    {% set phase_viz = [] %}
+    {% for v in applicable_viz %}
+      {% if pd.n in v.phases %}
+        {% set _ = phase_viz.append(v) %}
+      {% endif %}
+    {% endfor %}
+    {% set show_viz = phase_viz + global_viz %}
+    {% if show_viz %}
+    <ul>
+      {% for v in show_viz %}
+      <li><code>{{ v.name }}</code> ({{ v.type }}) &mdash; observables: {{ v.observables | join(', ') }}
+        {% if not v.phases or v.phases | length == 0 %}<em>(global)</em>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p style="color:#888;font-style:italic">No visualizations apply to this phase yet.</p>
+    {% endif %}
+  </div>
+
+  {% if pd.frontmatter.acceptance_tests %}
+  <div class="phase-detail-section">
+    <strong>Acceptance tests</strong>
+    <table>
+      <thead><tr><th>ID</th><th>Description</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for t in pd.frontmatter.acceptance_tests %}
+      <tr>
+        <td><code>{{ t.id }}</code></td>
+        <td>{{ t.desc }}</td>
+        <td><span class="status-pill {{ t.status }}">{{ t.status }}</span></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% endif %}
-  {% if p.acceptance_tests %}
-  <h4>Acceptance tests</h4>
-  <table><thead><tr><th>ID</th><th>Description</th><th>Status</th></tr></thead><tbody>
-  {% for t in p.acceptance_tests %}
-  <tr><td><code>{{ t.id }}</code></td><td>{{ t.desc }}</td><td>{{ t.status }}</td></tr>
-  {% endfor %}
-  </tbody></table>
-  {% endif %}
+
+  <div class="phase-detail-actions">
+    {% if pd.frontmatter.status == 'planned' %}
+    <button class="action-btn" onclick="_postPhaseAction('phase-start', {n: {{ pd.n }} })">Start phase</button>
+    {% elif pd.frontmatter.status in ['in_progress', 'gate_pending'] %}
+    <button class="action-btn" onclick="_postPhaseAction('phase-gate', {n: {{ pd.n }} })">Evaluate gate</button>
+    {% endif %}
+  </div>
 </div>
 {% endfor %}
 
@@ -652,6 +715,16 @@ document.getElementById('pbg-tree').innerHTML = window.renderJsonTree ? window.r
       </label>
       <label>Observables * <small>(comma-separated observable names)</small><input name="viz_observables" placeholder="DnaA, cell_mass" required></label>
       <label>Y-axis label (optional, for time-series)<input name="y_label" placeholder="DnaA (molecules)"></label>
+      <fieldset style="border:1px solid #ddd;border-radius:4px;padding:10px;margin-bottom:12px">
+        <legend style="font-size:0.88em;font-weight:600">Applies to phases (leave all unchecked = applies globally)</legend>
+        {% for p in phases %}
+        <label style="display:inline-block; margin-right:12px; font-weight:normal">
+          <input type="checkbox" name="phases" value="{{ p.n }}">
+          Phase {{ p.n }}: {{ p.name }}
+        </label>
+        {% endfor %}
+        {% if not phases %}<em style="color:#888;font-size:0.88em">No phases registered yet &mdash; visualization will apply globally.</em>{% endif %}
+      </fieldset>
       <div class="form-error"></div>
       <button type="submit">Add visualization</button>
     </form>
@@ -821,6 +894,9 @@ function _submitVisualization(form) {
     };
     var yLabel = f.y_label.value.trim();
     if (yLabel) data.config = { y_label: yLabel };
+    var phasesChecked = Array.from(form.querySelectorAll('input[name=phases]:checked'))
+                              .map(function(el){ return parseInt(el.value, 10); });
+    data.phases = phasesChecked;
     return data;
   });
 }

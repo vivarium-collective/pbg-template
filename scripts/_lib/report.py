@@ -199,6 +199,39 @@ def _read_phases(ws_root: Path) -> list[dict]:
     return phases
 
 
+def _current_phase(phases: list[dict]) -> dict | None:
+    """Pick the 'current' phase: first in_progress, else first non-complete, else last."""
+    if not phases:
+        return None
+    for p in phases:
+        if p.get("status") == "in_progress":
+            return p
+    for p in phases:
+        if p.get("status") != "complete":
+            return p
+    return phases[-1]  # all complete
+
+
+def _phase_details(ws_root: Path) -> list[dict]:
+    """For each phase entry, parse phases/phase-<n>.md to extract body sections."""
+    from .phase_md import parse_phase_md
+    out = []
+    phases_dir = ws_root / "phases"
+    if not phases_dir.is_dir():
+        return out
+    for f in sorted(phases_dir.glob("phase-*.md")):
+        try:
+            fm, body = parse_phase_md(f.read_text())
+        except Exception:
+            continue
+        out.append({
+            "frontmatter": fm,
+            "body": body,
+            "n": fm.get("phase", fm.get("n")),
+        })
+    return out
+
+
 def _count_bib_entries(ws_root: Path) -> int:
     """Count @-entries in references/papers.bib."""
     bib_file = ws_root / "references" / "papers.bib"
@@ -339,6 +372,9 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     except Exception:
         pending = {}
 
+    current_phase = _current_phase(phases)
+    phase_details = _phase_details(ws_root)
+
     out.write_text(tpl.render(
         workspace_name=ws["name"],
         generated_at=today,
@@ -352,6 +388,8 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         observables=observables,
         visualizations=visualizations,
         phases=phases,
+        current_phase=current_phase,
+        phase_details=phase_details,
         package_path=package_path,
         registry=registry,
         registry_warning=registry_warning,

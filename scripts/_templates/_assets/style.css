@@ -46,6 +46,35 @@ img{max-width:100%}
   display:inline-block;font-size:0.7em;background:#fef3c7;color:#a86b00;
   padding:2px 8px;border-radius:10px;margin-left:8px;
 }
+.pending-review-badge[title]{cursor:help}
+.phase-tracker a.pill{
+  text-decoration:none; color:inherit; cursor:pointer; display:block;
+  transition:transform 0.1s, box-shadow 0.1s;
+}
+.phase-tracker a.pill:hover{
+  transform:translateY(-2px); box-shadow:0 4px 8px rgba(0,0,0,0.08);
+}
+.phase-tracker a.pill.current{
+  border:2px solid #f5b042; box-shadow:0 0 0 2px rgba(245,176,66,0.2);
+}
+.current-phase-banner{
+  background:#fff7e6; border-left:4px solid #f5b042;
+  padding:12px 16px; border-radius:4px; margin-bottom:12px;
+  display:flex; gap:12px; align-items:center;
+}
+.status-pill{
+  font-size:0.78em; padding:2px 10px; border-radius:10px;
+}
+.status-pill.complete{background:#d1fae5; color:#065f46}
+.status-pill.in_progress{background:#fef3c7; color:#92400e}
+.status-pill.gate_pending{background:#fee2e2; color:#991b1b}
+.status-pill.planned{background:#e5e7eb; color:#4b5563}
+.phase-detail{ scroll-margin-top:20px }
+.phase-detail h3{ display:flex; gap:12px; align-items:center }
+.phase-detail-section{ margin:14px 0 }
+.phase-detail-actions{ margin-top:16px; display:flex; gap:8px }
+.source-artifact{ background:#f3f4f6; padding:8px 12px; border-radius:4px;
+                  font-size:0.92em; margin:0 0 12px }
 .stage-track{display:flex;gap:4px;margin:8px 0;flex-wrap:wrap}
 .stage-track .step{flex:1;min-width:90px;padding:8px;border-radius:4px;font-size:0.78em;text-align:center}
 .stage-track .step.done{background:#d1fae5}

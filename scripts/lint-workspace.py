@@ -124,6 +124,7 @@ def main() -> None:
     phase_validator = Draft7Validator(_schema("phase.schema.json"))
     fm_re = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
     phases_dir = WS_ROOT / "phases"
+    registered_phase_ns: set = set()
     if phases_dir.is_dir():
         for f in sorted(phases_dir.glob("phase-*.md")):
             text = f.read_text().replace("\r\n", "\n")
@@ -133,8 +134,26 @@ def main() -> None:
             try:
                 fm = yaml.safe_load(mo.group(1)) or {}
                 phase_validator.validate(fm)
+                n = fm.get("phase", fm.get("n"))
+                if n is not None:
+                    registered_phase_ns.add(int(n))
             except (ValidationError, yaml.YAMLError) as e:
                 _fail(f"{f} invalid frontmatter: {e}")
+
+    # Also collect phase numbers from workspace.yaml phases list (in case no phase-*.md files).
+    for phase_entry in ws.get("phases", []) or []:
+        if isinstance(phase_entry, dict) and phase_entry.get("n") is not None:
+            registered_phase_ns.add(int(phase_entry["n"]))
+
+    # Visualization phase references: each phases[*] must reference a registered phase.
+    for viz in ws.get("visualizations", []) or []:
+        if not isinstance(viz, dict):
+            continue
+        viz_phases = viz.get("phases") or []
+        viz_name = viz.get("name", "?")
+        for n in viz_phases:
+            if int(n) not in registered_phase_ns:
+                _fail(f"visualization '{viz_name}' references missing phase {n}")
 
     print("workspace lint: OK")
 

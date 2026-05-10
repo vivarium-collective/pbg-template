@@ -109,6 +109,7 @@
         "name": {"type": "string", "minLength": 1},
         "type": {"enum": ["time-series", "phase-space", "heatmap", "histogram"]},
         "observables": {"type": "array", "items": {"type": "string"}},
+        "phases": {"type": "array", "items": {"type": "integer", "minimum": 1}},
         "config": {"type": "object"}
       }
     },

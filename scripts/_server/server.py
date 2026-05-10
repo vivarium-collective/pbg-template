@@ -274,6 +274,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_guidance()
         if self.path.startswith("/api/branches"):
             return self._serve_branches()
+        if self.path.startswith("/api/branch-diff"):
+            return self._get_branch_diff()
         if self.path.startswith("/api/pending"):
             return self._serve_pending()
         rel = self.path.lstrip("/")
@@ -929,12 +931,15 @@ class Handler(BaseHTTPRequestHandler):
     def _post_visualization(self, body: dict):
         """Register a visualization in workspace.yaml (v0.3.0: top-level, no model).
 
-        Body: {name, type, observables, config?}
+        Body: {name, type, observables, config?, phases?}
+        phases is an optional list of phase numbers this visualization applies to.
+        Empty/missing = applies globally (all phases).
         """
         name = (body.get("name") or "").strip()
         viz_type = (body.get("type") or "").strip()
         obs_list = body.get("observables", [])
         config = body.get("config") or {}
+        phases_raw = body.get("phases", [])
 
         if not all([name, viz_type]):
             return self._json({"error": "name and type are required"}, 400)
@@ -942,6 +947,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "type must be one of: time-series, phase-space, heatmap, histogram"}, 400)
         if not isinstance(obs_list, list) or not obs_list:
             return self._json({"error": "observables must be a non-empty list"}, 400)
+        if not isinstance(phases_raw, list):
+            return self._json({"error": "phases must be a list of integers"}, 400)
+        try:
+            phases_list = [int(p) for p in phases_raw]
+        except (TypeError, ValueError):
+            return self._json({"error": "phases must be a list of integers"}, 400)
 
         import time as _time
         epoch = int(_time.time())
@@ -965,6 +976,20 @@ class Handler(BaseHTTPRequestHandler):
                     f"observables not registered: {missing}. "
                     "Register them first via /api/observable."
                 )
+
+            # Validate phase references if phases provided.
+            if phases_list:
+                registered_phases = {
+                    p.get("n") for p in (ws.get("phases") or [])
+                    if isinstance(p, dict)
+                }
+                missing_phases = [n for n in phases_list if n not in registered_phases]
+                if missing_phases:
+                    raise ValueError(
+                        f"phases not registered: {missing_phases}. "
+                        "Register them first via /api/phase-plan."
+                    )
+
             visualizations = ws.setdefault("visualizations", [])
             if visualizations is None:
                 visualizations = []
@@ -975,6 +1000,8 @@ class Handler(BaseHTTPRequestHandler):
             entry: dict = {"name": name, "type": viz_type, "observables": list(obs_list)}
             if config:
                 entry["config"] = config
+            if phases_list:
+                entry["phases"] = phases_list
             visualizations.append(entry)
             save_workspace(ws_file, ws)
 
@@ -1070,6 +1097,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_pending_entries(), 200)
         except Exception as e:
             return self._json({"error": str(e)}, 500)
+
+    def _get_branch_diff(self):
+        """Return a short diff summary for ?branch=<name>."""
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        branch = (qs.get("branch") or [""])[0]
+        if not branch or not re.match(r"^[A-Za-z0-9./_-]+$", branch) or ".." in branch:
+            return self._json({"error": "invalid branch name"}, 400)
+        log = subprocess.run(
+            ["git", "log", "--oneline", f"main..{branch}"],
+            cwd=WORKSPACE, capture_output=True, text=True, check=False,
+        )
+        diff_stat = subprocess.run(
+            ["git", "diff", "--stat", f"main...{branch}"],
+            cwd=WORKSPACE, capture_output=True, text=True, check=False,
+        )
+        return self._json({
+            "branch": branch,
+            "log": log.stdout,
+            "diff_stat": diff_stat.stdout,
+        }, 200)
 
     def _serve_file(self, path: Path, mime: str):
         if not path.exists() or not path.is_file():

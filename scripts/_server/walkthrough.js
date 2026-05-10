@@ -106,6 +106,41 @@
   // Branch timeline
   // -------------------------------------------------------------------------
 
+  function _showBranchDiff(branch, rowEl) {
+    var detailId = "branch-diff-" + branch.replace(/[^a-zA-Z0-9]/g, "_");
+    var existing = document.getElementById(detailId);
+    if (existing) {
+      existing.style.display = existing.style.display === "none" ? "" : "none";
+      return;
+    }
+    fetch("/api/branch-diff?branch=" + encodeURIComponent(branch))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var details = document.createElement("tr");
+        details.id = detailId;
+        var content = "";
+        if (data.error) {
+          content = "<em style='color:#c00'>Error: " + _esc(data.error) + "</em>";
+        } else {
+          content = "<details open><summary><strong>diff</strong></summary><pre style='font-size:0.8em;background:#f8f8f8;padding:8px;border-radius:4px;overflow-x:auto'>" +
+            _esc((data.log || "(no commits)") + (data.diff_stat ? "\n---\n" + data.diff_stat : "")) +
+            "</pre></details>";
+        }
+        details.innerHTML = "<td colspan='6' style='padding:8px 12px'>" + content + "</td>";
+        if (rowEl && rowEl.parentNode) {
+          rowEl.parentNode.insertBefore(details, rowEl.nextSibling);
+        }
+      })
+      .catch(function(err) {
+        var details = document.createElement("tr");
+        details.id = detailId;
+        details.innerHTML = "<td colspan='6' style='color:#c00'>Network error: " + _esc(String(err)) + "</td>";
+        if (rowEl && rowEl.parentNode) {
+          rowEl.parentNode.insertBefore(details, rowEl.nextSibling);
+        }
+      });
+  }
+
   function loadBranches() {
     var container = document.getElementById("branch-timeline-body");
     if (!container) return;
@@ -117,25 +152,85 @@
           container.innerHTML = "<p style='color:#888;font-style:italic'>No stage/* branches yet. Each browser action creates one.</p>";
           return;
         }
-        var rows = branches.map(function (b) {
+        var table = document.createElement("table");
+        table.innerHTML = "<thead><tr><th>Branch</th><th>SHA</th><th>Subject</th><th>Date</th><th>Ahead</th><th>Actions</th></tr></thead><tbody></tbody>";
+        var tbody = table.querySelector("tbody");
+        branches.forEach(function(b) {
           var sha = (b.last_commit && b.last_commit.sha) ? b.last_commit.sha : "?";
           var subject = (b.last_commit && b.last_commit.subject) ? b.last_commit.subject : "";
           var date = (b.last_commit && b.last_commit.date) ? b.last_commit.date.slice(0, 10) : "";
           var ahead = b.ahead_of_main || 0;
-          return "<tr>" +
+          var tr = document.createElement("tr");
+          tr.innerHTML =
             "<td><code>" + _esc(b.name) + "</code></td>" +
             "<td><code>" + _esc(sha) + "</code></td>" +
             "<td>" + _esc(subject) + "</td>" +
             "<td>" + _esc(date) + "</td>" +
             "<td><span style='background:#e8f5e9;color:#2e7d32;border-radius:3px;padding:1px 6px;font-size:0.82em'>+" + ahead + "</span></td>" +
-            "</tr>";
-        }).join("");
-        container.innerHTML = "<table><thead><tr><th>Branch</th><th>SHA</th><th>Subject</th><th>Date</th><th>Ahead</th></tr></thead><tbody>" + rows + "</tbody></table>";
+            "<td></td>";
+          var actCell = tr.querySelector("td:last-child");
+          // Copy gh pr create button
+          var btnPR = document.createElement("button");
+          btnPR.className = "pill-btn";
+          btnPR.textContent = "Copy gh pr create";
+          btnPR.title = "Copy: gh pr create --base main --head " + b.name;
+          btnPR.onclick = function() {
+            navigator.clipboard.writeText("gh pr create --base main --head " + b.name).then(function() {
+              btnPR.textContent = "Copied!";
+              setTimeout(function() { btnPR.textContent = "Copy gh pr create"; }, 1500);
+            });
+          };
+          actCell.appendChild(btnPR);
+          // Copy git merge button
+          var btnMerge = document.createElement("button");
+          btnMerge.className = "pill-btn";
+          btnMerge.textContent = "Copy git merge";
+          btnMerge.title = "Copy: git merge " + b.name;
+          btnMerge.onclick = function() {
+            navigator.clipboard.writeText("git merge " + b.name).then(function() {
+              btnMerge.textContent = "Copied!";
+              setTimeout(function() { btnMerge.textContent = "Copy git merge"; }, 1500);
+            });
+          };
+          actCell.appendChild(btnMerge);
+          // Show diff button
+          var btnDiff = document.createElement("button");
+          btnDiff.className = "pill-btn";
+          btnDiff.textContent = "Show diff";
+          btnDiff.onclick = function() { _showBranchDiff(b.name, tr); };
+          actCell.appendChild(btnDiff);
+          tbody.appendChild(tr);
+        });
+        container.innerHTML = "";
+        container.appendChild(table);
       })
       .catch(function () {
         if (container) container.innerHTML = "<p style='color:#c00'>Could not load branches (server not running?).</p>";
       });
   }
+
+  function _postPhaseAction(endpoint, data) {
+    fetch("/api/" + endpoint, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(data),
+    })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], json = parts[1];
+        if (!ok) {
+          alert("Error: " + (json.error || "unknown"));
+          return;
+        }
+        var msg = "Done! Branch: " + (json.branch || "?");
+        fetch("/api/render", {method: "POST"}).finally(function() {
+          alert(msg);
+          location.reload();
+        });
+      })
+      .catch(function(err) { alert("Network error: " + err); });
+  }
+  window._postPhaseAction = _postPhaseAction;
 
   // -------------------------------------------------------------------------
   // Run tests
@@ -275,6 +370,7 @@
   window.runTests = runTests;
   window.setupDropZone = setupDropZone;
   window._dropZoneStore = _dropZoneStore;
+  window._showBranchDiff = _showBranchDiff;
 
   // -------------------------------------------------------------------------
   // Copy-command button (legacy walkthrough-panel support)
