@@ -166,3 +166,26 @@ img{max-width:100%}
 }
 .muted{ color:#6b7280 }
 .empty-state{ color:#888; font-style:italic }
+.module-grid{
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
+  gap:14px; margin:8px 0;
+}
+.module-card{
+  background:#fff; border:1px solid #e5e7eb; border-radius:8px;
+  padding:14px 16px; display:flex; flex-direction:column; gap:8px;
+}
+.module-card-header{
+  display:flex; justify-content:space-between; align-items:center;
+}
+.module-card-header strong{ font-size:1.05em }
+.module-link{
+  font-size:0.85em; color:#1e40af; text-decoration:none;
+}
+.module-link:hover{ text-decoration:underline }
+.module-desc{ color:#4b5563; font-size:0.9em; margin:0; line-height:1.4 }
+.module-tags{ display:flex; gap:4px; flex-wrap:wrap }
+.tag-pill{
+  background:#eff6ff; color:#1e40af; padding:2px 8px;
+  border-radius:999px; font-size:0.78em;
+}
+.module-action{ margin-top:auto }

@@ -1,4 +1,4 @@
-// walkthrough.js — v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport (pip-install button); v0.3.6: Registry tab, simulation processes picker; v0.1.9: drag-drop uploads + sha256; v0.1.7: interactive forms.
+// walkthrough.js — v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
 (function () {
   "use strict";
 
@@ -245,10 +245,13 @@
     var link = document.querySelector('.menu-link[data-page="' + pageId + '"]');
     if (page) page.classList.add('active');
     if (link) link.classList.add('active');
-    // Lazy-load registry on first switch to Registry page.
-    if (pageId === 'registry' && !window._registryLoaded) {
-      window._registryLoaded = true;
-      _loadRegistry(false);
+    // Lazy-load catalog + registry on switch to Registry page.
+    if (pageId === 'registry') {
+      _loadCatalog();
+      if (!window._registryLoaded) {
+        window._registryLoaded = true;
+        _loadRegistry(false);
+      }
     }
   }
 
@@ -342,6 +345,73 @@
   }
 
   window._loadRegistry = _loadRegistry;
+
+  // -------------------------------------------------------------------------
+  // Catalog browser (v0.4.1)
+  // -------------------------------------------------------------------------
+
+  function _loadCatalog() {
+    fetch('/api/catalog')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var grid = document.getElementById('catalog-modules-grid');
+        if (!grid) return;
+        if (!data.modules || data.modules.length === 0) {
+          grid.innerHTML = '<p class="empty-state">Catalog empty.</p>';
+          return;
+        }
+        var cards = data.modules.map(function(m) {
+          var actionBtn = m.installed
+            ? '<span class="status-pill installed">installed</span>'
+            : '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
+          var tags = (m.tags || []).map(function(t) {
+            return '<span class="tag-pill">' + _esc(t) + '</span>';
+          }).join(' ');
+          var homepage = m.homepage
+            ? '<a href="' + _esc(m.homepage) + '" target="_blank" class="module-link">GitHub &#8599;</a>'
+            : '';
+          return '<div class="module-card">' +
+            '<div class="module-card-header"><strong>' + _esc(m.name) + '</strong> ' + homepage + '</div>' +
+            '<p class="module-desc">' + _esc(m.description) + '</p>' +
+            '<div class="module-tags">' + tags + '</div>' +
+            '<div class="module-action">' + actionBtn + '</div>' +
+            '</div>';
+        });
+        grid.innerHTML = cards.join('');
+      })
+      .catch(function(err) {
+        var grid = document.getElementById('catalog-modules-grid');
+        if (grid) grid.innerHTML = '<p class="empty-state" style="color:#c00">Catalog load failed: ' + _esc(String(err)) + '</p>';
+      });
+  }
+  window._loadCatalog = _loadCatalog;
+
+  function _installFromCatalog(name) {
+    if (!confirm("Install '" + name + "' as a workstream commit?\n\nThis adds a submodule, pip installs the package, and appends it to pyproject.toml. Requires an active workstream.")) return;
+    fetch('/api/catalog-install', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], json = parts[1];
+        if (!ok) {
+          alert("Install failed:\n" + (json.error || 'unknown') + "\n\n" + (json.log || ''));
+          return;
+        }
+        var msg = "Installed " + name + ".\nCommit: " + (json.commit || 'n/a');
+        alert(msg);
+        window._registryLoaded = false;  // force registry reload on next switch
+        fetch('/api/render', {method: 'POST'}).finally(function() {
+          location.reload();
+        });
+      })
+      .catch(function(err) {
+        alert("Network error: " + String(err));
+      });
+  }
+  window._installFromCatalog = _installFromCatalog;
 
   // -------------------------------------------------------------------------
   // Simulation CRUD (v0.3.5)

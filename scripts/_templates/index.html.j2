@@ -119,34 +119,7 @@
 <!-- ===== PAGE: WORKSPACE INPUTS ===== -->
 <section id="page-workspace-inputs" class="page" data-page="workspace-inputs">
   <h2 class="page-title">Workspace inputs</h2>
-  <p class="page-lead">External resources you bring into the workspace. Imports give you reference models, datasets feed validation, references and expert docs anchor the science.</p>
-
-  <!-- Imports panel -->
-  <div class="panel">
-    <h3>Imports</h3>
-    <p class="panel-lead">Register external models you want to reference, fork from, or operate against in-place. Optional &mdash; skip if your project starts from scratch.</p>
-    {% if imports %}
-    <table><thead><tr><th>Name</th><th>Mode</th><th>Source</th><th>Status</th></tr></thead><tbody>
-    {% for name, imp in imports.items() %}
-    <tr>
-      <td><code>{{ name }}</code></td>
-      <td>{{ imp.mode }}</td>
-      <td><code>{{ imp.source }}</code> @ <code>{{ imp.ref }}</code></td>
-      <td>
-        {% if imp.installed %}
-          <span class="status-pill installed">installed</span>
-        {% else %}
-          <button class="action-btn-small" onclick="_installImport('{{ name }}')">Install</button>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody></table>
-    {% else %}
-    <p style="color:#888;font-style:italic">No imports registered yet.</p>
-    {% endif %}
-    <button class="action-btn" onclick="openModal('modal-import')">+ Add import</button>
-  </div>
+  <p class="page-lead">External resources you bring into the workspace. Datasets feed validation, references and expert docs anchor the science. Simulation modules (the Python packages providing Processes/Steps) live in the <a href="#registry">Registry</a> tab.</p>
 
   <!-- Datasets panel -->
   <div class="panel">
@@ -329,26 +302,60 @@
 <!-- ===== PAGE: REGISTRY ===== -->
 <section id="page-registry" class="page" data-page="registry">
   <h2 class="page-title">Registry</h2>
-  <p class="page-lead">Live snapshot of <code>build_core()</code> for this workspace &mdash; every process and type currently registered. This is what your simulations have access to. Use the refresh button after changing core code.</p>
+  <p class="page-lead">Simulation modules: browse the catalog, install pbg-* packages, see what processes and types they contribute. Installing a module adds it as a submodule under <code>external/</code>, pip-installs it into the workspace venv, and appends it to <code>pyproject.toml</code> dependencies.</p>
 
-  <aside class="registry-hint">
-    <strong>Note:</strong> Only pip-installed packages with <code>bigraph-schema</code> as a dependency
-    appear here. To make an import discoverable, click <strong>Install</strong> on its row in
-    <a href="#workspace-inputs">Workspace inputs &rarr; Imports</a>.
-  </aside>
-
-  <button class="action-btn" onclick="_loadRegistry(true)">Refresh registry</button>
-  <div id="registry-status" class="muted" style="margin:8px 0"></div>
-
+  <!-- Section 1: Available modules (catalog) -->
   <section class="panel">
-    <h3>Processes <span id="registry-process-count" class="count-badge"></span></h3>
-    <div id="registry-processes-container">
-      <p class="empty-state">Loading&hellip;</p>
+    <h3>Available modules</h3>
+    <p class="panel-lead">Curated catalog of pbg-* packages. Click Install to add one to this workspace.</p>
+    <div id="catalog-modules-grid" class="module-grid">
+      <p class="empty-state">Loading catalog&hellip;</p>
     </div>
   </section>
 
+  <!-- Section 2: Installed modules -->
   <section class="panel">
-    <h3>Types <span id="registry-type-count" class="count-badge"></span></h3>
+    <h3>Installed modules</h3>
+    <p class="panel-lead">Modules currently active in this workspace. Each contributes Processes/Steps and Types to <code>build_core()</code>.</p>
+    {% if imports %}
+    <table>
+      <thead><tr><th>Name</th><th>Source</th><th>Path</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for name, imp in imports.items() %}
+      <tr>
+        <td><code>{{ name }}</code></td>
+        <td><code>{{ imp.source }}</code> @ <code>{{ imp.ref }}</code></td>
+        <td><code>{{ imp.path }}</code></td>
+        <td>
+          {% if imp.installed %}
+            <span class="status-pill installed">installed</span>
+          {% else %}
+            <span class="status-pill not_installed">not installed</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">No modules installed yet. Pick one from Available modules above.</p>
+    {% endif %}
+  </section>
+
+  <!-- Section 3: Discovered (existing tables, lazy-loaded) -->
+  <section class="panel">
+    <h3>Discovered processes &amp; types</h3>
+    <p class="panel-lead">Live snapshot of <code>build_core()</code> &mdash; every Process and Type that <code>allocate_core()</code> registers via auto-discovery. Grouped by source module.</p>
+
+    <button class="action-btn" onclick="_loadRegistry(true)">Refresh registry</button>
+    <div id="registry-status" class="muted" style="margin:8px 0"></div>
+
+    <h4>Processes <span id="registry-process-count" class="count-badge"></span></h4>
+    <div id="registry-processes-container">
+      <p class="empty-state">Loading&hellip;</p>
+    </div>
+
+    <h4>Types <span id="registry-type-count" class="count-badge"></span></h4>
     <div id="registry-types-container">
       <p class="empty-state">Loading&hellip;</p>
     </div>
@@ -521,33 +528,6 @@
 <!-- ============================================================ -->
 <!-- MODALS -->
 <!-- ============================================================ -->
-
-<!-- Import modal -->
-<div id="modal-import" class="modal-overlay">
-  <div class="modal-box">
-    <button class="modal-close" onclick="closeModal('modal-import')">&times;</button>
-    <h3>Add import</h3>
-    <p style="font-size:0.85em;color:#555">
-      Registers the import in <code>workspace.yaml</code> on a new <code>stage/0.5-import-*</code> branch.
-      <strong>git submodule add</strong> is <em>not</em> performed here &mdash; run the terminal command shown after submit.
-    </p>
-    <form id="form-import" onsubmit="event.preventDefault(); submitForm(this, '/api/import')">
-      <label>Name *<input name="name" placeholder="e.g. v2ecoli" required></label>
-      <label>Source URL *<input name="source" placeholder="https://github.com/org/repo.git" required></label>
-      <label>Ref *<input name="ref" placeholder="main" required></label>
-      <label>Mode *
-        <select name="mode">
-          <option value="reference">reference (read-only under external/)</option>
-          <option value="fork-source">fork-source (catalog only)</option>
-          <option value="in-place">in-place (submodule under external/)</option>
-        </select>
-      </label>
-      <label>Description (optional)<input name="description" placeholder="Short description"></label>
-      <div class="form-error"></div>
-      <button type="submit">Register import</button>
-    </form>
-  </div>
-</div>
 
 <!-- Dataset modal -->
 <div id="modal-dataset" class="modal-overlay">

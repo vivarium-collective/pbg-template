@@ -1,8 +1,7 @@
 """Render reports/index.html for the workspace dashboard.
 
 v0.3.0: workspace IS the model. Single dashboard only — no per-model deep dives.
-  Adds _pending_entries() for pending-visibility: unmerged stage/* branches surface
-  their new entries in the dashboard with a "(pending review)" badge.
+v0.4.1: imports moved to Registry tab; _pending_entries() removed (dead code).
 
 Public API:
   render_workspace_report(ws_root=None, *, today=None) -> Path
@@ -242,92 +241,6 @@ def _count_bib_entries(ws_root: Path) -> int:
         return sum(1 for line in text.splitlines() if line.strip().startswith("@"))
     except Exception:
         return 0
-
-
-def _pending_entries(ws_root: Path) -> dict:
-    """Walk unmerged stage/* branches; diff against main's workspace.yaml.
-
-    Returns a dict keyed by panel name, each value a list of
-    {"entry": <dict>, "branch": <str>} objects for new-on-branch entries.
-    """
-    try:
-        main_text = subprocess.run(
-            ["git", "show", "main:workspace.yaml"],
-            cwd=ws_root, capture_output=True, text=True, check=True,
-        ).stdout
-        main_ws = yaml.safe_load(main_text) or {}
-    except Exception:
-        return {}
-
-    def _key_set(items, key):
-        return {item.get(key) for item in (items or []) if isinstance(item, dict)}
-
-    main_obs_names = _key_set(main_ws.get("observables"), "name")
-    main_viz_names = _key_set(main_ws.get("visualizations"), "name")
-    main_phase_ns = {p.get("n") for p in (main_ws.get("phases") or []) if isinstance(p, dict)}
-    main_ds_names = _key_set(main_ws.get("datasets"), "name")
-    main_pdf_keys = _key_set(main_ws.get("references_pdfs"), "bib_key")
-    main_edoc_names = _key_set(main_ws.get("expert_docs"), "name")
-    main_import_names = set((main_ws.get("imports") or {}).keys())
-
-    try:
-        raw = subprocess.run(
-            ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/stage/"],
-            cwd=ws_root, capture_output=True, text=True, check=True,
-        ).stdout
-        stage_branches = [b.strip() for b in raw.splitlines() if b.strip()]
-    except Exception:
-        return {}
-
-    pending: dict = {
-        "observables": [],
-        "visualizations": [],
-        "phases": [],
-        "datasets": [],
-        "references_pdfs": [],
-        "expert_docs": [],
-        "imports": [],
-    }
-
-    for branch in stage_branches:
-        try:
-            branch_text = subprocess.run(
-                ["git", "show", f"{branch}:workspace.yaml"],
-                cwd=ws_root, capture_output=True, text=True, check=True,
-            ).stdout
-            branch_ws = yaml.safe_load(branch_text) or {}
-        except Exception:
-            continue
-
-        for item in (branch_ws.get("observables") or []):
-            if isinstance(item, dict) and item.get("name") not in main_obs_names:
-                pending["observables"].append({"entry": item, "branch": branch})
-
-        for item in (branch_ws.get("visualizations") or []):
-            if isinstance(item, dict) and item.get("name") not in main_viz_names:
-                pending["visualizations"].append({"entry": item, "branch": branch})
-
-        for item in (branch_ws.get("phases") or []):
-            if isinstance(item, dict) and item.get("n") not in main_phase_ns:
-                pending["phases"].append({"entry": item, "branch": branch})
-
-        for item in (branch_ws.get("datasets") or []):
-            if isinstance(item, dict) and item.get("name") not in main_ds_names:
-                pending["datasets"].append({"entry": item, "branch": branch})
-
-        for item in (branch_ws.get("references_pdfs") or []):
-            if isinstance(item, dict) and item.get("bib_key") not in main_pdf_keys:
-                pending["references_pdfs"].append({"entry": item, "branch": branch})
-
-        for item in (branch_ws.get("expert_docs") or []):
-            if isinstance(item, dict) and item.get("name") not in main_edoc_names:
-                pending["expert_docs"].append({"entry": item, "branch": branch})
-
-        for imp_name, imp_val in (branch_ws.get("imports") or {}).items():
-            if imp_name not in main_import_names:
-                pending["imports"].append({"entry": {"name": imp_name, **(imp_val or {})}, "branch": branch})
-
-    return pending
 
 
 def _detect_github_repo(ws_root: Path) -> str | None:

@@ -15,6 +15,8 @@ v0.3.0: schema v2 — workspace IS the model. All endpoints drop model scoping.
   added: unmerged stage/* branches surface entries with a "(pending review)" badge.
 v0.3.7-A: /api/import-install — pip-install an import into the workspace venv; marks
   installed=True + install_path in workspace.yaml; invalidates registry cache.
+v0.4.1: /api/catalog (GET) + /api/catalog-install (POST) — Registry as package manager.
+  Catalog browsing + one-click submodule add + pip install + pyproject.toml edit.
 """
 from __future__ import annotations
 import argparse
@@ -216,82 +218,6 @@ def _dirty_workspace() -> str:
     return "\n".join(kept)
 
 
-def _branched_action(branch_name: str, commit_message: str, action_fn) -> tuple[dict, int]:
-    """Run action_fn on a fresh branch off main; commit; return to main.
-
-    Returns (response_dict, http_status_code).
-    """
-    # Pre-flight: refuse if dirty (excluding generated report files).
-    status = _dirty_workspace()
-    if status.strip():
-        return {"error": f"working tree dirty (uncommitted changes): {status[:300]}"}, 409
-
-    # Refuse if branch already exists.
-    existing = subprocess.run(
-        ["git", "branch", "--list", branch_name],
-        cwd=WORKSPACE, capture_output=True, text=True, check=True,
-    ).stdout
-    if existing.strip():
-        return {
-            "error": f"branch '{branch_name}' already exists; resolve in terminal first"
-        }, 409
-
-    try:
-        subprocess.run(["git", "checkout", "-b", branch_name], cwd=WORKSPACE, check=True,
-                       capture_output=True)
-        action_fn()  # raises on validation/lint failure
-
-        subprocess.run(["git", "add", "-A"], cwd=WORKSPACE, check=True, capture_output=True)
-        # Unstage generated reports — they're derived state, regenerated on
-        # every page load; mixing them into action commits creates noise.
-        subprocess.run(["git", "reset", "HEAD", "--", "reports/"],
-                       cwd=WORKSPACE, check=False, capture_output=True)
-        # No-op-commit guard: if action_fn made no changes, abort cleanly.
-        diff = subprocess.run(
-            ["git", "diff", "--cached", "--stat"],
-            cwd=WORKSPACE, capture_output=True, text=True, check=True,
-        ).stdout
-        if not diff.strip():
-            subprocess.run(["git", "checkout", "main"], cwd=WORKSPACE, check=True,
-                           capture_output=True)
-            subprocess.run(["git", "branch", "-D", branch_name], cwd=WORKSPACE, check=True,
-                           capture_output=True)
-            return {"error": "action made no changes (already at this state?)"}, 409
-
-        subprocess.run([
-            "git", "-c", "user.email=pbg-template@local",
-                   "-c", "user.name=pbg-template",
-                   "commit", "-m", commit_message,
-        ], cwd=WORKSPACE, check=True, capture_output=True)
-        commit_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=WORKSPACE, capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        # Return to main so the next action also branches off main.
-        subprocess.run(["git", "checkout", "main"], cwd=WORKSPACE, check=True,
-                       capture_output=True)
-        return {
-            "branch": branch_name,
-            "commit": commit_sha[:7],
-            "message": commit_message,
-        }, 200
-    except subprocess.CalledProcessError as e:
-        _cleanup_branch(branch_name)
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
-        return {"error": f"git error: {stderr[:300]}"}, 500
-    except Exception as e:
-        _cleanup_branch(branch_name)
-        return {"error": str(e)}, 500
-
-
-def _cleanup_branch(branch_name: str) -> None:
-    """Best-effort: return to main and delete the branch."""
-    subprocess.run(["git", "checkout", "main"], cwd=WORKSPACE, check=False,
-                   capture_output=True)
-    subprocess.run(["git", "branch", "-D", branch_name], cwd=WORKSPACE, check=False,
-                   capture_output=True)
-
-
 def _safe_slug(s: str) -> str:
     """Convert a string to a safe branch name component."""
     s = re.sub(r"[^a-zA-Z0-9_-]", "-", s)
@@ -481,6 +407,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_pending()
         if self.path.startswith("/api/registry"):
             return self._get_registry()
+        if self.path.startswith("/api/catalog"):
+            return self._get_catalog()
         if self.path.startswith("/api/work-status"):
             return self._get_work_status()
         rel = self.path.lstrip("/")
@@ -522,6 +450,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/work-push":          self._post_work_push,
             "/api/work-create-pr":     self._post_work_create_pr,
             "/api/work-end":           self._post_work_end,
+            "/api/catalog-install":    self._post_catalog_install,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -1716,6 +1645,145 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             data = {"error": str(e), "processes": [], "types": []}
         return self._json(data, 200)
+
+    def _get_catalog(self):
+        """GET /api/catalog — return the curated module catalog with installed annotations."""
+        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
+        if not catalog_path.exists():
+            return self._json({"modules": [], "error": "catalog not found"}, 200)
+        try:
+            modules = json.loads(catalog_path.read_text())
+            # Annotate with installed status from workspace.yaml imports.
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            installed = ws_data.get("imports", {}) or {}
+            for m in modules:
+                m["installed"] = m["name"] in installed
+            return self._json({"modules": modules}, 200)
+        except Exception as e:
+            return self._json({"modules": [], "error": str(e)}, 500)
+
+    def _post_catalog_install(self, body: dict):
+        """POST /api/catalog-install — install a catalog module.
+
+        Steps: submodule add + pip install + pyproject.toml edit + workspace.yaml + commit.
+        Requires an active workstream (uses _active_branch_action).
+        """
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._json({"error": "missing name"}, 400)
+
+        # Load catalog entry.
+        catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
+        if not catalog_path.exists():
+            return self._json({"error": "catalog not found"}, 404)
+        try:
+            modules = json.loads(catalog_path.read_text())
+        except Exception as e:
+            return self._json({"error": f"catalog parse failed: {e}"}, 500)
+        entry = next((m for m in modules if m["name"] == name), None)
+        if not entry:
+            return self._json({"error": f"module '{name}' not in catalog"}, 404)
+
+        target_path = f"external/{name}"
+        abs_target = (WORKSPACE / target_path).resolve()
+
+        # Determine pip command upfront (before the action closure).
+        venv_pip = WORKSPACE / ".venv" / "bin" / "pip"
+        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
+        if venv_pip.exists():
+            pip_cmd_base = [str(venv_pip), "install", "-e"]
+        else:
+            uv_path = shutil.which("uv")
+            if uv_path and venv_py.exists():
+                pip_cmd_base = [uv_path, "pip", "install", "--python", str(venv_py), "-e"]
+            else:
+                return self._json({"error": "neither pip nor uv available"}, 500)
+
+        # Steps 1+2+3+4: all run inside the action closure so .gitmodules changes
+        # are staged and committed atomically on the active branch.
+        package_name = entry.get("package", name)
+        catalog_entry = entry  # captured for closure
+        log_holder: list[str] = []
+
+        def action():
+            # Step 1: submodule add if directory not already present.
+            if not abs_target.exists():
+                r = subprocess.run(
+                    ["git", "submodule", "add", "-b", catalog_entry["ref"],
+                     catalog_entry["source"], target_path],
+                    cwd=WORKSPACE, capture_output=True, text=True, timeout=120,
+                )
+                if r.returncode != 0:
+                    raise RuntimeError(
+                        f"submodule add failed: {(r.stderr or r.stdout)[:300]}"
+                    )
+
+            # Step 2: pip install -e.
+            try:
+                result = subprocess.run(
+                    pip_cmd_base + [str(abs_target)],
+                    cwd=WORKSPACE, capture_output=True, text=True, timeout=180,
+                )
+            except subprocess.TimeoutExpired:
+                raise RuntimeError("pip install timed out after 180s")
+
+            excerpt = (result.stdout + "\n" + result.stderr).strip()[-2000:]
+            log_holder.append(excerpt)
+            if result.returncode != 0:
+                raise RuntimeError(f"pip install failed:\n{excerpt[-500:]}")
+
+            # Step 3: workspace.yaml.
+            _ws_add_to_sys_path()
+            from scripts._lib.workspace_yaml import load_workspace, save_workspace
+            from scripts._lib.pyproject_edit import add_dependency
+
+            ws_file = WORKSPACE / "workspace.yaml"
+            ws = load_workspace(ws_file)
+            ws.setdefault("imports", {})[name] = {
+                "source": catalog_entry["source"],
+                "ref": catalog_entry["ref"],
+                "mode": "reference",
+                "path": f"external/{name}",
+                "description": catalog_entry.get("description", ""),
+                "installed": True,
+                "install_path": str(abs_target),
+                "package": package_name,
+            }
+            save_workspace(ws_file, ws)
+
+            # Step 4: pyproject.toml [project.dependencies].
+            try:
+                add_dependency(WORKSPACE / "pyproject.toml", package_name)
+            except Exception as e:
+                # Don't fail the whole install if pyproject edit fails — log it.
+                log_dir = WORKSPACE / ".pbg"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                (log_dir / "catalog-install.log").write_text(
+                    f"pyproject edit failed for {name}: {e}\n"
+                )
+
+        commit_msg = f"feat(catalog): install {name}"
+        resp, code = _active_branch_action(commit_msg, action)
+        log_excerpt = log_holder[0] if log_holder else ""
+
+        # Invalidate registry cache.
+        global _REGISTRY_CACHE
+        _REGISTRY_CACHE["data"] = None
+
+        if code == 200:
+            resp["ok"] = True
+            resp["module"] = name
+            resp["log"] = log_excerpt[-500:]
+        elif code == 409 and "no changes" in (resp.get("error") or ""):
+            # The pip install ran; metadata might already be in workspace.yaml.
+            return self._json({
+                "ok": True,
+                "already_installed": True,
+                "module": name,
+                "log": log_excerpt[-500:],
+            }, 200)
+
+        return self._json(resp, code)
 
     def _serve_file(self, path: Path, mime: str):
         if not path.exists() or not path.is_file():

@@ -1,0 +1,29 @@
+[
+  {
+    "name": "v2ecoli",
+    "description": "Whole-cell E. coli model (vivarium-collective)",
+    "source": "https://github.com/vivarium-collective/v2ecoli.git",
+    "ref": "main",
+    "package": "v2ecoli",
+    "homepage": "https://github.com/vivarium-collective/v2ecoli",
+    "tags": ["whole-cell", "ecoli", "biology"]
+  },
+  {
+    "name": "pbg-tellurium",
+    "description": "Tellurium ODE solver wrapped as a process-bigraph package",
+    "source": "https://github.com/vivarium-collective/pbg-tellurium.git",
+    "ref": "main",
+    "package": "pbg_tellurium",
+    "homepage": "https://github.com/vivarium-collective/pbg-tellurium",
+    "tags": ["ode", "kinetics", "sbml"]
+  },
+  {
+    "name": "pbg-cobra",
+    "description": "COBRApy / FBA wrapped as a process-bigraph package",
+    "source": "https://github.com/vivarium-collective/pbg-cobra.git",
+    "ref": "main",
+    "package": "pbg_cobra",
+    "homepage": "https://github.com/vivarium-collective/pbg-cobra",
+    "tags": ["metabolism", "fba", "cobra"]
+  }
+]
