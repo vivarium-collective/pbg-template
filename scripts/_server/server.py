@@ -1433,6 +1433,17 @@ class Handler(BaseHTTPRequestHandler):
         global _REGISTRY_CACHE
         _REGISTRY_CACHE["data"] = None
 
+        # The pip install itself succeeded; if the metadata mutation was a
+        # no-op (workspace.yaml already has installed=True on main), that's
+        # not an error — surface it as a clean re-install acknowledgment.
+        if code == 409 and "no changes" in (resp.get("error") or ""):
+            return self._json({
+                "ok": True,
+                "already_installed": True,
+                "message": "Package re-installed; workspace.yaml already marks it installed.",
+                "log": log_excerpt[-500:],
+            }, 200)
+
         if code == 200:
             resp["ok"] = True
             resp["log"] = log_excerpt[-500:]
