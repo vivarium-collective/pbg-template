@@ -2,13 +2,72 @@
 """Validate workspace.yaml + cross-references. Exit non-zero on failure."""
 from __future__ import annotations
 import hashlib
+import importlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 import yaml
 from jsonschema import Draft7Validator, FormatChecker, ValidationError
+
+
+def _try_get_registry(ws_root: Path, ws_data: dict) -> set | None:
+    """Try to introspect build_core() and return a set of registered process names.
+
+    Returns None if introspection fails (caller should warn, not fail).
+    """
+    package_name = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+    try:
+        py = sys.executable
+        script = f"""
+import json, sys
+try:
+    from {package_name}.core import build_core
+    core = build_core()
+    try:
+        names = sorted(core.process_registry.list())
+    except Exception:
+        try:
+            names = sorted(core.process_registry.registry.keys())
+        except Exception:
+            names = []
+    print(json.dumps(names))
+except Exception as e:
+    print(json.dumps([]))
+"""
+        result = subprocess.run(
+            [py, "-c", script],
+            cwd=ws_root, capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        names = json.loads(result.stdout.strip().split("\n")[-1])
+        if isinstance(names, list):
+            return set(names)
+        return None
+    except Exception:
+        return None
+
+
+def _validate_simulation_processes(ws_data: dict, registry: set | None) -> list[str]:
+    """Return error strings for simulation process refs not in registry.
+
+    If registry is None (introspection failed), returns empty list (warning only).
+    """
+    if registry is None:
+        return []
+    errors = []
+    for sim in ws_data.get("simulations", []) or []:
+        if not isinstance(sim, dict):
+            continue
+        for proc in sim.get("processes", []) or []:
+            if proc not in registry:
+                errors.append(
+                    f"simulation '{sim.get('name', '?')}' references missing process '{proc}'"
+                )
+    return errors
 
 
 def _sha256(path: Path) -> str:
@@ -176,6 +235,23 @@ def main() -> None:
         viz_sim = viz.get("simulation")
         if viz_sim and registered_sim_names and viz_sim not in registered_sim_names:
             _fail(f"visualization '{viz_name}' references missing simulation '{viz_sim}'")
+
+    # Simulation process references (best-effort: warn if registry unavailable).
+    has_process_refs = any(
+        isinstance(s, dict) and s.get("processes")
+        for s in ws.get("simulations", []) or []
+    )
+    if has_process_refs:
+        registry = _try_get_registry(WS_ROOT, ws)
+        if registry is None:
+            print(
+                "LINT WARNING: Could not introspect build_core() — "
+                "simulation process references not validated.",
+                file=sys.stderr,
+            )
+        else:
+            for err in _validate_simulation_processes(ws, registry):
+                _fail(err)
 
     print("workspace lint: OK")
 

@@ -132,3 +132,10 @@ img{max-width:100%}
 .page-title{ margin-top:0 }
 .page-lead{ color:#6b7280; margin-bottom:20px; max-width:680px }
 .below-pages{ margin-top:48px; padding-top:24px; border-top:1px solid #e5e7eb }
+.count-badge{ font-size:0.78em; color:#6b7280; font-weight:normal }
+.registry-schema{
+  display:inline-block; max-width:480px; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; vertical-align:middle; font-size:0.85em;
+}
+.muted{ color:#6b7280 }
+.empty-state{ color:#888; font-style:italic }

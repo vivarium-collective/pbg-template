@@ -1,4 +1,4 @@
-// walkthrough.js — v0.1.9: drag-drop uploads + sha256; v0.1.7: interactive forms.
+// walkthrough.js — v0.3.6: Registry tab, simulation processes picker; v0.1.9: drag-drop uploads + sha256; v0.1.7: interactive forms.
 (function () {
   "use strict";
 
@@ -244,6 +244,11 @@
     var link = document.querySelector('.menu-link[data-page="' + pageId + '"]');
     if (page) page.classList.add('active');
     if (link) link.classList.add('active');
+    // Lazy-load registry on first switch to Registry page.
+    if (pageId === 'registry' && !window._registryLoaded) {
+      window._registryLoaded = true;
+      _loadRegistry(false);
+    }
   }
 
   function _initMenuNav() {
@@ -255,7 +260,7 @@
         // let the browser scroll to the anchor naturally
         return;
       }
-      var validPages = ['workspace-inputs', 'setup', 'visualizations', 'build-model'];
+      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'build-model'];
       _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
     }
     window.addEventListener('hashchange', fromHash);
@@ -264,6 +269,78 @@
 
   window._switchPage = _switchPage;
   window._initMenuNav = _initMenuNav;
+
+  // -------------------------------------------------------------------------
+  // Registry tab (v0.3.6)
+  // -------------------------------------------------------------------------
+
+  function _renderRegistryTable(items, container, kind) {
+    if (!items || items.length === 0) {
+      container.innerHTML = '<p class="empty-state">No ' + kind + ' registered.</p>';
+      return;
+    }
+    var rows = items.map(function(it) {
+      var schemaPreview = it.schema_preview || '';
+      var escaped = schemaPreview.replace(/[<>&]/g, function(c) {
+        return {'<': '&lt;', '>': '&gt;', '&': '&amp;'}[c];
+      });
+      var schemaCol = '<code class="registry-schema">' + (escaped ? escaped : '<em class="muted">—</em>') + '</code>';
+      var addrCol = it.address ? '<code>' + it.address + '</code>' : '';
+      if (kind === 'processes') {
+        return '<tr><td><code>' + it.name + '</code></td><td>' + addrCol + '</td><td>' + schemaCol + '</td></tr>';
+      } else {
+        return '<tr><td><code>' + it.name + '</code></td><td>' + schemaCol + '</td></tr>';
+      }
+    }).join('');
+    var headers = kind === 'processes'
+      ? '<thead><tr><th>Name</th><th>Address</th><th>Config schema (preview)</th></tr></thead>'
+      : '<thead><tr><th>Name</th><th>Definition (preview)</th></tr></thead>';
+    container.innerHTML = '<table>' + headers + '<tbody>' + rows + '</tbody></table>';
+  }
+
+  function _loadRegistry(refresh) {
+    var status = document.getElementById('registry-status');
+    if (status) status.textContent = 'Loading…';
+    fetch('/api/registry' + (refresh ? '?refresh=1' : ''))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (status) {
+          if (data.error) {
+            status.innerHTML = '<span style="color:#991b1b">⚠ ' + data.error + '</span>';
+          } else {
+            status.textContent = '';
+          }
+        }
+        var procContainer = document.getElementById('registry-processes-container');
+        var typeContainer = document.getElementById('registry-types-container');
+        if (procContainer) _renderRegistryTable(data.processes || [], procContainer, 'processes');
+        if (typeContainer) _renderRegistryTable(data.types || [], typeContainer, 'types');
+        var procCount = document.getElementById('registry-process-count');
+        var typeCount = document.getElementById('registry-type-count');
+        if (procCount) procCount.textContent = '(' + (data.processes || []).length + ')';
+        if (typeCount) typeCount.textContent = '(' + (data.types || []).length + ')';
+
+        // Populate sim-process picker if present.
+        var picker = document.getElementById('sim-process-picker');
+        if (picker) {
+          var procs = data.processes || [];
+          if (procs.length === 0) {
+            picker.innerHTML = '<p class="muted">No processes registered yet.</p>';
+          } else {
+            picker.innerHTML = procs.map(function(p) {
+              return '<label style="display:inline-block; margin-right:12px">' +
+                '<input type="checkbox" name="processes" value="' + p.name + '"> ' + p.name +
+                '</label>';
+            }).join('');
+          }
+        }
+      })
+      .catch(function(err) {
+        if (status) status.innerHTML = '<span style="color:#991b1b">Network error: ' + err + '</span>';
+      });
+  }
+
+  window._loadRegistry = _loadRegistry;
 
   // -------------------------------------------------------------------------
   // Simulation CRUD (v0.3.5)
@@ -288,6 +365,8 @@
         emitter_config: _parseJSONorNull(form.emitter_config.value),
         phases: Array.from(form.querySelectorAll('input[name=phases]:checked'))
                       .map(function(el) { return parseInt(el.value, 10); }),
+        processes: Array.from(form.querySelectorAll('input[name=processes]:checked'))
+                        .map(function(el) { return el.value; }),
       };
       submitForm(form, '/api/simulation', function() { return data; });
     } catch (e) {

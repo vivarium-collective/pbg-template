@@ -22,12 +22,125 @@ import json
 import re
 import subprocess
 import sys
+import textwrap
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
 
 import yaml
+
+
+# ---------------------------------------------------------------------------
+# Registry cache (module-level, shared across requests)
+# ---------------------------------------------------------------------------
+
+_REGISTRY_CACHE: dict = {"data": None, "ts": 0.0}
+_REGISTRY_TTL = 30.0  # seconds
+
+
+def _get_registry_data(bypass_cache: bool = False) -> dict:
+    """Return registry data from build_core() subprocess, with 30s caching.
+
+    Always returns {processes: [...], types: [...]} plus optional 'error' key.
+    Never raises.
+    """
+    global _REGISTRY_CACHE
+    now = time.time()
+    if not bypass_cache and _REGISTRY_CACHE["data"] is not None:
+        if now - _REGISTRY_CACHE["ts"] < _REGISTRY_TTL:
+            return _REGISTRY_CACHE["data"]
+
+    try:
+        ws_yaml = WORKSPACE / "workspace.yaml"
+        ws_data = yaml.safe_load(ws_yaml.read_text())
+        slug = ws_data.get("name", "")
+        # Support explicit package_path in workspace.yaml (most reliable).
+        package_name = ws_data.get("package_path") or ("pbg_" + slug.replace("-", "_"))
+
+        py = sys.executable
+        script = textwrap.dedent(f"""
+import json, sys
+try:
+    from {package_name}.core import build_core
+    core = build_core()
+
+    processes = []
+    # Try multiple APIs defensively.
+    try:
+        proc_names = sorted(core.process_registry.list())
+    except Exception:
+        try:
+            proc_names = sorted(core.process_registry.registry.keys())
+        except Exception:
+            proc_names = []
+    for name in proc_names:
+        try:
+            cls = core.process_registry.access(name)
+            addr = f"{{cls.__module__}}.{{cls.__qualname__}}"
+            schema_preview = ""
+            if hasattr(cls, 'config_schema'):
+                try:
+                    schema_preview = json.dumps(cls.config_schema, default=str)[:200]
+                except Exception:
+                    schema_preview = ""
+        except Exception as e:
+            addr = f"<error: {{e}}>"
+            schema_preview = ""
+        processes.append({{"name": name, "address": addr, "schema_preview": schema_preview}})
+
+    types = []
+    # Try multiple APIs defensively.
+    try:
+        type_names = sorted(core.types())
+    except Exception:
+        try:
+            type_names = sorted(core.type_registry.list())
+        except Exception:
+            try:
+                type_names = sorted(core.type_registry.registry.keys())
+            except Exception:
+                type_names = []
+    for name in type_names:
+        try:
+            td = core.access(name)
+            schema_preview = json.dumps(td, default=str)[:200] if td else ""
+        except Exception as e:
+            schema_preview = f"<error: {{e}}>"
+        types.append({{"name": name, "schema_preview": schema_preview}})
+
+    print(json.dumps({{"processes": processes, "types": types}}))
+except ImportError as e:
+    print(json.dumps({{"error": f"could not import {package_name}.core: {{e}}", "processes": [], "types": []}}))
+except Exception as e:
+    print(json.dumps({{"error": f"build_core() failed: {{e}}", "processes": [], "types": []}}))
+""")
+        result = subprocess.run(
+            [py, "-c", script],
+            cwd=WORKSPACE, capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            data: dict = {
+                "error": f"subprocess failed: {(result.stderr or '').strip()[:300]}",
+                "processes": [],
+                "types": [],
+            }
+        else:
+            try:
+                last_line = result.stdout.strip().split("\n")[-1]
+                data = json.loads(last_line)
+            except (json.JSONDecodeError, IndexError):
+                data = {
+                    "error": f"invalid output: {result.stdout[:300]}",
+                    "processes": [],
+                    "types": [],
+                }
+    except Exception as e:
+        data = {"error": str(e), "processes": [], "types": []}
+
+    _REGISTRY_CACHE["data"] = data
+    _REGISTRY_CACHE["ts"] = now
+    return data
 
 
 def _save_upload(file_b64: str, target_path: Path) -> str:
@@ -278,6 +391,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_branch_diff()
         if self.path.startswith("/api/pending"):
             return self._serve_pending()
+        if self.path.startswith("/api/registry"):
+            return self._get_registry()
         rel = self.path.lstrip("/")
         # Refuse path traversal and absolute paths.
         if ".." in rel.split("/") or rel.startswith("/"):
@@ -1043,7 +1158,7 @@ class Handler(BaseHTTPRequestHandler):
         """Register a simulation in workspace.yaml.
 
         Body: {name, description?, t_start, t_end, initial_state?, parameter_overrides?,
-               emitter_config?, phases?}
+               emitter_config?, phases?, processes?}
         """
         import re as _re
         name = (body.get("name") or "").strip()
@@ -1054,6 +1169,7 @@ class Handler(BaseHTTPRequestHandler):
         parameter_overrides = body.get("parameter_overrides") or None
         emitter_config = body.get("emitter_config") or None
         phases_raw = body.get("phases", [])
+        processes_raw = body.get("processes", [])
 
         if not name:
             return self._json({"error": "name is required"}, 400)
@@ -1076,6 +1192,27 @@ class Handler(BaseHTTPRequestHandler):
             phases_list = [int(p) for p in phases_raw]
         except (TypeError, ValueError):
             return self._json({"error": "phases must be a list of integers"}, 400)
+
+        # Validate processes list.
+        if not isinstance(processes_raw, list):
+            return self._json({"error": "processes must be a list of strings"}, 400)
+        processes_list = [str(p).strip() for p in processes_raw if str(p).strip()]
+
+        # Validate process names against registry (best-effort; skip if registry unavailable).
+        if processes_list:
+            try:
+                reg = _get_registry_data()
+                if not reg.get("error"):
+                    registered_proc_names = {p["name"] for p in (reg.get("processes") or [])}
+                    for proc_name in processes_list:
+                        if proc_name not in registered_proc_names:
+                            return self._json(
+                                {"error": f"process '{proc_name}' not in registry"}, 400
+                            )
+            except Exception as reg_err:
+                # Registry call failed — warn but don't block.
+                import logging
+                logging.warning("Registry validation skipped: %s", reg_err)
 
         import time as _time
         epoch = int(_time.time())
@@ -1119,6 +1256,8 @@ class Handler(BaseHTTPRequestHandler):
                 entry["emitter_config"] = emitter_config
             if phases_list:
                 entry["phases"] = phases_list
+            if processes_list:
+                entry["processes"] = processes_list
             simulations.append(entry)
             save_workspace(ws_file, ws)
 
@@ -1266,6 +1405,21 @@ class Handler(BaseHTTPRequestHandler):
             "log": log.stdout,
             "diff_stat": diff_stat.stdout,
         }, 200)
+
+    def _get_registry(self):
+        """GET /api/registry — live introspection of build_core(); cached 30s.
+
+        Query param: ?refresh=1 to bypass cache.
+        Never returns 500 — always returns {processes, types} (with optional 'error').
+        """
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        bypass = qs.get("refresh", ["0"])[0] == "1"
+        try:
+            data = _get_registry_data(bypass_cache=bypass)
+        except Exception as e:
+            data = {"error": str(e), "processes": [], "types": []}
+        return self._json(data, 200)
 
     def _serve_file(self, path: Path, mime: str):
         if not path.exists() or not path.is_file():

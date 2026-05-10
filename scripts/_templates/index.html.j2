@@ -93,8 +93,9 @@
 
 <nav class="top-menu" role="tablist">
   <a href="#workspace-inputs" class="menu-link" data-page="workspace-inputs">Workspace inputs</a>
-  <a href="#setup" class="menu-link" data-page="setup">Setup</a>
+  <a href="#simulation-setup" class="menu-link" data-page="simulation-setup">Simulation Setup</a>
   <a href="#visualizations" class="menu-link" data-page="visualizations">Visualizations</a>
+  <a href="#registry" class="menu-link" data-page="registry">Registry</a>
   <a href="#build-model" class="menu-link" data-page="build-model">Build Model</a>
 </nav>
 
@@ -275,10 +276,10 @@
 
 </section>
 
-<!-- ===== PAGE: SETUP ===== -->
-<section id="page-setup" class="page" data-page="setup">
-  <h2 class="page-title">Setup</h2>
-  <p class="page-lead">Define what you&rsquo;ll measure (observables) and how you&rsquo;ll run the model (simulations).</p>
+<!-- ===== PAGE: SIMULATION SETUP ===== -->
+<section id="page-simulation-setup" class="page" data-page="simulation-setup">
+  <h2 class="page-title">Simulation Setup</h2>
+  <p class="page-lead">Define how you&rsquo;ll run the model. Set up <strong>simulations</strong> (run configs: time interval, parameters, initial state) and the <strong>observables</strong> they record. Visualizations live in their own tab.</p>
 
   <!-- Observables panel -->
   <div class="panel">
@@ -327,7 +328,7 @@
 
     {% if simulations %}
     <table>
-      <thead><tr><th>Name</th><th>Description</th><th>Time</th><th>Phases</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Name</th><th>Description</th><th>Time</th><th>Phases</th><th>Processes</th><th>Actions</th></tr></thead>
       <tbody>
       {% for s in simulations %}
       <tr>
@@ -335,6 +336,7 @@
         <td>{{ s.description or '' }}</td>
         <td>{{ s.t_start }} &rarr; {{ s.t_end }}</td>
         <td>{% if s.phases %}{{ s.phases | join(', ') }}{% else %}<em>all</em>{% endif %}</td>
+        <td>{% if s.processes %}{{ s.processes | join(', ') }}{% else %}<em>—</em>{% endif %}</td>
         <td><button class="action-btn-small" onclick="_deleteSimulation('{{ s.name }}')">Remove</button></td>
       </tr>
       {% endfor %}
@@ -364,6 +366,12 @@
           </label>
           {% endfor %}
           {% if not phases %}<em style="color:#888;font-size:0.88em">No phases registered yet &mdash; simulation will apply globally.</em>{% endif %}
+        </fieldset>
+        <fieldset style="border:1px solid #ddd;border-radius:4px;padding:10px;margin-bottom:12px">
+          <legend style="font-size:0.88em;font-weight:600">Processes (loaded from Registry &mdash; leave all unchecked = no declared deps)</legend>
+          <div id="sim-process-picker">
+            <p class="muted">Click <a href="#registry" onclick="_switchPage('registry')">Registry</a> first to populate this list.</p>
+          </div>
         </fieldset>
         <div class="form-error"></div>
         <button type="submit">Add simulation</button>
@@ -422,6 +430,29 @@
     <button class="action-btn" onclick="openModal('modal-visualization')">+ Add visualization</button>
   </div>
 
+</section>
+
+<!-- ===== PAGE: REGISTRY ===== -->
+<section id="page-registry" class="page" data-page="registry">
+  <h2 class="page-title">Registry</h2>
+  <p class="page-lead">Live snapshot of <code>build_core()</code> for this workspace &mdash; every process and type currently registered. This is what your simulations have access to. Use the refresh button after changing core code.</p>
+
+  <button class="action-btn" onclick="_loadRegistry(true)">Refresh registry</button>
+  <div id="registry-status" class="muted" style="margin:8px 0"></div>
+
+  <section class="panel">
+    <h3>Processes <span id="registry-process-count" class="count-badge"></span></h3>
+    <div id="registry-processes-container">
+      <p class="empty-state">Loading&hellip;</p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h3>Types <span id="registry-type-count" class="count-badge"></span></h3>
+    <div id="registry-types-container">
+      <p class="empty-state">Loading&hellip;</p>
+    </div>
+  </section>
 </section>
 
 <!-- ===== PAGE: BUILD MODEL ===== -->

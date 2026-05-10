@@ -130,7 +130,8 @@
         "initial_state": {"type": "object", "description": "Path-keyed initial values; structure free-form"},
         "parameter_overrides": {"type": "object", "description": "Process-config overrides; structure free-form"},
         "emitter_config": {"type": "object", "description": "Emitter settings (paths to record, sample interval, etc.)"},
-        "phases": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "Phase numbers this simulation belongs to (empty = global)"}
+        "phases": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "Phase numbers this simulation belongs to (empty = global)"},
+        "processes": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "Names of processes from the registry that this simulation expects (declarative tag — does not drive composite construction)"}
       }
     },
     "dataset": {
