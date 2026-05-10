@@ -43,32 +43,32 @@ def _next_step_hint(ws: dict) -> dict:
         }
     if not observables:
         return {
-            "label": "Add observables (Setup step 1)",
-            "command": "(dashboard) + Add observable\n(plugin) /pbg-add-observable",
+            "label": "Add observables (Simulation Setup tab)",
+            "command": "Dashboard → Simulation Setup → + Add observable",
             "details": "Pick which state variables to track (e.g. chromosome.DnaA_count).",
         }
     if not visualizations:
         return {
-            "label": "Add visualizations (Setup step 2)",
-            "command": "(dashboard) + Add visualization",
-            "details": "Define how to render the observables (time-series, phase-space, heatmap, histogram).",
+            "label": "Add visualizations (Visualizations tab)",
+            "command": "Dashboard → Visualizations → + Add visualization",
+            "details": "Define how to render observables (time-series, phase-space, heatmap, histogram).",
         }
     if not phases:
         return {
-            "label": "Plan mechanism integration phases",
-            "command": "bash scripts/add-phase-plan.sh   # or use dashboard + Add phase",
+            "label": "Plan model-development phases (Build Model tab)",
+            "command": "Dashboard → Build Model → + Add phase",
             "details": "Lay out the mechanisms to integrate, each backed by an expert doc or dataset.",
         }
     for p in phases:
         if p.get("status") != "complete":
             return {
                 "label": f"Phase {p['n']} ({p['name']}): {p.get('status', '?')}",
-                "command": f"bash scripts/start-phase.sh {p['n']}    # then evaluate-phase-gate.sh when done",
-                "details": "",
+                "command": f"Dashboard → Build Model → Phase {p['n']} → Start phase / Evaluate gate",
+                "details": "Or use the /pbg-phase skill to drive the phase from Claude Code.",
             }
     return {
         "label": "All planned phases complete",
-        "command": "Add more phases via the dashboard, or publish the workspace.",
+        "command": "Add more phases (Build Model → + Add phase) or publish the workspace.",
         "details": "",
     }
 
