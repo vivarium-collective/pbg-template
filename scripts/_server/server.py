@@ -22,6 +22,7 @@ import base64
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -174,18 +175,42 @@ def _is_generated_path(path: str) -> bool:
     return path.startswith("reports/")
 
 
+def _submodule_paths() -> set[str]:
+    """Read .gitmodules and return the set of registered submodule paths.
+
+    Submodule pointer movements show up as `M <path>` in `git status --porcelain`
+    even when the user has only updated the submodule's HEAD (e.g., `git submodule
+    update --remote`). These shouldn't block workspace-level actions.
+    """
+    gm = WORKSPACE / ".gitmodules"
+    if not gm.exists():
+        return set()
+    paths: set[str] = set()
+    for line in gm.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("path"):
+            _, _, val = line.partition("=")
+            val = val.strip()
+            if val:
+                paths.add(val)
+    return paths
+
+
 def _dirty_workspace() -> str:
-    """Return the porcelain status excluding generated report files."""
+    """Return the porcelain status excluding generated reports + submodule pointers."""
     status = subprocess.run(
         ["git", "status", "--porcelain"],
         cwd=WORKSPACE, capture_output=True, text=True, check=True,
     ).stdout
+    submodules = _submodule_paths()
     kept = []
     for raw in status.splitlines():
         if len(raw) < 4:
             continue
         path = raw[3:]
         if _is_generated_path(path):
+            continue
+        if path in submodules:
             continue
         kept.append(raw)
     return "\n".join(kept)
@@ -1351,21 +1376,35 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": f"path does not exist: {abs_target}"}, 404)
             target = str(abs_target)
 
-        # Find pip in venv.
+        # Pick installer: prefer pip in the venv; fall back to system `uv` when
+        # the venv has no pip (created via `uv venv`). Both produce the same
+        # editable install in the venv's site-packages.
         venv_pip = WORKSPACE / ".venv" / "bin" / "pip"
-        if not venv_pip.exists():
-            return self._json({"error": ".venv/bin/pip not found — run `python -m venv .venv` in the workspace"}, 500)
+        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
+        if venv_pip.exists():
+            cmd = [str(venv_pip), "install", "-e", target]
+        else:
+            uv_path = shutil.which("uv")
+            if uv_path and venv_py.exists():
+                cmd = [uv_path, "pip", "install", "--python", str(venv_py), "-e", target]
+            else:
+                hint = (
+                    "neither .venv/bin/pip nor `uv` found. "
+                    "Create a venv with pip (`python -m venv .venv && .venv/bin/pip install --upgrade pip`) "
+                    "or install uv (`brew install uv`)."
+                )
+                return self._json({"error": hint}, 500)
 
-        # Run pip install -e (outside the branch action so errors surface before git work).
+        # Run install (outside the branch action so errors surface before git work).
         try:
             result = subprocess.run(
-                [str(venv_pip), "install", "-e", target],
+                cmd,
                 cwd=WORKSPACE, capture_output=True, text=True, timeout=120,
             )
         except subprocess.TimeoutExpired:
-            return self._json({"error": "pip install timed out after 120s"}, 500)
+            return self._json({"error": f"{cmd[0]} install timed out after 120s"}, 500)
         except Exception as pip_err:
-            return self._json({"error": f"pip install error: {pip_err}"}, 500)
+            return self._json({"error": f"install error: {pip_err}"}, 500)
 
         log_excerpt = (result.stdout + "\n" + result.stderr).strip()[-2000:]
         if result.returncode != 0:
