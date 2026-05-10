@@ -42,11 +42,38 @@ img{max-width:100%}
 }
 .stage-label.optional{background:#7c7c7c}
 .stage-explainer{color:var(--gray);font-size:0.92em;margin:-4px 0 12px}
-.pending-review-badge{
-  display:inline-block;font-size:0.7em;background:#fef3c7;color:#a86b00;
-  padding:2px 8px;border-radius:10px;margin-left:8px;
+.workstream-strip{
+  background:#f0f9ff; border-bottom:2px solid #3b82f6;
+  padding:10px 20px;
+  display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+  font-size:0.92em;
+  position:sticky; top:0; z-index:45;
 }
-.pending-review-badge[title]{cursor:help}
+.workstream-strip.inactive{
+  background:#fef3c7; border-bottom-color:#d97706;
+}
+.workstream-strip .ws-label{ color:#6b7280; font-weight:500 }
+.workstream-strip .ws-branch{
+  background:#dbeafe; padding:3px 10px; border-radius:4px; color:#1e3a8a; font-size:0.95em;
+}
+.workstream-strip .ws-meta{ color:#6b7280; font-size:0.88em }
+.workstream-strip .ws-link{
+  color:#1e40af; text-decoration:none; padding:3px 10px; border-radius:4px; background:#eff6ff;
+}
+.workstream-strip .ws-link:hover{ background:#dbeafe }
+.workstream-strip .ws-btn{
+  padding:5px 12px; border:1px solid #3b82f6; background:#fff; color:#1e40af;
+  border-radius:4px; cursor:pointer; font-size:0.88em;
+}
+.workstream-strip .ws-btn:hover{ background:#eff6ff }
+.workstream-strip .ws-btn.ws-primary{
+  background:#3b82f6; color:#fff;
+}
+.workstream-strip .ws-btn.ws-primary:hover{ background:#2563eb }
+.workstream-strip .ws-btn.ws-end{
+  border-color:#dc2626; color:#991b1b; margin-left:auto;
+}
+.workstream-strip .ws-btn.ws-end:hover{ background:#fef2f2 }
 .phase-tracker a.pill{
   text-decoration:none; color:inherit; cursor:pointer; display:block;
   transition:transform 0.1s, box-shadow 0.1s;
@@ -110,13 +137,13 @@ img{max-width:100%}
   word-break:break-all;
 }
 .top-header{
-  position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--border);
-  padding:14px 20px;z-index:50;
+  background:var(--panel);border-bottom:1px solid var(--border);
+  padding:14px 20px;
 }
 .top-menu{
   display:flex; gap:4px; border-bottom:2px solid #e5e7eb;
   margin-bottom:24px; padding:0 8px;
-  position:sticky; top:57px; background:var(--panel); z-index:40;
+  background:var(--panel);
 }
 .top-menu .menu-link{
   padding:12px 20px; text-decoration:none; color:#4b5563;

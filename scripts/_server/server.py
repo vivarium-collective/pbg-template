@@ -299,6 +299,61 @@ def _safe_slug(s: str) -> str:
     return s[:40]
 
 
+def _active_branch_action(commit_message: str, action_fn) -> tuple[dict, int]:
+    """Run action_fn on the active workstream branch; commit; stay on it."""
+    _ws_add_to_sys_path()
+    from scripts._lib.work_state import load_state, save_state
+    state = load_state()
+    branch = state.get("active_branch")
+    if not branch:
+        return {"error": "no active workstream — click Start workstream at the top of the dashboard"}, 409
+
+    # Make sure we're on the active branch (auto-recover from drift)
+    current = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=WORKSPACE, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    if current != branch:
+        r = subprocess.run(["git", "checkout", branch], cwd=WORKSPACE, capture_output=True, text=True)
+        if r.returncode != 0:
+            return {"error": f"could not check out workstream branch '{branch}': {r.stderr[:200]}"}, 500
+
+    if _dirty_workspace().strip():
+        return {"error": f"working tree dirty: {_dirty_workspace()[:300]}"}, 409
+
+    try:
+        action_fn()
+        subprocess.run(["git", "add", "-A"], cwd=WORKSPACE, check=True, capture_output=True)
+        subprocess.run(["git", "reset", "HEAD", "--", "reports/"], cwd=WORKSPACE, check=False, capture_output=True)
+        diff = subprocess.run(
+            ["git", "diff", "--cached", "--stat"],
+            cwd=WORKSPACE, capture_output=True, text=True, check=True,
+        ).stdout
+        if not diff.strip():
+            return {"error": "action made no changes (already at this state?)"}, 409
+        subprocess.run([
+            "git", "-c", "user.email=pbg-template@local",
+                  "-c", "user.name=pbg-template",
+                  "commit", "-m", commit_message,
+        ], cwd=WORKSPACE, check=True, capture_output=True)
+        commit_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=WORKSPACE, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+        # Reload state (action_fn may have side-effects) and keep file fresh
+        state = load_state()
+        if state.get("active_branch") == branch:
+            save_state(state)
+
+        return {"branch": branch, "commit": commit_sha[:7], "message": commit_message}, 200
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+        return {"error": f"git operation failed: {stderr[:300]}"}, 500
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+
 # ---------------------------------------------------------------------------
 # Pending visibility helper
 # ---------------------------------------------------------------------------
@@ -426,6 +481,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_pending()
         if self.path.startswith("/api/registry"):
             return self._get_registry()
+        if self.path.startswith("/api/work-status"):
+            return self._get_work_status()
         rel = self.path.lstrip("/")
         # Refuse path traversal and absolute paths.
         if ".." in rel.split("/") or rel.startswith("/"):
@@ -461,6 +518,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/simulation":         self._post_simulation,
             "/api/run-tests":          self._post_run_tests,
             "/api/render":             self._post_render,
+            "/api/work-start":         self._post_work_start,
+            "/api/work-push":          self._post_work_push,
+            "/api/work-create-pr":     self._post_work_create_pr,
+            "/api/work-end":           self._post_work_end,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -517,9 +578,6 @@ class Handler(BaseHTTPRequestHandler):
         if re.search(r'[^\w\-.]', name):
             return self._json({"error": "name must contain only word chars, hyphens, dots"}, 400)
 
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/0.5-import-{_safe_slug(name)}-{epoch}"
         commit_msg = f"feat(0.5): register import '{name}' (mode={mode})"
 
         def action():
@@ -530,7 +588,7 @@ class Handler(BaseHTTPRequestHandler):
                 description=description,
             )
 
-        resp, code = _branched_action(branch, commit_msg, action)
+        resp, code = _active_branch_action(commit_msg, action)
         if code == 200:
             # Add guidance about submodule step.
             if mode in ("reference",):
@@ -579,9 +637,6 @@ class Handler(BaseHTTPRequestHandler):
         else:
             return self._json({"error": "either file_b64, path, or url is required"}, 400)
 
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/4-dataset-{_safe_slug(name)}-{epoch}"
         commit_msg = f"feat(4): register dataset '{name}'"
 
         def action():
@@ -616,7 +671,7 @@ class Handler(BaseHTTPRequestHandler):
             datasets.append(entry)
             save_workspace(ws_file, ws)
 
-        return self._json(*_branched_action(branch, commit_msg, action))
+        return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_reference_pdf(self, body: dict):
         """Drop-and-go PDF reference flow (v0.1.12)."""
@@ -665,9 +720,6 @@ class Handler(BaseHTTPRequestHandler):
         else:
             claim_ids = []
 
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/5-reference-{_safe_slug(bib_key)}-{epoch}"
         commit_msg = f"feat(5): add reference '{bib_key}'"
         if metadata_pending:
             commit_msg += " (metadata pending)"
@@ -722,7 +774,7 @@ class Handler(BaseHTTPRequestHandler):
                 claims_file.parent.mkdir(parents=True, exist_ok=True)
                 claims_file.write_text(_yaml.safe_dump(existing_claims, sort_keys=False))
 
-        response, status = _branched_action(branch, commit_msg, action)
+        response, status = _active_branch_action(commit_msg, action)
         response["bib_key"] = bib_key
         response["metadata_pending"] = metadata_pending
         response["extracted"] = {k: v for k, v in extracted.items() if k != "raw"}
@@ -752,9 +804,6 @@ class Handler(BaseHTTPRequestHandler):
         else:
             claim_mappings = dict(claim_mappings_raw) if claim_mappings_raw else {}
 
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/5-reference-{_safe_slug(bibkey)}-{epoch}"
         commit_msg = f"feat(5): add reference '{bibkey}'"
 
         def action():
@@ -802,12 +851,11 @@ class Handler(BaseHTTPRequestHandler):
                     refs_pdfs.append({"bib_key": bibkey, "path": pdf_dest_rel, "sha256": sha})
                 save_workspace(ws_file, ws)
 
-        return self._json(*_branched_action(branch, commit_msg, action))
+        return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_expert_doc(self, body: dict):
         """Register an expert document in workspace.yaml."""
         import shutil as _shutil
-        import time as _time
 
         name = (body.get("name") or "").strip()
         file_b64 = body.get("file_b64", "").strip()
@@ -846,8 +894,6 @@ class Handler(BaseHTTPRequestHandler):
             ext = source_path.suffix if source_path.suffix else ".pdf"
             dest_rel = f"references/expert/{_safe_slug(name)}{ext}"
 
-        epoch = int(_time.time())
-        branch = f"stage/5-expert-doc-{_safe_slug(name)}-{epoch}"
         commit_msg = f"feat(5): add expert document '{name}'"
 
         def action():
@@ -886,7 +932,7 @@ class Handler(BaseHTTPRequestHandler):
             expert_docs.append(entry)
             save_workspace(ws_file, ws)
 
-        return self._json(*_branched_action(branch, commit_msg, action))
+        return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_phase_plan(self, body: dict):
         """Plan phases for the workspace (v0.3.0: no model param).
@@ -916,9 +962,6 @@ class Handler(BaseHTTPRequestHandler):
                 "status": "planned",
             })
 
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/8-phase-plan-{epoch}"
         commit_msg = f"feat(8): plan phases (N={len(phases)})"
 
         def action():
@@ -939,7 +982,7 @@ class Handler(BaseHTTPRequestHandler):
             ]
             save_workspace(ws_file, ws)
 
-        return self._json(*_branched_action(branch, commit_msg, action))
+        return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_phase_start(self, body: dict):
         """Start a phase for the workspace (v0.3.0: no model param).
@@ -951,9 +994,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "n is required"}, 400)
         n = int(n)
 
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/9-phase-{n}-start-{epoch}"
         commit_msg = f"feat(9): start phase {n}"
 
         def action():
@@ -996,7 +1036,7 @@ class Handler(BaseHTTPRequestHandler):
                     break
             save_workspace(ws_file, ws)
 
-        return self._json(*_branched_action(branch, commit_msg, action))
+        return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_phase_gate(self, body: dict):
         """Evaluate a phase gate for the workspace (v0.3.0: no model param).
@@ -1008,9 +1048,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "n is required"}, 400)
         n = int(n)
 
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/9-phase-{n}-gate-{epoch}"
         commit_msg = f"feat(9): evaluate gate for phase {n}"
 
         gate_status = {"status": "gate_pending"}
@@ -1048,7 +1085,7 @@ class Handler(BaseHTTPRequestHandler):
                     break
             save_workspace(ws_file, ws)
 
-        resp, code = _branched_action(branch, commit_msg, action)
+        resp, code = _active_branch_action(commit_msg, action)
         if code == 200:
             resp["gate_status"] = gate_status["status"]
         return self._json(resp, code)
@@ -1066,9 +1103,6 @@ class Handler(BaseHTTPRequestHandler):
         if not all([name, store_path]):
             return self._json({"error": "name and store_path are required"}, 400)
 
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/setup-observable-{_safe_slug(name)}-{epoch}"
         commit_msg = f"feat(setup): add observable '{name}'"
 
         def action():
@@ -1091,7 +1125,7 @@ class Handler(BaseHTTPRequestHandler):
             observables.append(entry)
             save_workspace(ws_file, ws)
 
-        return self._json(*_branched_action(branch, commit_msg, action))
+        return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_visualization(self, body: dict):
         """Register a visualization in workspace.yaml (v0.3.0: top-level, no model).
@@ -1121,9 +1155,6 @@ class Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             return self._json({"error": "phases must be a list of integers"}, 400)
 
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/setup-viz-{_safe_slug(name)}-{epoch}"
         commit_msg = f"feat(setup): add visualization '{name}'"
 
         def action():
@@ -1186,7 +1217,7 @@ class Handler(BaseHTTPRequestHandler):
             visualizations.append(entry)
             save_workspace(ws_file, ws)
 
-        return self._json(*_branched_action(branch, commit_msg, action))
+        return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_simulation(self, body: dict):
         """Register a simulation in workspace.yaml.
@@ -1248,9 +1279,6 @@ class Handler(BaseHTTPRequestHandler):
                 import logging
                 logging.warning("Registry validation skipped: %s", reg_err)
 
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/sim-{_safe_slug(name)}-{epoch}"
         commit_msg = f"feat(setup): add simulation '{name}'"
 
         def action():
@@ -1295,7 +1323,7 @@ class Handler(BaseHTTPRequestHandler):
             simulations.append(entry)
             save_workspace(ws_file, ws)
 
-        return self._json(*_branched_action(branch, commit_msg, action))
+        return self._json(*_active_branch_action(commit_msg, action))
 
     def _delete_simulation(self, body: dict):
         """Remove a simulation from workspace.yaml.
@@ -1306,9 +1334,6 @@ class Handler(BaseHTTPRequestHandler):
         if not name:
             return self._json({"error": "name is required"}, 400)
 
-        import time as _time
-        epoch = int(_time.time())
-        branch = f"stage/sim-rm-{_safe_slug(name)}-{epoch}"
         commit_msg = f"feat(setup): remove simulation '{name}'"
 
         def action():
@@ -1326,7 +1351,7 @@ class Handler(BaseHTTPRequestHandler):
                 ws.pop("simulations", None)
             save_workspace(ws_file, ws)
 
-        return self._json(*_branched_action(branch, commit_msg, action))
+        return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_run_tests(self, body: dict):
         """Run pytest for the workspace (v0.3.0: no model param).
@@ -1422,12 +1447,9 @@ class Handler(BaseHTTPRequestHandler):
             ws["imports"][name]["install_path"] = install_target
             save_workspace(ws_file, ws)
 
-        import time as _time
-        epoch = int(_time.time())
-        branch_name = f"stage/sim-import-install-{_safe_slug(name)}-{epoch}"
         commit_msg = f"chore(import): pip install {name} into venv"
 
-        resp, code = _branched_action(branch_name, commit_msg, action)
+        resp, code = _active_branch_action(commit_msg, action)
 
         # Invalidate registry cache so next /api/registry call sees fresh data.
         global _REGISTRY_CACHE
@@ -1449,6 +1471,146 @@ class Handler(BaseHTTPRequestHandler):
             resp["log"] = log_excerpt[-500:]
 
         return self._json(resp, code)
+
+    # ------------------------------------------------------------------
+    # Work-stream endpoints (v0.4.0b)
+    # ------------------------------------------------------------------
+
+    def _post_work_start(self, body: dict):
+        """Create a new working branch from base; set active in state."""
+        branch = (body.get("branch") or "").strip()
+        base = (body.get("base") or "main").strip()
+        if not branch or not re.match(r"^[A-Za-z0-9._/-]+$", branch) or len(branch) > 100:
+            return self._json({"error": "invalid branch name"}, 400)
+
+        _ws_add_to_sys_path()
+        from scripts._lib.work_state import load_state, save_state
+        state = load_state()
+        if state.get("active_branch"):
+            return self._json({"error": f"already on workstream '{state['active_branch']}'. End it first."}, 409)
+        if _dirty_workspace().strip():
+            return self._json({"error": "working tree dirty — commit or stash first"}, 409)
+
+        # Verify base exists
+        r = subprocess.run(["git", "rev-parse", "--verify", base], cwd=WORKSPACE, capture_output=True, text=True)
+        if r.returncode != 0:
+            return self._json({"error": f"base branch '{base}' not found"}, 404)
+
+        # Verify branch doesn't already exist locally
+        r = subprocess.run(["git", "rev-parse", "--verify", branch], cwd=WORKSPACE, capture_output=True, text=True)
+        if r.returncode == 0:
+            return self._json({"error": f"branch '{branch}' already exists. Pick a different name or delete the old one."}, 409)
+
+        subprocess.run(["git", "checkout", base], cwd=WORKSPACE, check=True, capture_output=True)
+        r = subprocess.run(["git", "checkout", "-b", branch], cwd=WORKSPACE, capture_output=True, text=True)
+        if r.returncode != 0:
+            return self._json({"error": f"branch create failed: {r.stderr[:300]}"}, 500)
+
+        save_state({"active_branch": branch, "base": base, "pushed": False, "pr_number": None, "pr_url": None})
+        return self._json({"ok": True, "branch": branch, "base": base}, 200)
+
+    def _post_work_push(self, body: dict):
+        _ws_add_to_sys_path()
+        from scripts._lib.work_state import load_state, save_state
+        state = load_state()
+        branch = state.get("active_branch")
+        if not branch:
+            return self._json({"error": "no active workstream"}, 409)
+        r = subprocess.run(["git", "push", "-u", "origin", branch], cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            return self._json({"error": f"push failed: {(r.stderr or r.stdout)[:300]}"}, 500)
+        state["pushed"] = True
+        save_state(state)
+        return self._json({"ok": True, "branch": branch, "log": r.stdout[-300:]}, 200)
+
+    def _post_work_create_pr(self, body: dict):
+        _ws_add_to_sys_path()
+        from scripts._lib.work_state import load_state, save_state
+        state = load_state()
+        branch = state.get("active_branch")
+        if not branch:
+            return self._json({"error": "no active workstream"}, 409)
+        if not state.get("pushed"):
+            return self._json({"error": "push to origin first (Push button)"}, 409)
+        if state.get("pr_url"):
+            return self._json({"error": f"PR already exists: {state['pr_url']}", "pr_url": state["pr_url"]}, 409)
+
+        base = state.get("base") or "main"
+        title = (body.get("title") or "").strip() or f"Workstream: {branch}"
+        body_text = (body.get("body") or "").strip() or "Created via pbg-template dashboard."
+
+        if not shutil.which("gh"):
+            try:
+                from scripts._lib.report import _detect_github_repo
+            except ImportError:
+                _detect_github_repo = lambda *a: None
+            repo = _detect_github_repo(WORKSPACE)
+            manual = f"https://github.com/{repo}/compare/{base}...{branch}?expand=1" if repo else None
+            return self._json({
+                "error": "gh CLI not installed. Open manually:",
+                "manual_url": manual,
+            }, 500)
+
+        r = subprocess.run(
+            ["gh", "pr", "create", "--base", base, "--head", branch,
+             "--title", title, "--body", body_text],
+            cwd=WORKSPACE, capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode != 0:
+            return self._json({"error": f"gh pr create failed: {(r.stderr or r.stdout)[:300]}"}, 500)
+        pr_url = r.stdout.strip().splitlines()[-1] if r.stdout else ""
+        m = re.search(r"/pull/(\d+)", pr_url)
+        if m:
+            state["pr_url"] = pr_url
+            state["pr_number"] = int(m.group(1))
+            save_state(state)
+        return self._json({"ok": True, "pr_url": pr_url, "pr_number": state.get("pr_number")}, 200)
+
+    def _get_work_status(self):
+        _ws_add_to_sys_path()
+        from scripts._lib.work_state import load_state
+        state = load_state()
+        if not state.get("active_branch"):
+            return self._json({"active": False}, 200)
+        branch = state["active_branch"]
+        base = state.get("base", "main")
+
+        # commits ahead of base
+        r = subprocess.run(["git", "rev-list", "--count", f"{base}..{branch}"],
+                           cwd=WORKSPACE, capture_output=True, text=True)
+        commits_ahead = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
+
+        # unpushed commits
+        if state.get("pushed"):
+            r2 = subprocess.run(["git", "rev-list", "--count", f"origin/{branch}..{branch}"],
+                                cwd=WORKSPACE, capture_output=True, text=True)
+            unpushed = int(r2.stdout.strip() or 0) if r2.returncode == 0 else commits_ahead
+        else:
+            unpushed = commits_ahead
+
+        return self._json({
+            "active": True,
+            "branch": branch,
+            "base": base,
+            "commits_ahead": commits_ahead,
+            "unpushed": unpushed,
+            "pushed": state.get("pushed", False),
+            "pr_number": state.get("pr_number"),
+            "pr_url": state.get("pr_url"),
+        }, 200)
+
+    def _post_work_end(self, body: dict):
+        _ws_add_to_sys_path()
+        from scripts._lib.work_state import load_state, clear_state
+        state = load_state()
+        if not state.get("active_branch"):
+            return self._json({"error": "no active workstream"}, 409)
+        if _dirty_workspace().strip():
+            return self._json({"error": "uncommitted changes — commit or stash before ending"}, 409)
+        base = state.get("base", "main")
+        subprocess.run(["git", "checkout", base], cwd=WORKSPACE, check=True, capture_output=True)
+        clear_state()
+        return self._json({"ok": True}, 200)
 
     def _post_render(self, body: dict):
         """Re-render workspace dashboard."""

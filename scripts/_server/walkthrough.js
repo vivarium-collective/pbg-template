@@ -1,4 +1,4 @@
-// walkthrough.js — v0.3.7-A: _installImport (pip-install button); v0.3.6: Registry tab, simulation processes picker; v0.1.9: drag-drop uploads + sha256; v0.1.7: interactive forms.
+// walkthrough.js — v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport (pip-install button); v0.3.6: Registry tab, simulation processes picker; v0.1.9: drag-drop uploads + sha256; v0.1.7: interactive forms.
 (function () {
   "use strict";
 
@@ -75,7 +75,7 @@
         if (branch) msg += " Branch: " + branch + (commit ? " (" + commit + ")" : "");
         if (next) msg += "\n\nNext terminal step:\n  " + next;
         if (note) msg += "\n\n" + note;
-        // Re-render then reload.
+        // Re-render then reload (strip updates on reload).
         fetch("/api/render", { method: "POST" }).finally(function () {
           alert(msg);
           location.reload();
@@ -224,6 +224,7 @@
         }
         var msg = "Done! Branch: " + (json.branch || "?");
         fetch("/api/render", {method: "POST"}).finally(function() {
+          _refreshWorkStrip();
           alert(msg);
           location.reload();
         });
@@ -260,7 +261,7 @@
         // let the browser scroll to the anchor naturally
         return;
       }
-      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'build-model'];
+      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'build-model'];
       _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
     }
     window.addEventListener('hashchange', fromHash);
@@ -428,6 +429,106 @@
   window._installImport = _installImport;
 
   // -------------------------------------------------------------------------
+  // Workstream strip (v0.4.0b)
+  // -------------------------------------------------------------------------
+
+  function _refreshWorkStrip() {
+    fetch('/api/work-status')
+      .then(function(r){ return r.json(); })
+      .then(_renderWorkStrip)
+      .catch(function(err){ console.warn('work-status failed:', err); });
+  }
+  window._refreshWorkStrip = _refreshWorkStrip;
+
+  function _renderWorkStrip(s) {
+    var el = document.getElementById('workstream-strip');
+    if (!el) return;
+    if (!s.active) {
+      el.classList.add('inactive');
+      el.innerHTML =
+        '<span class="ws-label">No active workstream.</span>' +
+        '<button class="ws-btn ws-primary" onclick="_startWork()">Start workstream</button>';
+      return;
+    }
+    el.classList.remove('inactive');
+    var parts = [];
+    parts.push('<span class="ws-label">Working on:</span>');
+    parts.push('<code class="ws-branch">' + s.branch + '</code>');
+    parts.push('<span class="ws-meta">' + s.commits_ahead + ' commit' + (s.commits_ahead === 1 ? '' : 's') + ' ahead of ' + s.base + '</span>');
+    if (s.unpushed > 0 || (!s.pushed && s.commits_ahead > 0)) {
+      parts.push('<button class="ws-btn" onclick="_pushWork()">Push (' + s.unpushed + ')</button>');
+    }
+    if (s.pr_url) {
+      parts.push('<a class="ws-link" href="' + s.pr_url + '" target="_blank">PR #' + s.pr_number + ' &#8599;</a>');
+    } else if (s.pushed) {
+      parts.push('<button class="ws-btn" onclick="_createPR()">Create PR</button>');
+    }
+    parts.push('<button class="ws-btn ws-end" onclick="_endWork()" title="Switch back to ' + s.base + ' (workstream branch is preserved)">End</button>');
+    el.innerHTML = parts.join(' ');
+  }
+
+  function _startWork() {
+    var name = prompt("Workstream branch name (e.g., feat/baseline-work):");
+    if (!name) return;
+    fetch('/api/work-start', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({branch: name.trim()}),
+    })
+      .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
+      .then(function(parts){
+        if (!parts[0]) { alert("Could not start workstream:\n" + (parts[1].error || 'unknown')); return; }
+        _refreshWorkStrip();
+        location.reload();
+      });
+  }
+  window._startWork = _startWork;
+
+  function _pushWork() {
+    fetch('/api/work-push', {method: 'POST'})
+      .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
+      .then(function(parts){
+        if (!parts[0]) { alert("Push failed:\n" + (parts[1].error || 'unknown')); return; }
+        alert("Pushed.");
+        _refreshWorkStrip();
+      });
+  }
+  window._pushWork = _pushWork;
+
+  function _createPR() {
+    var title = prompt("PR title:");
+    if (title === null) return;
+    fetch('/api/work-create-pr', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({title: (title || '').trim()}),
+    })
+      .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
+      .then(function(parts){
+        if (!parts[0]) {
+          var msg = "Could not create PR:\n" + (parts[1].error || 'unknown');
+          if (parts[1].manual_url) msg += "\n\nOpen manually: " + parts[1].manual_url;
+          alert(msg);
+          return;
+        }
+        window.open(parts[1].pr_url, '_blank');
+        _refreshWorkStrip();
+      });
+  }
+  window._createPR = _createPR;
+
+  function _endWork() {
+    if (!confirm("End workstream? This switches you back to base. Your branch is preserved.")) return;
+    fetch('/api/work-end', {method: 'POST'})
+      .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
+      .then(function(parts){
+        if (!parts[0]) { alert("Could not end workstream:\n" + (parts[1].error || 'unknown')); return; }
+        location.reload();
+      });
+  }
+  window._endWork = _endWork;
+
+  // -------------------------------------------------------------------------
   // Run tests
   // -------------------------------------------------------------------------
 
@@ -574,6 +675,9 @@
   document.addEventListener("DOMContentLoaded", function () {
     // Initialize menu navigation.
     _initMenuNav();
+
+    // Initialize workstream strip.
+    _refreshWorkStrip();
 
     var panel = document.getElementById("walkthrough-panel");
     if (panel) {

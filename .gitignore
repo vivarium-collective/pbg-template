@@ -1,5 +1,6 @@
 .venv/
 .pbg/server/
+.pbg/state.json
 __pycache__/
 *.pyc
 *.egg-info/

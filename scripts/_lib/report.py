@@ -330,6 +330,24 @@ def _pending_entries(ws_root: Path) -> dict:
     return pending
 
 
+def _detect_github_repo(ws_root: Path) -> str | None:
+    """Parse `git remote get-url origin` and return 'owner/repo' if GitHub, else None."""
+    try:
+        r = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=ws_root, capture_output=True, text=True, check=True,
+        )
+        url = r.stdout.strip()
+        # SSH: git@github.com:owner/repo.git
+        import re
+        m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return None
+
+
 def render_workspace_report(ws_root: Path | None = None, *, today: str | None = None) -> Path:
     """Build <ws_root>/reports/index.html from workspace.yaml + pending branches."""
     ws_root = ws_root or _ws_root()
@@ -367,12 +385,6 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     registry, registry_warning = _load_registry(ws_root, package_path)
     pbg_doc = _load_document(ws_root, package_path)
 
-    # Pending visibility: collect entries from unmerged stage/* branches.
-    try:
-        pending = _pending_entries(ws_root)
-    except Exception:
-        pending = {}
-
     current_phase = _current_phase(phases)
     phase_details = _phase_details(ws_root)
 
@@ -397,6 +409,5 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         registry=registry,
         registry_warning=registry_warning,
         pbg_doc_json=json.dumps(pbg_doc, indent=2, default=str),
-        pending=pending,
     ))
     return out
