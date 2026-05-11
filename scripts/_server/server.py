@@ -429,7 +429,9 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        # Strip query string for route matching (self.path includes ?focus=...).
+        path_only = self.path.split("?", 1)[0]
+        if path_only in ("/", "/index.html"):
             return self._serve_file(WORKSPACE / "reports" / "index.html", "text/html")
         if self.path.startswith("/api/state"):
             return self._serve_state()
