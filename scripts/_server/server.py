@@ -2634,18 +2634,15 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
 
             core = build_core()
             state = {json.dumps(state)}
-            composite = Composite({{'state': state}}, core=core)
-            # plot_bigraph signature varies; try several known forms.
+            # bigraph-viz's plot_bigraph expects the state dict directly, NOT
+            # composite.composition (which is a string in this version). Pass
+            # the raw resolved state for a real graph.
             try:
-                fig = plot_bigraph(composite.composition, out_dir=None, filename=None, show_values=True)
-            except TypeError:
-                try:
-                    fig = plot_bigraph(composite.composition)
-                except Exception as e:
-                    print('@@@ERROR@@@')
-                    print(f'plot_bigraph failed: {{e}}')
-                    sys.exit(0)
-            # fig may be a graphviz.Digraph; convert to SVG
+                fig = plot_bigraph(state)
+            except Exception as e:
+                print('@@@ERROR@@@')
+                print(f'plot_bigraph failed: {{e}}')
+                sys.exit(0)
             try:
                 svg = fig.pipe(format='svg').decode('utf-8')
                 print('@@@SVG@@@')
