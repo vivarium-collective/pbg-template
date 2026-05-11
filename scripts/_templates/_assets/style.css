@@ -242,26 +242,21 @@ body.focus-mode .page.active{ display:block }
 body.focus-mode main.pages{ padding-top:8px }
 body.focus-mode .page-lead-supplement{ display:none }
 
-/* ── Composite explorer diagram (v0.5.1.4) ─────────────────────────────
- * graphviz emits a snug viewBox sized to the natural graph extent (in pt).
- * v0.5.1.2 set width:100% which STRETCHED the small natural SVG to fill
- * the wide panel — ballooning text + circles ridiculously.
+/* ── Composite explorer diagram (v0.5.1.5) ─────────────────────────────
+ * Server sets the SVG's width="100%" + drops height attr. The viewBox
+ * preserves aspect ratio, so the browser fills the container width and
+ * auto-computes height. Standard responsive-SVG pattern.
  *
- * Correct behavior: let the SVG render at natural size; ONLY scale down
- * (never up) if it overflows the container. Center horizontally. Scroll
- * vertically only when the natural size exceeds the max-height.
+ * CSS just needs to provide a sane height cap + vertical scroll if the
+ * resulting graph is taller than the panel.
  */
 #ce-diagram{
   max-height: 800px;
   overflow: auto;
-  text-align: center;   /* horizontal centering for the natural-size SVG */
 }
 #ce-diagram svg{
-  max-width: 100%;      /* shrink-to-fit only; don't stretch up */
+  display: block;
   max-height: 760px;
-  width: auto;
-  height: auto;
-  display: inline-block;
 }
 
 /* Add a slim header in focus mode so the user knows what they're looking at */

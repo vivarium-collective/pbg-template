@@ -2651,28 +2651,32 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
                         state=state, core=core,
                         label_margin='0.15',
                         rankdir='LR',
-                        dpi='150',
                     )
                 except TypeError:
-                    # Older API; fall back to minimal kwargs.
                     fig = plot_bigraph(state)
             except Exception as e:
                 print('@@@ERROR@@@')
                 print(f'plot_bigraph failed: {{e}}')
                 sys.exit(0)
-            # Add graph-level padding to prevent edge clipping. graphviz
-            # default pad=0.0555 is too tight; 0.5 gives visible breathing room.
+            # pad='0.5' on the graph prevents edge clipping (graphviz default
+            # 0.0555 is too tight).
             try:
                 fig.attr(pad='0.5')
             except Exception:
                 pass
             try:
                 svg = fig.pipe(format='svg').decode('utf-8')
-                # Keep graphviz's natural width/height (in pt) so the SVG
-                # renders at its native size. CSS max-width:100% handles the
-                # only-shrink case if the container is narrower; viewBox alone
-                # leaves browsers to default to 300×150 CSS replaced-element
-                # sizing, which made width:100% bloat the graph in v0.5.1.2.
+                # Make the SVG responsive: width="100%" so it fills the panel,
+                # viewBox preserves aspect ratio. Drop the explicit height so
+                # browser computes from viewBox. This is the standard
+                # responsive-SVG pattern; works in every browser.
+                import re as _re
+                svg = _re.sub(
+                    r'(<svg\\b)([^>]*?)\\s+width="[^"]*"',
+                    r'\\1\\2 width="100%"',
+                    svg, count=1,
+                )
+                svg = _re.sub(r'(<svg[^>]*?)\\s+height="[^"]*"', r'\\1', svg, count=1)
                 print('@@@SVG@@@')
                 print(svg)
             except Exception as e:
