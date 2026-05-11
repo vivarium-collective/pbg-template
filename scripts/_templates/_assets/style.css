@@ -242,21 +242,25 @@ body.focus-mode .page.active{ display:block }
 body.focus-mode main.pages{ padding-top:8px }
 body.focus-mode .page-lead-supplement{ display:none }
 
-/* ── Composite explorer diagram (v0.5.1.5) ─────────────────────────────
- * Server sets the SVG's width="100%" + drops height attr. The viewBox
- * preserves aspect ratio, so the browser fills the container width and
- * auto-computes height. Standard responsive-SVG pattern.
+/* ── Composite explorer diagram (v0.5.1.6) ─────────────────────────────
+ * Server preserves graphviz's natural pt dimensions; CSS only shrinks
+ * the SVG if the container is narrower. For wider containers, the SVG
+ * renders at its natural pt size and we center it. No forced stretching.
  *
- * CSS just needs to provide a sane height cap + vertical scroll if the
- * resulting graph is taller than the panel.
+ * The lingering rendering issues (huge labels/circles) are a bigraph-viz
+ * default-sizing concern; see task #85 for the upstream PR.
  */
 #ce-diagram{
   max-height: 800px;
   overflow: auto;
+  text-align: center;
 }
 #ce-diagram svg{
-  display: block;
+  max-width: 100%;
   max-height: 760px;
+  width: auto;
+  height: auto;
+  display: inline-block;
 }
 
 /* Add a slim header in focus mode so the user knows what they're looking at */

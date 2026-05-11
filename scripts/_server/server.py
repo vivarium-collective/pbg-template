@@ -2658,25 +2658,27 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
                 print('@@@ERROR@@@')
                 print(f'plot_bigraph failed: {{e}}')
                 sys.exit(0)
-            # pad='0.5' on the graph prevents edge clipping (graphviz default
-            # 0.0555 is too tight).
+            # Constrain graphviz output dimensions to a sane in-page size.
+            # Without this, graphviz's tight auto-fit makes text/circles
+            # balloon when the SVG is later scaled to a wide container.
+            # `size='8,6'` = 8in × 6in max (576pt × 432pt). `ratio='compress'`
+            # tells graphviz to shrink-to-fit rather than expand.
+            # pad='0.5' adds breathing room (default 0.0555 clips labels).
             try:
-                fig.attr(pad='0.5')
+                fig.attr(
+                    pad='0.5',
+                    size='8,6',
+                    ratio='compress',
+                )
             except Exception:
                 pass
             try:
                 svg = fig.pipe(format='svg').decode('utf-8')
-                # Make the SVG responsive: width="100%" so it fills the panel,
-                # viewBox preserves aspect ratio. Drop the explicit height so
-                # browser computes from viewBox. This is the standard
-                # responsive-SVG pattern; works in every browser.
-                import re as _re
-                svg = _re.sub(
-                    r'(<svg\\b)([^>]*?)\\s+width="[^"]*"',
-                    r'\\1\\2 width="100%"',
-                    svg, count=1,
-                )
-                svg = _re.sub(r'(<svg[^>]*?)\\s+height="[^"]*"', r'\\1', svg, count=1)
+                # Keep graphviz's natural pt width/height. With default 72-dpi
+                # SVG + size='8,6' constraint, the natural size is small
+                # enough to fit comfortably in a typical panel. CSS handles
+                # shrink-only via max-width:100% if container is narrower.
+                # Forcing width="100%" caused massive over-scaling.
                 print('@@@SVG@@@')
                 print(svg)
             except Exception as e:
