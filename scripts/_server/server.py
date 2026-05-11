@@ -2636,15 +2636,25 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
             state = {json.dumps(state)}
             # bigraph-viz's plot_bigraph expects the state dict directly, NOT
             # composite.composition (which is a string in this version). Pass
-            # the raw resolved state for a real graph.
+            # the resolved state with core so node types resolve properly.
             try:
-                fig = plot_bigraph(state)
+                # Try the spatio-flux style invocation first (state= + core=).
+                # Fall back to positional if older API.
+                try:
+                    fig = plot_bigraph(state=state, core=core)
+                except TypeError:
+                    fig = plot_bigraph(state)
             except Exception as e:
                 print('@@@ERROR@@@')
                 print(f'plot_bigraph failed: {{e}}')
                 sys.exit(0)
             try:
                 svg = fig.pipe(format='svg').decode('utf-8')
+                # Strip fixed width/height so the SVG scales to its container.
+                # Keep viewBox so the aspect ratio is preserved.
+                import re as _re
+                svg = _re.sub(r'(<svg[^>]*?)\s+width="[^"]*"', r'\\1', svg, count=1)
+                svg = _re.sub(r'(<svg[^>]*?)\s+height="[^"]*"', r'\\1', svg, count=1)
                 print('@@@SVG@@@')
                 print(svg)
             except Exception as e:

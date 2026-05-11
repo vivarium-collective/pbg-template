@@ -242,6 +242,24 @@ body.focus-mode .page.active{ display:block }
 body.focus-mode main.pages{ padding-top:8px }
 body.focus-mode .page-lead-supplement{ display:none }
 
+/* ── Composite explorer diagram (v0.5.1.2) ─────────────────────────────
+ * graphviz emits SVG with fixed pt width/height. The server strips them
+ * (so viewBox alone drives the rendering). These CSS rules then make the
+ * SVG fill its container's width while preserving aspect ratio — no more
+ * tiny diagram in a big panel, no more cut-off when the panel is narrow.
+ */
+#ce-diagram{
+  /* Override any inline max-height; let the diagram scroll vertically. */
+  max-height: 800px;
+  overflow: auto;
+}
+#ce-diagram svg{
+  width: 100%;
+  height: auto;
+  max-height: 760px;
+  display: block;
+}
+
 /* Add a slim header in focus mode so the user knows what they're looking at */
 body.focus-mode::before{
   content: "Focus mode — close this tab when done";
