@@ -1626,9 +1626,18 @@ if __name__ == "__main__":
         except Exception as pip_err:
             return self._json({"error": f"install error: {pip_err}"}, 500)
 
-        log_excerpt = (result.stdout + "\n" + result.stderr).strip()[-2000:]
+        log_excerpt = (result.stdout + "\n" + result.stderr).strip()[-3000:]
         if result.returncode != 0:
-            return self._json({"error": "pip install failed", "log": log_excerpt}, 500)
+            _ws_add_to_sys_path()
+            from scripts._lib.install_errors import diagnose as _diagnose_install
+            diag = _diagnose_install(log_excerpt)
+            resp = {
+                "error": "install failed",
+                "log": log_excerpt[-1000:],
+            }
+            if diag:
+                resp["diagnosis"] = diag.as_dict()
+            return self._json(resp, 500)
 
         # Mark installed in workspace.yaml on a stage branch.
         install_target = target  # captured for closure
@@ -2048,6 +2057,14 @@ if __name__ == "__main__":
                 "module": name,
                 "log": log_excerpt[-500:],
             }, 200)
+        elif code == 500 and log_excerpt:
+            # pip install failed inside action() — add structured diagnosis if available.
+            _ws_add_to_sys_path()
+            from scripts._lib.install_errors import diagnose as _diagnose_install
+            diag = _diagnose_install(log_excerpt)
+            resp["log"] = log_excerpt[-1000:]
+            if diag:
+                resp["diagnosis"] = diag.as_dict()
 
         return self._json(resp, code)
 

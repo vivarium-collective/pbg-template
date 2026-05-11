@@ -1,4 +1,4 @@
-// walkthrough.js — v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
+// walkthrough.js — v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
 (function () {
   "use strict";
 
@@ -386,6 +386,23 @@
   }
   window._loadCatalog = _loadCatalog;
 
+  // -------------------------------------------------------------------------
+  // Install error rendering (v0.4.5)
+  // -------------------------------------------------------------------------
+
+  function _renderInstallError(json) {
+    // Returns the alert text to show.
+    if (json.diagnosis) {
+      var d = json.diagnosis;
+      return (
+        "⚠ " + d.summary + "\n\n" +
+        "→ " + d.suggestion + "\n\n" +
+        "(error excerpt: " + (d.raw_excerpt || '').slice(0, 200) + "…)"
+      );
+    }
+    return "Install failed:\n" + (json.error || 'unknown') + "\n\n" + (json.log || '').slice(0, 500);
+  }
+
   function _installFromCatalog(name) {
     if (!confirm("Install '" + name + "' as a workstream commit?\n\nThis adds a submodule, pip installs the package, and appends it to pyproject.toml. Requires an active workstream.")) return;
     fetch('/api/catalog-install', {
@@ -397,7 +414,7 @@
       .then(function(parts) {
         var ok = parts[0], json = parts[1];
         if (!ok) {
-          alert("Install failed:\n" + (json.error || 'unknown') + "\n\n" + (json.log || ''));
+          alert(_renderInstallError(json));
           return;
         }
         var msg = "Installed " + name + ".\nCommit: " + (json.commit || 'n/a');
@@ -481,7 +498,7 @@
       .then(function(parts) {
         var ok = parts[0], json = parts[1];
         if (!ok) {
-          alert("Install failed:\n\n" + (json.error || 'unknown') + "\n\n" + (json.log || ''));
+          alert(_renderInstallError(json));
           btn.disabled = false;
           btn.textContent = "Install";
           return;
