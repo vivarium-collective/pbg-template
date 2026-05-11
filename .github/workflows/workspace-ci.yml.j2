@@ -2,11 +2,16 @@ name: workspace-ci
 on: [push, pull_request]
 
 # CI for a workspace scaffolded from pbg-template.
+#
 # Sequence:
-#   1. Check out workspace + submodules.
-#   2. Set up venv + install workspace deps editably.
-#   3. Lint workspace.yaml against the JSON schema.
-#   4. Run pytest at the workspace root (test_core_integration.py + test_phases.py + any user tests).
+#   1. Check out the workspace (no submodules — workspace tests don't need them,
+#      and recursive init breaks when an external/* submodule contains its own
+#      orphaned gitlinks that aren't declared in its .gitmodules).
+#   2. Best-effort init of external/* submodules (one level deep, never recursive).
+#      Failures here are non-fatal — the workspace tests should run regardless.
+#   3. Set up venv + install workspace deps editably.
+#   4. Lint workspace.yaml against the JSON schema.
+#   5. Run pytest at the workspace root (if any test files exist).
 #
 # This file ships in pbg-template as `.j2` so GitHub does NOT run it on the
 # template repo itself (which has no real pyproject.toml). template-init.sh
@@ -18,7 +23,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
+      - name: Init external submodules (best-effort, non-recursive)
+        run: |
+          # Only init top-level submodules under external/.
+          # Any sub-submodules with orphaned gitlinks (e.g. v2ecoli's
+          # .claude/worktrees/*) would break recursion, so we skip recursion.
+          # Failures here are tolerated — the workspace tests don't strictly
+          # need every external import to be present.
+          git submodule update --init --no-recursive external/ 2>&1 || true
+          echo "Submodule init complete (best-effort)."
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -37,4 +51,4 @@ jobs:
         if: hashFiles('tests/**/*.py') != ''
         run: |
           source .venv/bin/activate
-          pytest tests/ -v
+          pytest tests/ -v --color=yes
