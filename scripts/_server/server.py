@@ -2668,11 +2668,11 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
                 pass
             try:
                 svg = fig.pipe(format='svg').decode('utf-8')
-                # Strip fixed width/height so the SVG scales to its container.
-                # Keep viewBox so the aspect ratio is preserved.
-                import re as _re
-                svg = _re.sub(r'(<svg[^>]*?)\s+width="[^"]*"', r'\\1', svg, count=1)
-                svg = _re.sub(r'(<svg[^>]*?)\s+height="[^"]*"', r'\\1', svg, count=1)
+                # Keep graphviz's natural width/height (in pt) so the SVG
+                # renders at its native size. CSS max-width:100% handles the
+                # only-shrink case if the container is narrower; viewBox alone
+                # leaves browsers to default to 300×150 CSS replaced-element
+                # sizing, which made width:100% bloat the graph in v0.5.1.2.
                 print('@@@SVG@@@')
                 print(svg)
             except Exception as e:
