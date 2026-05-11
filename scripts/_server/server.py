@@ -74,6 +74,13 @@ try:
     from {package_name}.core import build_core
     core = build_core()
 
+    import process_bigraph as _pb
+    EMITTER_CLS = getattr(_pb, 'Emitter', None)
+    try:
+        from pbg_superpowers.visualization import Visualization as VISUALIZATION_CLS
+    except ImportError:
+        VISUALIZATION_CLS = None
+
     # Processes (and other linkable components) live in core.link_registry,
     # a dict keyed by both short names ('Composite') and fully-qualified
     # names ('process_bigraph.composite.Composite'). Dedupe by class identity
@@ -97,16 +104,32 @@ try:
             addr = f"{{cls.__module__}}.{{cls.__qualname__}}"
         except Exception:
             addr = str(cls)
+        # Categorize by ancestry
+        kind = "other"
+        if isinstance(cls, type):
+            if EMITTER_CLS is not None and issubclass(cls, EMITTER_CLS) and cls is not EMITTER_CLS:
+                kind = "emitter"
+            elif VISUALIZATION_CLS is not None and issubclass(cls, VISUALIZATION_CLS) and cls is not VISUALIZATION_CLS:
+                kind = "visualization"
+            elif hasattr(cls, '__mro__'):
+                for ancestor in cls.__mro__:
+                    if ancestor.__name__ in ('Process', 'ProcessEnsemble'):
+                        kind = "process"
+                        break
+                    if ancestor.__name__ == 'Step':
+                        kind = "step"
+                        break
         schema_preview = ""
         if hasattr(cls, 'config_schema'):
             try:
-                schema_preview = json.dumps(cls.config_schema, default=str)[:200]
+                schema_preview = json.dumps(cls.config_schema, default=str)[:400]
             except Exception:
-                schema_preview = ""
+                schema_preview = "<unserializable>"
         seen_classes[cls_id] = len(processes)
         processes.append({{
             "name": name,
             "address": addr,
+            "kind": kind,
             "schema_preview": schema_preview,
             "aliases": [],
         }})

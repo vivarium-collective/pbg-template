@@ -251,3 +251,15 @@ body.focus-mode::before{
   padding:6px 16px; font-size:0.82em; font-weight:500;
   border-bottom:1px solid #fcd34d;
 }
+
+/* ── Registry kind pickers: Emitters + Visualizations (v0.4.12) ──────── */
+.picker-row{
+  display:flex; gap:12px; align-items:flex-start; justify-content:space-between;
+  padding:10px 12px; border-bottom:1px solid #e5e7eb;
+}
+.picker-row:last-child{ border-bottom:none }
+.picker-row-main{ flex:1; min-width:0 }
+.picker-row-main code{ font-size:0.82em }
+.picker-row-main details{ margin-top:4px }
+.picker-row-main details summary{ cursor:pointer; font-size:0.85em }
+.picker-row-actions{ flex-shrink:0 }

@@ -212,6 +212,15 @@
   <h2 class="page-title">Simulation Setup</h2>
   <p class="page-lead">Define how you&rsquo;ll run the model. Set up <strong>simulations</strong> (run configs: time interval, parameters, initial state) and the <strong>observables</strong> they record. Visualizations live in their own tab.</p>
 
+  <!-- Available Emitters (registry-driven) -->
+  <div class="panel">
+    <h3>Available Emitters <span id="emitter-count" class="count-badge"></span></h3>
+    <p class="panel-lead">Emitters capture observable values during simulation. These are discovered from <code>core.link_registry</code> &mdash; any installed pbg-* package can contribute one.</p>
+    <div id="emitter-picker-container">
+      <p class="empty-state">Loading from Registry&hellip;</p>
+    </div>
+  </div>
+
   <!-- Observables panel -->
   <div class="panel">
     <h3>Observables</h3>
@@ -299,8 +308,18 @@
   <h2 class="page-title">Visualizations</h2>
   <p class="page-lead">Charts rendered from observable trajectories. Describe what to plot, then use the Create/Add/Commit lifecycle to generate and version the function.</p>
 
+  <!-- Available Visualizations (registry-driven) -->
   <div class="panel">
-    <h3>Visualizations</h3>
+    <h3>Available Visualizations <span id="viz-count" class="count-badge"></span></h3>
+    <p class="panel-lead">Visualization classes discovered from <code>core.link_registry</code>. Subclasses of <code>pbg_superpowers.visualization.Visualization</code> from any installed pbg-* package appear here. Click &ldquo;Use&rdquo; to add it to this workspace&rsquo;s visualization list.</p>
+    <div id="viz-picker-container">
+      <p class="empty-state">Loading from Registry&hellip;</p>
+    </div>
+  </div>
+
+  <!-- Described visualizations -->
+  <div class="panel">
+    <h3>Described visualizations</h3>
     <p class="panel-lead">Add a visualization by name + description. Click <strong>Create</strong> to invoke <code>/pbg-viz</code>, <strong>Add to project</strong> to stage it, then <strong>Commit</strong> to save it on the active branch.</p>
     <div style="margin-bottom:8px">
       <button class="action-btn" onclick="_vizCommitAll()">Commit all staged</button>
