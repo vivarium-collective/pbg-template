@@ -2663,10 +2663,18 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
                 except Exception:
                     pass
                 svg = fig.pipe(format='svg').decode('utf-8')
-                # Keep graphviz's natural pt dimensions (with compact=True
-                # they're small enough — typically 300-400pt wide). CSS
-                # max-width:100% shrinks only if container is narrower.
-                # Forcing width=100% bloats internal text/strokes at panel scale.
+                # graphviz bug workaround: the inner <g transform="scale(s)..."> scales
+                # content by s (typically 1.39), but the viewBox is set to the UN-scaled
+                # extent. So a viewBox of 308×176 with a 1.39 scale transform places
+                # rightmost nodes at viewBox x≈378 — outside the box → clipped right side.
+                # The SVG's natural width/height attrs DO match the scaled extent.
+                # Fix: rewrite viewBox to match the width/height in pt.
+                import re as _re
+                wm = _re.search(r'<svg[^>]*\\bwidth=\"([0-9.]+)pt\"', svg)
+                hm = _re.search(r'<svg[^>]*\\bheight=\"([0-9.]+)pt\"', svg)
+                if wm and hm:
+                    new_vb = 'viewBox="0 0 ' + wm.group(1) + ' ' + hm.group(1) + '"'
+                    svg = _re.sub(r'viewBox=\"[^\"]+\"', new_vb, svg, count=1)
                 print('@@@SVG@@@')
                 print(svg)
             except Exception as e:
