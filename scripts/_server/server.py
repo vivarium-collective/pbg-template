@@ -2637,17 +2637,35 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
             # bigraph-viz's plot_bigraph expects the state dict directly, NOT
             # composite.composition (which is a string in this version). Pass
             # the resolved state with core so node types resolve properly.
+            #
+            # Anti-clipping hints (forwarded to get_graphviz_fig as kwargs):
+            #   - label_margin='0.15' adds room around node labels
+            #   - rankdir='LR' reads better for typical process graphs
+            #   - dpi='150' renders sharper at the same SVG dimensions
+            # Upstream root cause: bigraph-viz's default graph_attrs has no
+            # `pad` set, so graphviz clips at default 0.0555in margin. Track
+            # the upstream PR adding `pad='0.5'` to fix this for every consumer.
             try:
-                # Try the spatio-flux style invocation first (state= + core=).
-                # Fall back to positional if older API.
                 try:
-                    fig = plot_bigraph(state=state, core=core)
+                    fig = plot_bigraph(
+                        state=state, core=core,
+                        label_margin='0.15',
+                        rankdir='LR',
+                        dpi='150',
+                    )
                 except TypeError:
+                    # Older API; fall back to minimal kwargs.
                     fig = plot_bigraph(state)
             except Exception as e:
                 print('@@@ERROR@@@')
                 print(f'plot_bigraph failed: {{e}}')
                 sys.exit(0)
+            # Add graph-level padding to prevent edge clipping. graphviz
+            # default pad=0.0555 is too tight; 0.5 gives visible breathing room.
+            try:
+                fig.attr(pad='0.5')
+            except Exception:
+                pass
             try:
                 svg = fig.pipe(format='svg').decode('utf-8')
                 # Strip fixed width/height so the SVG scales to its container.
