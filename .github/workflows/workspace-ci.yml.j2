@@ -26,13 +26,14 @@ jobs:
           submodules: false
       - name: Init external submodules (best-effort, non-recursive)
         run: |
-          # Only init top-level submodules under external/.
-          # Any sub-submodules with orphaned gitlinks (e.g. v2ecoli's
-          # .claude/worktrees/*) would break recursion, so we skip recursion.
-          # Failures here are tolerated — the workspace tests don't strictly
-          # need every external import to be present.
-          git submodule update --init --no-recursive external/ 2>&1 || true
-          echo "Submodule init complete (best-effort)."
+          # Default `git submodule update` is non-recursive — omit --recursive
+          # to avoid descending into a sub-module's submodules (which can have
+          # orphan gitlinks like v2ecoli's .claude/worktrees/*). Failures here
+          # are tolerated — workspace tests don't strictly need every external.
+          # NOTE: --no-recursive is NOT a real flag; just omit --recursive.
+          git submodule update --init external/ 2>&1 || true
+          echo "--- external/ contents ---"
+          ls -la external/ 2>&1 || true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
