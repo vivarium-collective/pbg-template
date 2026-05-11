@@ -2157,18 +2157,17 @@ if __name__ == "__main__":
         return self._json(data, 200)
 
     def _get_composites(self):
-        """GET /api/composites — return discovered composite specs (workspace-local)."""
+        """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package."""
         _ws_add_to_sys_path()
         try:
-            from scripts._lib.composite_lookup import discover_workspace_composites
+            from scripts._lib.composite_lookup import discover_all_composites
         except ImportError as e:
             return self._json({"composites": [], "error": str(e)}, 200)
 
         try:
             ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
             pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-            specs = discover_workspace_composites(WORKSPACE, pkg)
-            # Strip internal _state field before returning to client.
+            specs = discover_all_composites(WORKSPACE, pkg)
             out = []
             for s in specs.values():
                 out.append({k: v for k, v in s.items() if not k.startswith("_")})
@@ -2180,7 +2179,7 @@ if __name__ == "__main__":
         """GET /api/composite-resolve — resolve a composite spec with param overrides, return state + SVG."""
         from urllib.parse import urlparse, parse_qs
         _ws_add_to_sys_path()
-        from scripts._lib.composite_lookup import substitute_parameters
+        from scripts._lib.composite_lookup import substitute_parameters, find_composite_path
 
         qs = parse_qs(urlparse(self.path).query)
         spec_id = (qs.get("id") or [""])[0]
@@ -2195,17 +2194,7 @@ if __name__ == "__main__":
 
         ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        parts = spec_id.split(".composites.")
-        if len(parts) != 2:
-            return self._json({"error": f"unrecognized composite id: {spec_id}"}, 404)
-        stem = parts[1]
-        # Find the file
-        path = None
-        for suffix in (".composite.yaml", ".composite.yml", ".composite.json"):
-            candidate = WORKSPACE / pkg / "composites" / f"{stem}{suffix}"
-            if candidate.exists():
-                path = candidate
-                break
+        path = find_composite_path(WORKSPACE, pkg, spec_id)
         if path is None:
             return self._json({"error": f"spec file not found for id {spec_id}"}, 404)
 
@@ -2233,7 +2222,7 @@ if __name__ == "__main__":
     def _post_composite_test_run(self, body: dict):
         """POST /api/composite-test-run — run a composite for N steps, return emitter results."""
         _ws_add_to_sys_path()
-        from scripts._lib.composite_lookup import substitute_parameters
+        from scripts._lib.composite_lookup import substitute_parameters, find_composite_path
 
         spec_id = (body.get("id") or "").strip()
         overrides = body.get("overrides") or {}
@@ -2244,16 +2233,7 @@ if __name__ == "__main__":
 
         ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        parts = spec_id.split(".composites.")
-        if len(parts) != 2:
-            return self._json({"error": f"unrecognized composite id: {spec_id}"}, 404)
-        stem = parts[1]
-        path = None
-        for suffix in (".composite.yaml", ".composite.yml", ".composite.json"):
-            candidate = WORKSPACE / pkg / "composites" / f"{stem}{suffix}"
-            if candidate.exists():
-                path = candidate
-                break
+        path = find_composite_path(WORKSPACE, pkg, spec_id)
         if path is None:
             return self._json({"error": "spec file not found"}, 404)
 
