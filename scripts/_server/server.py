@@ -2645,45 +2645,33 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
             # Upstream root cause: bigraph-viz's default graph_attrs has no
             # `pad` set, so graphviz clips at default 0.0555in margin. Track
             # the upstream PR adding `pad='0.5'` to fix this for every consumer.
+            # Try the new bigraph-viz 1.1.0+ API: render_svg with responsive +
+            # compact flags. Falls back to plot_bigraph + manual fig.attr for
+            # older versions.
+            # Use plot_bigraph (which handles state→graph_dict→SVG correctly)
+            # with the new bigraph-viz 1.1.0 compact mode. Post-process the
+            # SVG to make it responsive (width=100% + no fixed height) so it
+            # fills the dashboard container without bloating.
             try:
                 try:
-                    fig = plot_bigraph(
-                        state=state, core=core,
-                        label_margin='0.15',
-                        rankdir='LR',
-                    )
+                    fig = plot_bigraph(state=state, core=core, compact=True, rankdir='LR')
                 except TypeError:
-                    fig = plot_bigraph(state)
-            except Exception as e:
-                print('@@@ERROR@@@')
-                print(f'plot_bigraph failed: {{e}}')
-                sys.exit(0)
-            # Constrain graphviz output dimensions to a sane in-page size.
-            # Without this, graphviz's tight auto-fit makes text/circles
-            # balloon when the SVG is later scaled to a wide container.
-            # `size='8,6'` = 8in × 6in max (576pt × 432pt). `ratio='compress'`
-            # tells graphviz to shrink-to-fit rather than expand.
-            # pad='0.5' adds breathing room (default 0.0555 clips labels).
-            try:
-                fig.attr(
-                    pad='0.5',
-                    size='8,6',
-                    ratio='compress',
-                )
-            except Exception:
-                pass
-            try:
+                    # compact kwarg not supported (older bigraph-viz)
+                    fig = plot_bigraph(state=state, core=core, rankdir='LR')
+                try:
+                    fig.attr(pad='0.5')
+                except Exception:
+                    pass
                 svg = fig.pipe(format='svg').decode('utf-8')
-                # Keep graphviz's natural pt width/height. With default 72-dpi
-                # SVG + size='8,6' constraint, the natural size is small
-                # enough to fit comfortably in a typical panel. CSS handles
-                # shrink-only via max-width:100% if container is narrower.
-                # Forcing width="100%" caused massive over-scaling.
+                # Keep graphviz's natural pt dimensions (with compact=True
+                # they're small enough — typically 300-400pt wide). CSS
+                # max-width:100% shrinks only if container is narrower.
+                # Forcing width=100% bloats internal text/strokes at panel scale.
                 print('@@@SVG@@@')
                 print(svg)
             except Exception as e:
                 print('@@@ERROR@@@')
-                print(f'failed to render to SVG: {{e}}')
+                print(f'render failed: {{e}}')
         except Exception as e:
             print('@@@ERROR@@@')
             print(traceback.format_exc())
