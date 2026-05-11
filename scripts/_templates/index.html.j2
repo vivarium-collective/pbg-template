@@ -119,7 +119,20 @@
     {% for ds in datasets %}
     <tr>
       <td><code>{{ ds.name }}</code></td>
-      <td><code>{% if ds.path %}{{ ds.path }}{% elif ds.url %}{{ ds.url }}{% endif %}</code></td>
+      <td>
+        {% if ds.file_exists %}
+          {% if ds.sha256_valid == False %}<span class="file-status status-mismatch">⚠ sha mismatch</span>{% else %}<span class="file-status status-ok">✓ {{ ds.size_human }}</span>{% endif %}
+          <a href="/{{ ds.path }}" target="_blank" class="file-link">Open ↗</a><br>
+          <small class="muted">{{ ds.path }}</small>
+        {% elif ds.file_exists == False %}
+          <span class="file-status status-missing">⚠ missing</span><br>
+          <small class="muted">{{ ds.path }}</small>
+        {% elif ds.url %}
+          <a href="{{ ds.url }}" target="_blank" class="file-link">{{ ds.url }} ↗</a>
+        {% else %}
+          <small class="muted">{{ ds.path or '(no source)' }}</small>
+        {% endif %}
+      </td>
       <td>{{ (ds.claims or [])|join(', ') }}</td>
     </tr>
     {% endfor %}
@@ -140,7 +153,18 @@
     {% for pdf in references_pdfs %}
     <tr>
       <td><code>{{ pdf.bib_key }}</code>{% if pdf._metadata_pending %} <span class="stage-label optional">Needs metadata</span>{% endif %}</td>
-      <td><a href="/{{ pdf.path }}">{{ pdf.path }}</a></td>
+      <td>
+        {% if pdf.file_exists %}
+          {% if pdf.sha256_valid == False %}<span class="file-status status-mismatch">⚠ sha mismatch</span>{% else %}<span class="file-status status-ok">✓ {{ pdf.size_human }}</span>{% endif %}
+          <a href="/{{ pdf.path }}" target="_blank" class="file-link">Open ↗</a><br>
+          <small class="muted">{{ pdf.path }}</small>
+        {% elif pdf.file_exists == False %}
+          <span class="file-status status-missing">⚠ missing</span><br>
+          <small class="muted">{{ pdf.path }}</small>
+        {% else %}
+          <small class="muted">{{ pdf.path }}</small>
+        {% endif %}
+      </td>
       <td><code>{{ pdf.sha256[:8] }}&hellip;</code></td>
     </tr>
     {% endfor %}
@@ -158,7 +182,18 @@
     {% for doc in expert_docs %}
     <tr>
       <td><strong>{{ doc.name }}</strong></td>
-      <td><a href="/{{ doc.path }}">{{ doc.path }}</a></td>
+      <td>
+        {% if doc.file_exists %}
+          {% if doc.sha256_valid == False %}<span class="file-status status-mismatch" title="sha256 in workspace.yaml doesn't match disk">⚠ sha mismatch</span>{% else %}<span class="file-status status-ok">✓ {{ doc.size_human }}</span>{% endif %}
+          <a href="/{{ doc.path }}" target="_blank" class="file-link">Open ↗</a><br>
+          <small class="muted">{{ doc.path }}</small>
+        {% elif doc.file_exists == False %}
+          <span class="file-status status-missing" title="path in workspace.yaml does not exist on disk">⚠ missing</span><br>
+          <small class="muted">{{ doc.path }}</small>
+        {% else %}
+          <small class="muted">{{ doc.path or '(no path)' }}</small>
+        {% endif %}
+      </td>
       <td>{{ doc.description or '' }}</td>
       <td>{{ doc.contributor or '' }}</td>
       <td>{{ (doc.claims_supported or [])|join(', ') }}</td>

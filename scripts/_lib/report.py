@@ -204,6 +204,73 @@ def _count_bib_entries(ws_root: Path) -> int:
         return 0
 
 
+_SIZE_UNITS = ("B", "KB", "MB", "GB", "TB")
+
+
+def _human_size(n: int) -> str:
+    """Render a byte count as e.g. '314 KB' or '1.2 MB'."""
+    size = float(n)
+    for unit in _SIZE_UNITS:
+        if size < 1024.0 or unit == _SIZE_UNITS[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}" if size < 10 else f"{int(size)} {unit}"
+        size /= 1024.0
+    return f"{int(size)} TB"
+
+
+def _enrich_with_file_info(entries: list[dict], ws_root: Path) -> list[dict]:
+    """For each entry with a 'path' field, attach file_exists / size_bytes / size_human / sha256_valid.
+
+    Used to render datasets, expert_docs, references_pdfs with file-presence indicators
+    instead of plain links the user has to click to verify.
+    """
+    out = []
+    for raw in entries:
+        if not isinstance(raw, dict):
+            out.append(raw)
+            continue
+        e = dict(raw)  # don't mutate the original
+        path = e.get("path")
+        if not path:
+            e["file_exists"] = None
+            e["size_human"] = None
+            e["sha256_valid"] = None
+            out.append(e)
+            continue
+        abs_path = (ws_root / path) if not Path(path).is_absolute() else Path(path)
+        if not abs_path.exists():
+            e["file_exists"] = False
+            e["size_human"] = None
+            e["sha256_valid"] = None
+            out.append(e)
+            continue
+        try:
+            size = abs_path.stat().st_size
+            e["file_exists"] = True
+            e["size_bytes"] = size
+            e["size_human"] = _human_size(size)
+        except OSError:
+            e["file_exists"] = None
+            e["size_human"] = None
+        # sha256 check is optional — only validate if metadata declares one.
+        declared = e.get("sha256")
+        if declared and e.get("file_exists"):
+            try:
+                import hashlib as _hashlib
+                h = _hashlib.sha256()
+                with abs_path.open("rb") as fh:
+                    for chunk in iter(lambda: fh.read(65536), b""):
+                        h.update(chunk)
+                e["sha256_valid"] = h.hexdigest() == declared
+            except OSError:
+                e["sha256_valid"] = None
+        else:
+            e["sha256_valid"] = None
+        out.append(e)
+    return out
+
+
 def _detect_github_repo(ws_root: Path) -> str | None:
     """Parse `git remote get-url origin` and return 'owner/repo' if GitHub, else None."""
     try:
@@ -240,9 +307,9 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     _copy_assets(ws_root / "reports" / "assets")
 
     references_count = _count_bib_entries(ws_root)
-    datasets = ws.get("datasets") or []
-    expert_docs = ws.get("expert_docs") or []
-    references_pdfs = ws.get("references_pdfs") or []
+    datasets = _enrich_with_file_info(ws.get("datasets") or [], ws_root)
+    expert_docs = _enrich_with_file_info(ws.get("expert_docs") or [], ws_root)
+    references_pdfs = _enrich_with_file_info(ws.get("references_pdfs") or [], ws_root)
     imports = ws.get("imports") or {}
     observables = ws.get("observables") or []
     visualizations = ws.get("visualizations") or []
