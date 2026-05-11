@@ -464,6 +464,11 @@
         var countBadge = document.getElementById('composite-count');
         if (!container) return;
         var composites = data.composites || [];
+        // Cache by id so onclick handlers pass just the id; _useComposite
+        // looks the full object up. Inline JSON.stringify in onclick attrs
+        // breaks when descriptions contain apostrophes / quotes.
+        window._compositesById = {};
+        composites.forEach(function(c) { window._compositesById[c.id] = c; });
         if (countBadge) countBadge.textContent = '(' + composites.length + ')';
         if (!composites.length) {
           container.innerHTML =
@@ -493,7 +498,7 @@
             requires +
             paramSummary +
             '<div class="module-action">' +
-              '<button class="action-btn" onclick=\'_useComposite(' + JSON.stringify(c) + ')\'>Use</button>' +
+              '<button class="action-btn" onclick="_useComposite(\'' + _esc(c.id) + '\')">Use</button>' +
             '</div>' +
           '</div>';
         });
@@ -502,7 +507,15 @@
   }
   window._loadComposites = _loadComposites;
 
-  function _useComposite(composite) {
+  function _useComposite(compositeOrId) {
+    // Accept either a full composite object (legacy) or an id string.
+    var composite = (typeof compositeOrId === 'string')
+      ? (window._compositesById || {})[compositeOrId]
+      : compositeOrId;
+    if (!composite) {
+      alert("Composite not found in cache. Reload the page and try again.");
+      return;
+    }
     var modal = document.getElementById('modal-configure-composite');
     if (!modal) return;
     var nameSpan = document.getElementById('cc-composite-name');
