@@ -1,4 +1,4 @@
-// walkthrough.js — v0.5.1: composite explorer page (bigraph-viz + test run + promote to simulation); v0.4.14: Available Composites picker + Emitter Use feedback + drop process multi-select; v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
+// walkthrough.js — v0.5.2: composite explorer UX fixes (no focus-mode hijack, one-row-per-param layout, lazy-load composite cache); v0.5.1: composite explorer page (bigraph-viz + test run + promote to simulation); v0.4.14: Available Composites picker + Emitter Use feedback + drop process multi-select; v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
 (function () {
   "use strict";
 
@@ -1259,7 +1259,14 @@
   window._ceCurrent = null;  // current composite + overrides state
 
   function _openCompositeExplorer(id) {
-    window.location.search = '?focus=composite-explore&id=' + encodeURIComponent(id);
+    // Navigate to the explorer as a normal tab (menu stays visible — user can
+    // click another menu item to leave). The id lives in ?id= so deep-linking
+    // / reload works; the hash drives which page is shown.
+    var url = new URL(window.location.href);
+    url.searchParams.set('id', id);
+    url.hash = '#composite-explore';
+    window.history.pushState({}, '', url.toString());
+    _switchPage('composite-explore');
   }
   window._openCompositeExplorer = _openCompositeExplorer;
 
@@ -1274,6 +1281,12 @@
       return;
     }
     window._ceCurrent = {id: id, overrides: {}};
+    // Eagerly populate the composite card cache so "Create simulation" can
+    // open the Configure modal even when the user lands here directly
+    // (deep-link / Use button) without ever visiting Simulation Setup.
+    if (!window._compositesById || !window._compositesById[id]) {
+      _loadComposites();
+    }
     _ceFetch();
   }
   window._initCompositeExplorer = _initCompositeExplorer;
@@ -1324,12 +1337,20 @@
       var type = pdef.type || 'string';
       var inputType = (type === 'int' || type === 'float') ? 'number' : 'text';
       var step = (type === 'float') ? 'any' : (type === 'int' ? '1' : '');
-      var desc = pdef.description ? '<small class="muted">' + _esc(pdef.description) + '</small>' : '';
-      return '<label>' + _esc(k) + ' <span class="muted">(' + _esc(type) + ')</span>' +
-        '<input data-param="' + _esc(k) + '" data-type="' + _esc(type) + '" type="' + inputType + '"' +
-        (step ? ' step="' + step + '"' : '') +
-        ' value="' + _esc(String(current !== undefined && current !== null ? current : '')) + '">' +
-        desc + '</label>';
+      var desc = pdef.description
+        ? '<div class="ce-param-desc muted"><small>' + _esc(pdef.description) + '</small></div>'
+        : '';
+      return '<div class="ce-param-row">' +
+        '<label class="ce-param-label">' +
+          '<span class="ce-param-name"><code>' + _esc(k) + '</code> ' +
+            '<span class="muted">(' + _esc(type) + ')</span></span>' +
+          '<input class="ce-param-input" data-param="' + _esc(k) +
+            '" data-type="' + _esc(type) + '" type="' + inputType + '"' +
+            (step ? ' step="' + step + '"' : '') +
+            ' value="' + _esc(String(current !== undefined && current !== null ? current : '')) + '">' +
+        '</label>' +
+        desc +
+      '</div>';
     }).join('');
   }
 
@@ -1404,22 +1425,40 @@
 
   function _cePromoteSimulation() {
     // Re-use the existing _useComposite flow (Configure modal) with current overrides pre-applied.
-    var c = (window._compositesById || {})[window._ceCurrent.id];
-    if (!c) {
-      // Fetch and try again by loading composites first
-      alert('Composite not in cache. Switch to Simulation Setup tab once to load, then retry.');
+    var id = window._ceCurrent.id;
+
+    function _openModalAndApplyOverrides() {
+      _useComposite(id);
+      var modal = document.getElementById('modal-configure-composite');
+      if (modal) {
+        Object.keys(window._ceCurrent.overrides || {}).forEach(function(k) {
+          var inp = modal.querySelector('input[name="param_' + k + '"]');
+          if (inp) inp.value = window._ceCurrent.overrides[k];
+        });
+      }
+    }
+
+    if ((window._compositesById || {})[id]) {
+      _openModalAndApplyOverrides();
       return;
     }
-    // Open the Configure modal with the current composite
-    _useComposite(window._ceCurrent.id);
-    // Apply current overrides to the modal inputs
-    var modal = document.getElementById('modal-configure-composite');
-    if (modal) {
-      Object.keys(window._ceCurrent.overrides || {}).forEach(function(k) {
-        var inp = modal.querySelector('input[name="param_' + k + '"]');
-        if (inp) inp.value = window._ceCurrent.overrides[k];
+    // Cache not populated yet (user landed here without visiting
+    // Simulation Setup). Fetch synchronously-as-possible, then open.
+    fetch('/api/composites')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var composites = data.composites || [];
+        window._compositesById = window._compositesById || {};
+        composites.forEach(function(c) { window._compositesById[c.id] = c; });
+        if (!window._compositesById[id]) {
+          alert('Composite "' + id + '" not found on the server. It may have been removed.');
+          return;
+        }
+        _openModalAndApplyOverrides();
+      })
+      .catch(function(err) {
+        alert('Failed to load composites: ' + err);
       });
-    }
   }
   window._cePromoteSimulation = _cePromoteSimulation;
 

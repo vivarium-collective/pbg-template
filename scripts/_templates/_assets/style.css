@@ -263,6 +263,20 @@ body.focus-mode .page-lead-supplement{ display:none }
   display: inline-block;
 }
 
+/* ── Composite explorer parameters list (v0.5.2) ──────────────────────── */
+#ce-parameters{ display:flex; flex-direction:column; gap:10px }
+.ce-param-row{
+  display:flex; flex-direction:column; gap:2px;
+  padding:8px 10px; border:1px solid #e5e7eb; border-radius:4px;
+  background:#fff;
+}
+.ce-param-label{
+  display:flex; align-items:center; gap:10px; margin:0;
+}
+.ce-param-name{ flex:0 0 auto; min-width:180px }
+.ce-param-input{ flex:1 1 auto; max-width:320px }
+.ce-param-desc{ margin-left:190px }
+
 /* Add a slim header in focus mode so the user knows what they're looking at */
 body.focus-mode::before{
   content: "Focus mode — close this tab when done";

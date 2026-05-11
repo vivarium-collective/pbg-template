@@ -2638,43 +2638,17 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
             # composite.composition (which is a string in this version). Pass
             # the resolved state with core so node types resolve properly.
             #
-            # Anti-clipping hints (forwarded to get_graphviz_fig as kwargs):
-            #   - label_margin='0.15' adds room around node labels
-            #   - rankdir='LR' reads better for typical process graphs
-            #   - dpi='150' renders sharper at the same SVG dimensions
-            # Upstream root cause: bigraph-viz's default graph_attrs has no
-            # `pad` set, so graphviz clips at default 0.0555in margin. Track
-            # the upstream PR adding `pad='0.5'` to fix this for every consumer.
-            # Try the new bigraph-viz 1.1.0+ API: render_svg with responsive +
-            # compact flags. Falls back to plot_bigraph + manual fig.attr for
-            # older versions.
-            # Use plot_bigraph (which handles state→graph_dict→SVG correctly)
-            # with the new bigraph-viz 1.1.0 compact mode. Post-process the
-            # SVG to make it responsive (width=100% + no fixed height) so it
-            # fills the dashboard container without bloating.
+            # bigraph-viz >=2.0.3 returns a ResponsiveGraph whose
+            # _make_responsive_svg() handles the responsive width + the
+            # graphviz viewBox/transform mismatch that previously clipped
+            # the right/bottom edges. Fall back to raw .pipe('svg') if a
+            # downgrade ever happens, but the pin in pyproject.toml is >=2.0.3.
             try:
-                try:
-                    fig = plot_bigraph(state=state, core=core, compact=True, rankdir='LR')
-                except TypeError:
-                    # compact kwarg not supported (older bigraph-viz)
-                    fig = plot_bigraph(state=state, core=core, rankdir='LR')
-                try:
-                    fig.attr(pad='0.5')
-                except Exception:
-                    pass
-                svg = fig.pipe(format='svg').decode('utf-8')
-                # graphviz bug workaround: the inner <g transform="scale(s)..."> scales
-                # content by s (typically 1.39), but the viewBox is set to the UN-scaled
-                # extent. So a viewBox of 308×176 with a 1.39 scale transform places
-                # rightmost nodes at viewBox x≈378 — outside the box → clipped right side.
-                # The SVG's natural width/height attrs DO match the scaled extent.
-                # Fix: rewrite viewBox to match the width/height in pt.
-                import re as _re
-                wm = _re.search(r'<svg[^>]*\\bwidth=\"([0-9.]+)pt\"', svg)
-                hm = _re.search(r'<svg[^>]*\\bheight=\"([0-9.]+)pt\"', svg)
-                if wm and hm:
-                    new_vb = 'viewBox="0 0 ' + wm.group(1) + ' ' + hm.group(1) + '"'
-                    svg = _re.sub(r'viewBox=\"[^\"]+\"', new_vb, svg, count=1)
+                fig = plot_bigraph(state=state, core=core, rankdir='LR')
+                if hasattr(fig, '_make_responsive_svg'):
+                    svg = fig._make_responsive_svg()
+                else:
+                    svg = fig.pipe(format='svg').decode('utf-8')
                 print('@@@SVG@@@')
                 print(svg)
             except Exception as e:
