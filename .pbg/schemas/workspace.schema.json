@@ -2,17 +2,20 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "workspace.yaml",
   "type": "object",
-  "required": ["schema_version", "name", "created", "plugin_version", "stages"],
+  "required": ["schema_version", "name", "created", "plugin_version"],
   "properties": {
     "schema_version": {"const": 2},
     "name": {"type": "string", "minLength": 1},
     "created": {"type": "string", "format": "date"},
     "plugin_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "package_path": {"type": "string"},
-    "pbg_processes": {"type": "array", "items": {"type": "string"}},
+    "pbg_processes": {
+      "type": "array", "items": {"type": "string"},
+      "description": "Legacy from v0.1.x — kept as optional for migrated workspaces; new workspaces omit it."
+    },
     "stages": {
       "type": "object",
-      "required": ["workspace_bootstrap"],
+      "description": "Legacy from v0.1.x 9-stage flow — kept as optional for migrated workspaces; new workspaces omit it.",
       "properties": {
         "workspace_bootstrap": {"$ref": "#/definitions/stageStatus"}
       }

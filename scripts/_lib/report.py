@@ -27,41 +27,10 @@ def _ws_root() -> Path:
     return workspace_root()
 
 
-def _next_step_hint(ws: dict) -> dict:
-    """Compute a short hint for the wizard panel based on workspace state (v0.3.0: top-level)."""
-    imports = ws.get("imports", {}) or {}
-    observables = ws.get("observables", []) or []
-    visualizations = ws.get("visualizations", []) or []
-    phases = ws.get("phases", []) or []
-
-    if not imports and not observables and not visualizations and not phases:
-        return {
-            "label": "Add workspace inputs — import external models or register datasets, references, expert docs",
-            "command": "bash scripts/serve.sh  # open the dashboard and use the + Add buttons",
-            "details": "If your project builds on an existing model, register it as an import. Otherwise, start by adding observables (Setup).",
-        }
-    if not observables:
-        return {
-            "label": "Add observables (Simulation Setup tab)",
-            "command": "Dashboard → Simulation Setup → + Add observable",
-            "details": "Pick which state variables to track (e.g. chromosome.DnaA_count).",
-        }
-    if not visualizations:
-        return {
-            "label": "Add visualizations (Visualizations tab)",
-            "command": "Dashboard → Visualizations → + Add visualization",
-            "details": "Define how to render observables (time-series, phase-space, heatmap, histogram).",
-        }
-    if not phases:
-        return {
-            "label": "Plan model-development phases (Build Model tab)",
-            "command": "Dashboard → Build Model → + Add phase",
-            "details": "Lay out the mechanisms to integrate, each backed by an expert doc or dataset.",
-        }
-    # Past beginner setup: phases exist. The workstream strip + Build Model tab
-    # (current-phase banner + per-phase Start/Evaluate buttons) surface the next
-    # step contextually. A separate top-of-page banner would just duplicate that.
-    return None
+# _next_step_hint() removed in v0.4.4. Each tab's page-lead + the workstream
+# strip + Build Model's per-phase action buttons carry the "what next" signal
+# contextually; a separate top-of-page banner duplicated the information and
+# accumulated stale wording.
 
 
 def _env(template_dir: Path) -> Environment:
@@ -270,7 +239,6 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     out.parent.mkdir(parents=True, exist_ok=True)
     _copy_assets(ws_root / "reports" / "assets")
 
-    hint = _next_step_hint(ws)
     references_count = _count_bib_entries(ws_root)
     datasets = ws.get("datasets") or []
     expert_docs = ws.get("expert_docs") or []
@@ -302,7 +270,6 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         references_count=references_count,
         references_pdfs=references_pdfs,
         decisions=decisions,
-        next_step=hint,
         expert_docs=expert_docs,
         observables=observables,
         visualizations=visualizations,

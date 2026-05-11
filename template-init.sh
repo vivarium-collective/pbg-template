@@ -14,7 +14,9 @@ if [[ ! "$WS_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 
 TODAY="$(date -u +%Y-%m-%d)"
-PLUGIN_VERSION="0.1.1"
+PLUGIN_VERSION="0.4.4"
+# Python package name for the workspace: hyphens become underscores
+PACKAGE_PATH="pbg_${WS_NAME//-/_}"
 
 # Render every .j2 file in the workspace root (skip scripts/ — those are
 # runtime Jinja2 templates for the dashboard renderer, not init-time files)
@@ -22,6 +24,7 @@ find . -name '*.j2' -type f -not -path './.git/*' -not -path './scripts/*' | whi
   out="${tpl%.j2}"
   sed \
     -e "s/{{ *workspace_name *}}/$WS_NAME/g" \
+    -e "s/{{ *package_path *}}/$PACKAGE_PATH/g" \
     -e "s/{{ *today *}}/$TODAY/g" \
     -e "s/{{ *plugin_version *}}/$PLUGIN_VERSION/g" \
     -e "s/{{ *generated_at *}}/$TODAY/g" \
@@ -29,6 +32,32 @@ find . -name '*.j2' -type f -not -path './.git/*' -not -path './scripts/*' | whi
   rm "$tpl"
   echo "rendered $tpl -> $out"
 done
+
+# Scaffold the workspace's Python package if not already present. The Registry
+# tab imports {{ package_path }}.core to call build_core(); without this the
+# dashboard shows an "ImportError" for every fresh workspace.
+if [ ! -d "$PACKAGE_PATH" ]; then
+  mkdir -p "$PACKAGE_PATH"
+  cat > "$PACKAGE_PATH/__init__.py" <<EOF
+"""$PACKAGE_PATH — workspace Python package."""
+EOF
+  cat > "$PACKAGE_PATH/core.py" <<'EOF'
+"""build_core() — wraps process_bigraph.allocate_core().
+
+Imports declared in workspace.yaml are auto-discovered by allocate_core()
+once they're pip-installed in the workspace venv. Use the dashboard's
+Install button on a Registry catalog entry, or run
+`.venv/bin/pip install -e <path>` manually. No manual register_link()
+boilerplate needed for standard pbg-* packages.
+"""
+from process_bigraph import allocate_core
+
+
+def build_core():
+    return allocate_core()
+EOF
+  echo "created $PACKAGE_PATH/{__init__.py,core.py}"
+fi
 
 # Remove the init script itself once we're done
 echo "removing template-init.sh"
@@ -40,8 +69,12 @@ echo
 echo "📋 Next steps are in: NEXT_STEPS.md"
 echo
 echo "Quick setup:"
-echo "  1. git init && git add -A && git commit -m 'feat(stage-0): workspace bootstrap'"
+echo "  1. git init -b main && git add -A && git commit -m 'feat: workspace bootstrap'"
 echo "  2. uv venv .venv && source .venv/bin/activate && uv pip install -e \".[dev]\""
 echo "  3. python scripts/lint-workspace.py    # should print 'workspace lint: OK'"
+echo "  4. bash scripts/serve.sh               # open the dashboard"
 echo
-echo "Then open NEXT_STEPS.md to walk through stages 0.5 → 9..N."
+echo "Inside the dashboard, click 'Start workstream' to begin a feature branch."
+echo "Every action you take commits to that branch; push and open one PR when ready."
+echo
+echo "Full guide: NEXT_STEPS.md"
