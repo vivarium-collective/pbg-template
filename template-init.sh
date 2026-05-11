@@ -4,6 +4,11 @@
 # without installing the pbg-superpowers plugin.
 set -euo pipefail
 
+if ! command -v uv &> /dev/null; then
+  echo "ERROR: uv is required. Install with: brew install uv  OR  pip install uv" >&2
+  exit 1
+fi
+
 WS_NAME_DEFAULT="$(basename "$PWD")"
 read -rp "workspace name [$WS_NAME_DEFAULT]: " WS_NAME
 WS_NAME="${WS_NAME:-$WS_NAME_DEFAULT}"

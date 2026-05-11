@@ -2192,7 +2192,10 @@ if __name__ == "__main__":
     def _post_catalog_install(self, body: dict):
         """POST /api/catalog-install — install a catalog module.
 
-        Steps: submodule add + pip install + pyproject.toml edit + workspace.yaml + commit.
+        If the catalog entry has a ``pypi_name`` field, the package is
+        installed directly from PyPI (no submodule, no uv.sources entry).
+        Otherwise the legacy git-submodule path is used.
+
         Requires an active workstream (uses _active_branch_action).
         """
         name = (body.get("name") or "").strip()
@@ -2211,96 +2214,158 @@ if __name__ == "__main__":
         if not entry:
             return self._json({"error": f"module '{name}' not in catalog"}, 404)
 
+        pypi_name = entry.get("pypi_name")  # optional; if set, install from PyPI
+
         target_path = f"external/{name}"
         abs_target = (WORKSPACE / target_path).resolve()
 
-        # Determine pip command upfront (before the action closure).
+        # Resolve uv / pip command upfront (before the action closure).
         venv_pip = WORKSPACE / ".venv" / "bin" / "pip"
         venv_py = WORKSPACE / ".venv" / "bin" / "python3"
-        if venv_pip.exists():
-            pip_cmd_base = [str(venv_pip), "install", "-e"]
-        else:
-            uv_path = shutil.which("uv")
+        uv_path = shutil.which("uv")
+
+        if pypi_name:
+            # PyPI path: use uv exclusively (faster, no submodule needed).
             if uv_path and venv_py.exists():
+                pypi_install_cmd = [uv_path, "pip", "install", "--python", str(venv_py), pypi_name]
+            elif venv_pip.exists():
+                pypi_install_cmd = [str(venv_pip), "install", pypi_name]
+            else:
+                return self._json({"error": "neither pip nor uv available"}, 500)
+        else:
+            # Git-submodule fallback: editable local install.
+            if venv_pip.exists():
+                pip_cmd_base = [str(venv_pip), "install", "-e"]
+            elif uv_path and venv_py.exists():
                 pip_cmd_base = [uv_path, "pip", "install", "--python", str(venv_py), "-e"]
             else:
                 return self._json({"error": "neither pip nor uv available"}, 500)
 
-        # Steps 1+2+3+4: all run inside the action closure so .gitmodules changes
-        # are staged and committed atomically on the active branch.
         package_name = entry.get("package", name)
         catalog_entry = entry  # captured for closure
         log_holder: list[str] = []
+        install_mode_holder: list[str] = []
 
         def action():
-            # Step 1: submodule add if directory not already present.
-            if not abs_target.exists():
-                r = subprocess.run(
-                    ["git", "submodule", "add", "-b", catalog_entry["ref"],
-                     catalog_entry["source"], target_path],
-                    cwd=WORKSPACE, capture_output=True, text=True, timeout=120,
-                )
-                if r.returncode != 0:
-                    raise RuntimeError(
-                        f"submodule add failed: {(r.stderr or r.stdout)[:300]}"
+            if pypi_name:
+                # ---- PyPI install path ----
+                install_mode_holder.append("pypi")
+
+                try:
+                    result = subprocess.run(
+                        pypi_install_cmd,
+                        cwd=WORKSPACE, capture_output=True, text=True, timeout=180,
+                    )
+                except subprocess.TimeoutExpired:
+                    raise RuntimeError("pip install from PyPI timed out after 180s")
+
+                excerpt = (result.stdout + "\n" + result.stderr).strip()[-2000:]
+                log_holder.append(excerpt)
+                if result.returncode != 0:
+                    raise RuntimeError(f"pip install from PyPI failed:\n{excerpt[-500:]}")
+
+                # workspace.yaml
+                _ws_add_to_sys_path()
+                from scripts._lib.workspace_yaml import load_workspace, save_workspace
+                from scripts._lib.pyproject_edit import add_dependency
+
+                ws_file = WORKSPACE / "workspace.yaml"
+                ws = load_workspace(ws_file)
+                ws.setdefault("imports", {})[name] = {
+                    "source": catalog_entry["source"],
+                    "ref": catalog_entry["ref"],
+                    "mode": "pypi",
+                    "pypi_name": pypi_name,
+                    "description": catalog_entry.get("description", ""),
+                    "installed": True,
+                    "package": package_name,
+                }
+                save_workspace(ws_file, ws)
+
+                # pyproject.toml — only [project.dependencies]; NO uv.sources entry
+                # because the package is on PyPI and resolves without local path mapping.
+                try:
+                    add_dependency(WORKSPACE / "pyproject.toml", pypi_name)
+                except Exception as e:
+                    log_dir = WORKSPACE / ".pbg"
+                    log_dir.mkdir(parents=True, exist_ok=True)
+                    (log_dir / "catalog-install.log").write_text(
+                        f"pyproject edit failed for {name}: {e}\n"
                     )
 
-            # Step 2: pip install -e.
-            try:
-                result = subprocess.run(
-                    pip_cmd_base + [str(abs_target)],
-                    cwd=WORKSPACE, capture_output=True, text=True, timeout=180,
-                )
-            except subprocess.TimeoutExpired:
-                raise RuntimeError("pip install timed out after 180s")
+            else:
+                # ---- Git-submodule fallback path ----
+                install_mode_holder.append("git")
 
-            excerpt = (result.stdout + "\n" + result.stderr).strip()[-2000:]
-            log_holder.append(excerpt)
-            if result.returncode != 0:
-                raise RuntimeError(f"pip install failed:\n{excerpt[-500:]}")
+                # Step 1: submodule add if directory not already present.
+                if not abs_target.exists():
+                    r = subprocess.run(
+                        ["git", "submodule", "add", "-b", catalog_entry["ref"],
+                         catalog_entry["source"], target_path],
+                        cwd=WORKSPACE, capture_output=True, text=True, timeout=120,
+                    )
+                    if r.returncode != 0:
+                        raise RuntimeError(
+                            f"submodule add failed: {(r.stderr or r.stdout)[:300]}"
+                        )
 
-            # Step 3: workspace.yaml.
-            _ws_add_to_sys_path()
-            from scripts._lib.workspace_yaml import load_workspace, save_workspace
-            from scripts._lib.pyproject_edit import add_dependency, add_uv_source
+                # Step 2: pip install -e.
+                try:
+                    result = subprocess.run(
+                        pip_cmd_base + [str(abs_target)],
+                        cwd=WORKSPACE, capture_output=True, text=True, timeout=180,
+                    )
+                except subprocess.TimeoutExpired:
+                    raise RuntimeError("pip install timed out after 180s")
 
-            ws_file = WORKSPACE / "workspace.yaml"
-            ws = load_workspace(ws_file)
-            ws.setdefault("imports", {})[name] = {
-                "source": catalog_entry["source"],
-                "ref": catalog_entry["ref"],
-                "mode": "reference",
-                "path": f"external/{name}",
-                "description": catalog_entry.get("description", ""),
-                "installed": True,
-                "install_path": str(abs_target),
-                "package": package_name,
-            }
-            save_workspace(ws_file, ws)
+                excerpt = (result.stdout + "\n" + result.stderr).strip()[-2000:]
+                log_holder.append(excerpt)
+                if result.returncode != 0:
+                    raise RuntimeError(f"pip install failed:\n{excerpt[-500:]}")
 
-            # Step 4: pyproject.toml — both [project.dependencies] and
-            # [tool.uv.sources]. The dep line declares the requirement;
-            # the uv-source maps it to the local submodule path so uv can
-            # resolve a git-only pbg-* package in CI without going to PyPI.
-            try:
-                add_dependency(WORKSPACE / "pyproject.toml", package_name)
-                add_uv_source(
-                    WORKSPACE / "pyproject.toml",
-                    package_name,
-                    path=f"external/{name}",
-                    editable=True,
-                )
-            except Exception as e:
-                # Don't fail the whole install if pyproject edit fails — log it.
-                log_dir = WORKSPACE / ".pbg"
-                log_dir.mkdir(parents=True, exist_ok=True)
-                (log_dir / "catalog-install.log").write_text(
-                    f"pyproject edit failed for {name}: {e}\n"
-                )
+                # Step 3: workspace.yaml.
+                _ws_add_to_sys_path()
+                from scripts._lib.workspace_yaml import load_workspace, save_workspace
+                from scripts._lib.pyproject_edit import add_dependency, add_uv_source
+
+                ws_file = WORKSPACE / "workspace.yaml"
+                ws = load_workspace(ws_file)
+                ws.setdefault("imports", {})[name] = {
+                    "source": catalog_entry["source"],
+                    "ref": catalog_entry["ref"],
+                    "mode": "reference",
+                    "path": f"external/{name}",
+                    "description": catalog_entry.get("description", ""),
+                    "installed": True,
+                    "install_path": str(abs_target),
+                    "package": package_name,
+                }
+                save_workspace(ws_file, ws)
+
+                # Step 4: pyproject.toml — both [project.dependencies] and
+                # [tool.uv.sources]. The dep line declares the requirement;
+                # the uv-source maps it to the local submodule path so uv can
+                # resolve a git-only pbg-* package in CI without going to PyPI.
+                try:
+                    add_dependency(WORKSPACE / "pyproject.toml", package_name)
+                    add_uv_source(
+                        WORKSPACE / "pyproject.toml",
+                        package_name,
+                        path=f"external/{name}",
+                        editable=True,
+                    )
+                except Exception as e:
+                    # Don't fail the whole install if pyproject edit fails — log it.
+                    log_dir = WORKSPACE / ".pbg"
+                    log_dir.mkdir(parents=True, exist_ok=True)
+                    (log_dir / "catalog-install.log").write_text(
+                        f"pyproject edit failed for {name}: {e}\n"
+                    )
 
         commit_msg = f"feat(catalog): install {name}"
         resp, code = _active_branch_action(commit_msg, action)
         log_excerpt = log_holder[0] if log_holder else ""
+        install_mode = install_mode_holder[0] if install_mode_holder else ("pypi" if pypi_name else "git")
 
         # Invalidate registry cache.
         global _REGISTRY_CACHE
@@ -2309,6 +2374,7 @@ if __name__ == "__main__":
         if code == 200:
             resp["ok"] = True
             resp["module"] = name
+            resp["install_mode"] = install_mode
             resp["log"] = log_excerpt[-500:]
         elif code == 409 and "no changes" in (resp.get("error") or ""):
             # The pip install ran; metadata might already be in workspace.yaml.
@@ -2316,6 +2382,7 @@ if __name__ == "__main__":
                 "ok": True,
                 "already_installed": True,
                 "module": name,
+                "install_mode": install_mode,
                 "log": log_excerpt[-500:],
             }, 200)
         elif code == 500 and log_excerpt:
@@ -2324,6 +2391,7 @@ if __name__ == "__main__":
             from scripts._lib.install_errors import diagnose as _diagnose_install
             diag = _diagnose_install(log_excerpt)
             resp["log"] = log_excerpt[-1000:]
+            resp["install_mode"] = install_mode
             if diag:
                 resp["diagnosis"] = diag.as_dict()
 
