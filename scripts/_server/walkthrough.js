@@ -1,4 +1,4 @@
-// walkthrough.js — v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
+// walkthrough.js — v0.4.14: Available Composites picker + Emitter Use feedback + drop process multi-select; v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
 (function () {
   "use strict";
 
@@ -255,6 +255,9 @@
         _loadRegistry(false);
       }
     }
+    if (pageId === 'simulation-setup') {
+      _loadComposites();
+    }
     // Lazy-load branches when switching to the Branches tab.
     if (pageId === 'branches') {
       if (!window._branchesLoaded) {
@@ -355,18 +358,27 @@
 
   function _useRegistryClass(kind, name) {
     if (kind === 'emitter') {
-      // Expand the simulation form details and pre-fill the emitter_config textarea.
+      _switchPage('simulation-setup');
+      // Find the inline simulation form (inside a <details> in Simulation Setup)
       var form = document.getElementById('form-simulation');
-      if (form) {
-        var details = form.closest('details');
-        if (details) details.open = true;
-        var ta = form.querySelector('textarea[name=emitter_config]');
-        if (ta) {
-          ta.value = JSON.stringify({address: 'local:' + name, config: {}}, null, 2);
-        }
-        // Navigate to the simulation-setup page if not already there.
-        _switchPage('simulation-setup');
+      if (!form) return;
+      var details = form.closest('details');
+      if (details) details.open = true;
+      var ta = form.querySelector('textarea[name=emitter_config]');
+      if (ta) {
+        ta.value = JSON.stringify({address: 'local:' + name, config: {}}, null, 2);
+        // Highlight the textarea so user notices
+        ta.classList.add('highlight-flash');
+        setTimeout(function() { ta.classList.remove('highlight-flash'); }, 1500);
+        // Scroll into view
+        ta.scrollIntoView({behavior: 'smooth', block: 'center'});
       }
+      // Show a transient banner
+      var banner = document.createElement('div');
+      banner.className = 'apply-banner';
+      banner.textContent = name + ' applied to next Add simulation — review and submit below';
+      form.parentNode.insertBefore(banner, form);
+      setTimeout(function() { banner.remove(); }, 4000);
     } else if (kind === 'visualization') {
       // Open Add visualization modal with a class-reference description.
       openModal('modal-visualization');
@@ -439,6 +451,118 @@
   }
 
   window._loadRegistry = _loadRegistry;
+
+  // -------------------------------------------------------------------------
+  // Composites browser (v0.4.14)
+  // -------------------------------------------------------------------------
+
+  function _loadComposites() {
+    fetch('/api/composites')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var container = document.getElementById('composite-cards');
+        var countBadge = document.getElementById('composite-count');
+        if (!container) return;
+        var composites = data.composites || [];
+        if (countBadge) countBadge.textContent = '(' + composites.length + ')';
+        if (!composites.length) {
+          container.innerHTML =
+            '<p class="empty-state">No composite specs found yet. Add a <code>*.composite.yaml</code> file under ' +
+            '<code>pbg_&lt;slug&gt;/composites/</code> to register one. See ' +
+            '<a href="https://github.com/vivarium-collective/pbg-superpowers/blob/main/docs/conventions/composites.md" target="_blank">' +
+            'the composite spec convention</a> for the format.</p>';
+          return;
+        }
+        var cards = composites.map(function(c) {
+          var paramSummary = '';
+          var paramKeys = Object.keys(c.parameters || {});
+          if (paramKeys.length) {
+            paramSummary = '<div class="module-tags">' +
+              paramKeys.map(function(k) {
+                return '<span class="tag-pill">' + _esc(k) + '</span>';
+              }).join('') + '</div>';
+          }
+          var requires = '';
+          if (c.requires && c.requires.processes && c.requires.processes.length) {
+            requires = '<small class="muted">Requires: ' +
+              c.requires.processes.map(_esc).join(', ') + '</small><br>';
+          }
+          return '<div class="module-card">' +
+            '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong></div>' +
+            '<p class="module-desc">' + _esc(c.description || '(no description)') + '</p>' +
+            requires +
+            paramSummary +
+            '<div class="module-action">' +
+              '<button class="action-btn" onclick=\'_useComposite(' + JSON.stringify(c) + ')\'>Use</button>' +
+            '</div>' +
+          '</div>';
+        });
+        container.innerHTML = cards.join('');
+      });
+  }
+  window._loadComposites = _loadComposites;
+
+  function _useComposite(composite) {
+    var modal = document.getElementById('modal-configure-composite');
+    if (!modal) return;
+    var nameSpan = document.getElementById('cc-composite-name');
+    if (nameSpan) {
+      nameSpan.innerHTML = 'Composite: <code>' + _esc(composite.id) + '</code>';
+    }
+    var hiddenId = modal.querySelector('input[name=composite_id]');
+    if (hiddenId) hiddenId.value = composite.id;
+    // Pre-fill sim_name with a sensible default
+    var simNameInput = modal.querySelector('input[name=sim_name]');
+    if (simNameInput) simNameInput.value = composite.name + '-run';
+    // Render parameter fields
+    var fieldsContainer = document.getElementById('cc-parameter-fields');
+    if (fieldsContainer) {
+      var params = composite.parameters || {};
+      var keys = Object.keys(params);
+      if (!keys.length) {
+        fieldsContainer.innerHTML = '<p class="muted" style="font-size:0.9em">No parameters to configure.</p>';
+      } else {
+        fieldsContainer.innerHTML = '<h4 style="margin:14px 0 6px;font-size:0.95em">Parameters</h4>' +
+          keys.map(function(pname) {
+            var pdef = params[pname];
+            var inputType = (pdef.type === 'int' || pdef.type === 'float') ? 'number' : 'text';
+            var step = (pdef.type === 'float') ? 'any' : (pdef.type === 'int' ? '1' : '');
+            var def = pdef.default === undefined ? '' : String(pdef.default);
+            var desc = pdef.description ? ('<small class="muted">' + _esc(pdef.description) + '</small>') : '';
+            return '<label>' + _esc(pname) + ' <span class="muted">(' + (pdef.type || 'string') + ')</span>' +
+              '<input name="param_' + _esc(pname) + '" type="' + inputType + '"' +
+              (step ? ' step="' + step + '"' : '') +
+              ' value="' + _esc(def) + '">' +
+              desc +
+            '</label>';
+          }).join('');
+      }
+    }
+    openModal('modal-configure-composite');
+  }
+  window._useComposite = _useComposite;
+
+  function _submitConfigureComposite(form) {
+    var data = {
+      name: form.sim_name.value.trim(),
+      composite: form.composite_id.value,
+      t_start: parseFloat(form.t_start.value),
+      t_end: parseFloat(form.t_end.value),
+      parameter_overrides: {},
+    };
+    // Collect param_<name> fields
+    Array.from(form.elements).forEach(function(el) {
+      if (el.name && el.name.indexOf('param_') === 0 && el.value !== '') {
+        var pname = el.name.substring('param_'.length);
+        var v = el.value;
+        // Cast based on input type
+        if (el.type === 'number') v = parseFloat(v);
+        data.parameter_overrides[pname] = v;
+      }
+    });
+    submitForm(form, '/api/simulation', function() { return data; });
+  }
+  window._submitConfigureComposite = _submitConfigureComposite;
 
   // -------------------------------------------------------------------------
   // Catalog browser (v0.4.1)
@@ -547,8 +671,6 @@
         emitter_config: _parseJSONorNull(form.emitter_config.value),
         phases: Array.from(form.querySelectorAll('input[name=phases]:checked'))
                       .map(function(el) { return parseInt(el.value, 10); }),
-        processes: Array.from(form.querySelectorAll('input[name=processes]:checked'))
-                        .map(function(el) { return el.value; }),
       };
       submitForm(form, '/api/simulation', function() { return data; });
     } catch (e) {

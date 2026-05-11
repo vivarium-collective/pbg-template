@@ -213,6 +213,15 @@
   <h2 class="page-title">Simulation Setup</h2>
   <p class="page-lead">Define how you&rsquo;ll run the model. Set up <strong>simulations</strong> (run configs: time interval, parameters, initial state) and the <strong>observables</strong> they record. Visualizations live in their own tab.</p>
 
+  <!-- Available Composites (workspace-local discovery) -->
+  <div class="panel">
+    <h3>Available Composites <span id="composite-count" class="count-badge"></span></h3>
+    <p class="panel-lead">Discoverable composite documents from <code>pbg_&lt;slug&gt;/composites/*.composite.{yaml,json}</code>. Each one packages a runnable simulation state with parameters you can configure. Click <strong>Use</strong> to create a simulation from it.</p>
+    <div id="composite-cards" class="module-grid">
+      <p class="empty-state">Loading composites&hellip;</p>
+    </div>
+  </div>
+
   <!-- Available Emitters (registry-driven) -->
   <div class="panel">
     <h3>Available Emitters <span id="emitter-count" class="count-badge"></span></h3>
@@ -288,12 +297,6 @@
           </label>
           {% endfor %}
           {% if not phases %}<em style="color:#888;font-size:0.88em">No phases registered yet &mdash; simulation will apply globally.</em>{% endif %}
-        </fieldset>
-        <fieldset style="border:1px solid #ddd;border-radius:4px;padding:10px;margin-bottom:12px">
-          <legend style="font-size:0.88em;font-weight:600">Processes (loaded from Registry &mdash; leave all unchecked = no declared deps)</legend>
-          <div id="sim-process-picker">
-            <p class="muted">Click <a href="#registry" onclick="_switchPage('registry')">Registry</a> first to populate this list.</p>
-          </div>
         </fieldset>
         <div class="form-error"></div>
         <button type="submit">Add simulation</button>
@@ -738,6 +741,24 @@
       <p style="font-size:0.85em;color:#555">After adding, click <strong>Create</strong> to invoke the <code>/pbg-viz</code> skill which generates the function.</p>
       <div class="form-error"></div>
       <button type="submit" class="action-btn">Add visualization</button>
+    </form>
+  </div>
+</div>
+
+<!-- Configure composite modal -->
+<div id="modal-configure-composite" class="modal-overlay">
+  <div class="modal-box" style="max-width:560px">
+    <button class="modal-close" onclick="closeModal('modal-configure-composite')">&times;</button>
+    <h3>Configure composite</h3>
+    <p id="cc-composite-name" class="muted" style="margin:0 0 12px"></p>
+    <form id="form-configure-composite" onsubmit="event.preventDefault(); _submitConfigureComposite(this);">
+      <label>Simulation name <input name="sim_name" pattern="^[a-zA-Z0-9_-]+$" required></label>
+      <label>t_start <input name="t_start" type="number" step="any" min="0" value="0" required></label>
+      <label>t_end <input name="t_end" type="number" step="any" required value="10"></label>
+      <div id="cc-parameter-fields"></div>
+      <input type="hidden" name="composite_id">
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Create simulation</button>
     </form>
   </div>
 </div>

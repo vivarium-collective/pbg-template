@@ -470,6 +470,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_pending()
         if self.path.startswith("/api/registry"):
             return self._get_registry()
+        if self.path.startswith("/api/composites"):
+            return self._get_composites()
         if self.path.startswith("/api/catalog"):
             return self._get_catalog()
         if self.path.startswith("/api/work-status"):
@@ -2147,6 +2149,26 @@ if __name__ == "__main__":
         except Exception as e:
             data = {"error": str(e), "processes": [], "types": []}
         return self._json(data, 200)
+
+    def _get_composites(self):
+        """GET /api/composites — return discovered composite specs (workspace-local)."""
+        _ws_add_to_sys_path()
+        try:
+            from scripts._lib.composite_lookup import discover_workspace_composites
+        except ImportError as e:
+            return self._json({"composites": [], "error": str(e)}, 200)
+
+        try:
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+            specs = discover_workspace_composites(WORKSPACE, pkg)
+            # Strip internal _state field before returning to client.
+            out = []
+            for s in specs.values():
+                out.append({k: v for k, v in s.items() if not k.startswith("_")})
+            return self._json({"composites": out}, 200)
+        except Exception as e:
+            return self._json({"composites": [], "error": str(e)}, 200)
 
     def _get_catalog(self):
         """GET /api/catalog — return the curated module catalog with installed annotations."""

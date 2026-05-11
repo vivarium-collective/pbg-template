@@ -261,3 +261,21 @@ body.focus-mode::before{
 .picker-row-main details{ margin-top:4px }
 .picker-row-main details summary{ cursor:pointer; font-size:0.85em }
 .picker-row-actions{ flex-shrink:0 }
+
+/* ── Emitter Use feedback + Composite picker (v0.4.14) ───────────────── */
+.apply-banner{
+  background:#dbeafe; color:#1e40af; padding:8px 14px;
+  border-radius:4px; margin:0 0 12px; font-size:0.9em;
+  animation: fadeOut 4s ease-out forwards;
+}
+@keyframes fadeOut{
+  0%,70% { opacity:1; }
+  100%   { opacity:0; }
+}
+.highlight-flash{
+  animation: highlightFlash 1.5s ease-out;
+}
+@keyframes highlightFlash{
+  0%,30% { box-shadow:0 0 0 3px #fef3c7; background:#fffbeb; }
+  100%   { box-shadow:none; background:transparent; }
+}

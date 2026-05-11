@@ -56,6 +56,10 @@
     "references_pdfs": {
       "type": "array",
       "items": {"$ref": "#/definitions/referencePdf"}
+    },
+    "tasks": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/task"}
     }
   },
   "definitions": {
@@ -144,7 +148,11 @@
         "parameter_overrides": {"type": "object", "description": "Process-config overrides; structure free-form"},
         "emitter_config": {"type": "object", "description": "Emitter settings (paths to record, sample interval, etc.)"},
         "phases": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "Phase numbers this simulation belongs to (empty = global)"},
-        "processes": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "Names of processes from the registry that this simulation expects (declarative tag — does not drive composite construction)"}
+        "processes": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "Names of processes from the registry that this simulation expects (declarative tag — does not drive composite construction)"},
+        "composite": {
+          "type": "string",
+          "description": "Reference to a composite spec id (e.g. pbg_<slug>.composites.<name>) that this simulation runs"
+        }
       }
     },
     "dataset": {
@@ -178,6 +186,67 @@
         "path": {"type": "string", "minLength": 1},
         "sha256": {"type": "string", "minLength": 1},
         "_metadata_pending": {"type": "boolean"}
+      }
+    },
+    "task": {
+      "type": "object",
+      "required": ["n", "name", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "n": {"type": "integer", "minimum": 1},
+        "name": {"type": "string", "pattern": "^[a-zA-Z0-9_-]+$"},
+        "status": {"enum": ["planned", "baseline_run", "applied", "perturbed_run", "compared", "passed", "failed"]},
+        "objective": {"type": "string"},
+        "simulation": {"type": "string", "description": "Name of the simulation config to run (from workspace.yaml.simulations)"},
+        "datasets":       {"type": "array", "items": {"type": "string"}},
+        "expert_docs":    {"type": "array", "items": {"type": "string"}},
+        "visualizations": {"type": "array", "items": {"type": "string"}},
+        "model_changes": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/model_change"}
+        },
+        "desired_behaviors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string"},
+              "observable": {"type": "string", "description": "Which observable this measures (refs workspace.yaml.observables[].name)"},
+              "condition":  {"type": "string", "description": "Natural-language condition"},
+              "rationale":  {"type": "string"}
+            }
+          }
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["perturbation", "expected"],
+            "additionalProperties": false,
+            "properties": {
+              "perturbation": {"type": "string"},
+              "expected":     {"type": "string"},
+              "passed":       {"type": "boolean"}
+            }
+          }
+        },
+        "baseline_run":  {"type": "string", "description": "Path under results/ where baseline emitter output is stored"},
+        "perturbed_run": {"type": "string"},
+        "comparison":    {"type": "string"}
+      }
+    },
+    "model_change": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["add_process", "change_config", "rewire", "remove_process"]},
+        "path": {"type": "string"},
+        "process": {"type": "string", "description": "Process class name from the registry (for add_process)"},
+        "config": {"type": "object"},
+        "new_value": {},
+        "wires": {"type": "object"}
       }
     }
   }
