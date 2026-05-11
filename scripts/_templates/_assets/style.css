@@ -162,7 +162,6 @@ img{max-width:100%}
 .page.active{ display:block }
 .page-title{ margin-top:0 }
 .page-lead{ color:#6b7280; margin-bottom:20px; max-width:680px }
-.below-pages{ margin-top:48px; padding-top:24px; border-top:1px solid #e5e7eb }
 .count-badge{ font-size:0.78em; color:#6b7280; font-weight:normal }
 .registry-schema{
   display:inline-block; max-width:480px; overflow:hidden; text-overflow:ellipsis;
@@ -238,7 +237,6 @@ img{max-width:100%}
 body.focus-mode header.top-header{ display:none }
 body.focus-mode nav.top-menu{ display:none }
 body.focus-mode .workstream-strip{ display:none }
-body.focus-mode .below-pages{ display:none }
 body.focus-mode .page{ display:none }
 body.focus-mode .page.active{ display:block }
 body.focus-mode main.pages{ padding-top:8px }

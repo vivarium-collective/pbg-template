@@ -99,6 +99,7 @@
   <a href="#simulation-setup" class="menu-link" data-page="simulation-setup">Simulation Setup</a>
   <a href="#visualizations" class="menu-link" data-page="visualizations">Visualizations</a>
   <a href="#build-model" class="menu-link" data-page="build-model">Build Model</a>
+  <a href="#branches" class="menu-link" data-page="branches">Branches</a>
 </nav>
 
 <div id="workstream-strip" class="workstream-strip"></div>
@@ -566,14 +567,14 @@
 
 </section>
 
-</main>
-
-<!-- Branch timeline — OUTSIDE .pages, always visible -->
-<section class="below-pages" style="padding:20px;max-width:1200px;margin:0 auto">
-  <h2>Branch timeline</h2>
-  <p class="stage-explainer">Every action above creates a feature branch. Open PRs from your terminal: <code>gh pr create --base main --head &lt;branch&gt;</code>.</p>
-  <div id="branch-timeline-body"><p style="color:#888;font-style:italic">Loading&hellip;</p></div>
+<!-- ===== PAGE: BRANCHES ===== -->
+<section id="page-branches" class="page" data-page="branches">
+  <h2 class="page-title">Branches</h2>
+  <p class="page-lead">All stage/* branches in this workspace, with one-click merge / PR / diff actions. Branches accumulate as the dashboard creates them on actions (Add observable, Install module, etc.). Use this tab to land them on main.</p>
+  <div id="branch-timeline-body"></div>
 </section>
+
+</main>
 
 <!-- ============================================================ -->
 <!-- MODALS -->

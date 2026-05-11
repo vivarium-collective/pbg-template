@@ -255,6 +255,13 @@
         _loadRegistry(false);
       }
     }
+    // Lazy-load branches when switching to the Branches tab.
+    if (pageId === 'branches') {
+      if (!window._branchesLoaded) {
+        window._branchesLoaded = true;
+        loadBranches();
+      }
+    }
   }
 
   function _initMenuNav() {
@@ -262,7 +269,7 @@
     var params = new URLSearchParams(window.location.search);
     var focus = params.get('focus');
     if (focus) {
-      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'build-model'];
+      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'build-model', 'branches'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -278,7 +285,7 @@
         // let the browser scroll to the anchor naturally
         return;
       }
-      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'build-model'];
+      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'build-model', 'branches'];
       _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
     }
     window.addEventListener('hashchange', fromHash);
@@ -961,10 +968,8 @@
     // Initialize workstream strip.
     _refreshWorkStrip();
 
-    // Auto-load branches if the branch timeline container exists.
-    if (document.getElementById("branch-timeline-body")) {
-      loadBranches();
-    }
+    // Branches are now lazy-loaded when switching to the Branches tab.
+    // (loadBranches() is called from _switchPage when pageId === 'branches'.)
   });
 
   // -------------------------------------------------------------------------
