@@ -542,17 +542,59 @@
     parts.push('<span class="ws-label">Working on:</span>');
     parts.push('<code class="ws-branch">' + s.branch + '</code>');
     parts.push('<span class="ws-meta">' + s.commits_ahead + ' commit' + (s.commits_ahead === 1 ? '' : 's') + ' ahead of ' + s.base + '</span>');
-    if (s.unpushed > 0 || (!s.pushed && s.commits_ahead > 0)) {
-      parts.push('<button class="ws-btn" onclick="_pushWork()">Push (' + s.unpushed + ')</button>');
+
+    // No origin remote yet — surface the Create-GitHub-repo path instead of Push.
+    if (s.has_origin === false) {
+      if (s.gh_available === false) {
+        parts.push('<span class="ws-warn" title="Install GitHub CLI to enable one-click repo creation">gh CLI missing</span>');
+      } else {
+        parts.push('<button class="ws-btn ws-primary" onclick="_createGithubRepo()" title="Create a GitHub repo for this workspace and push in one step">Create GitHub repo</button>');
+      }
+    } else {
+      // Origin exists — normal Push / PR flow.
+      if (s.unpushed > 0 || (!s.pushed && s.commits_ahead > 0)) {
+        parts.push('<button class="ws-btn" onclick="_pushWork()">Push (' + s.unpushed + ')</button>');
+      }
+      if (s.pr_url) {
+        parts.push('<a class="ws-link" href="' + s.pr_url + '" target="_blank">PR #' + s.pr_number + ' &#8599;</a>');
+      } else if (s.pushed) {
+        parts.push('<button class="ws-btn" onclick="_createPR()">Create PR</button>');
+      }
     }
-    if (s.pr_url) {
-      parts.push('<a class="ws-link" href="' + s.pr_url + '" target="_blank">PR #' + s.pr_number + ' &#8599;</a>');
-    } else if (s.pushed) {
-      parts.push('<button class="ws-btn" onclick="_createPR()">Create PR</button>');
-    }
+
     parts.push('<button class="ws-btn ws-end" onclick="_endWork()" title="Switch back to ' + s.base + ' (workstream branch is preserved)">End</button>');
     el.innerHTML = parts.join(' ');
   }
+
+  function _createGithubRepo() {
+    var visibility = prompt("Repo visibility: public, private, or internal", "private");
+    if (visibility === null) return;
+    visibility = visibility.trim().toLowerCase() || "private";
+    if (visibility !== "public" && visibility !== "private" && visibility !== "internal") {
+      alert("Visibility must be one of: public, private, internal."); return;
+    }
+    fetch('/api/work-create-github-repo', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({visibility: visibility}),
+    })
+      .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
+      .then(function(parts){
+        var ok = parts[0], json = parts[1];
+        if (!ok) {
+          var msg = "Could not create GitHub repo:\n" + (json.error || 'unknown');
+          if (json.diagnosis) msg += "\n\n→ " + json.diagnosis.suggestion;
+          if (json.log) msg += "\n\n(log tail: " + json.log + ")";
+          alert(msg);
+          return;
+        }
+        alert("Created " + json.visibility + " repo and pushed.\n" + (json.repo_url || ''));
+        if (json.repo_url) window.open(json.repo_url, '_blank');
+        _refreshWorkStrip();
+      })
+      .catch(function(err){ alert("Network error: " + err); });
+  }
+  window._createGithubRepo = _createGithubRepo;
 
   function _startWork() {
     var name = prompt("Workstream branch name (e.g., feat/baseline-work):");
@@ -575,7 +617,16 @@
     fetch('/api/work-push', {method: 'POST'})
       .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
       .then(function(parts){
-        if (!parts[0]) { alert("Push failed:\n" + (parts[1].error || 'unknown')); return; }
+        var ok = parts[0], json = parts[1];
+        if (!ok) {
+          var msg = "Push failed:\n" + (json.error || 'unknown');
+          if (json.diagnosis) {
+            msg = "⚠ " + json.diagnosis.summary + "\n→ " + json.diagnosis.suggestion;
+          }
+          alert(msg);
+          _refreshWorkStrip();
+          return;
+        }
         alert("Pushed.");
         _refreshWorkStrip();
       });

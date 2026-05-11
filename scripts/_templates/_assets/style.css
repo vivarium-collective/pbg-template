@@ -74,6 +74,10 @@ img{max-width:100%}
   border-color:#dc2626; color:#991b1b; margin-left:auto;
 }
 .workstream-strip .ws-btn.ws-end:hover{ background:#fef2f2 }
+.workstream-strip .ws-warn{
+  color:#92400e; font-weight:500; font-size:0.85em;
+  background:#fef3c7; padding:3px 10px; border-radius:4px;
+}
 .phase-tracker a.pill{
   text-decoration:none; color:inherit; cursor:pointer; display:block;
   transition:transform 0.1s, box-shadow 0.1s;

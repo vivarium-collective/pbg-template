@@ -202,6 +202,40 @@ def _submodule_paths() -> set[str]:
     return paths
 
 
+def _has_origin_remote() -> bool:
+    """True if a git remote named 'origin' is configured."""
+    r = subprocess.run(
+        ["git", "remote"],
+        cwd=WORKSPACE, capture_output=True, text=True, check=False,
+    )
+    return "origin" in (r.stdout or "").split()
+
+
+def _diagnose_push_error(err: str) -> dict | None:
+    """Return a structured diagnosis for known push failure patterns, else None."""
+    if not err:
+        return None
+    if "does not appear to be a git repository" in err or "Could not read from remote repository" in err:
+        return {
+            "category": "no_origin",
+            "summary": "Push failed because no GitHub remote is configured.",
+            "suggestion": "Click `Create GitHub repo` in the workstream strip to create one and push in one step.",
+        }
+    if "Permission to" in err and "denied" in err:
+        return {
+            "category": "auth",
+            "summary": "Push denied — your git credential doesn't have write access.",
+            "suggestion": "Run `gh auth login` (or check your SSH key / token) and try again.",
+        }
+    if "rejected" in err and ("non-fast-forward" in err or "behind" in err):
+        return {
+            "category": "behind",
+            "summary": "Remote has commits your local branch doesn't.",
+            "suggestion": "Pull/rebase first: `git pull --rebase origin <branch>`, then push.",
+        }
+    return None
+
+
 def _dirty_workspace() -> str:
     """Return the porcelain status excluding generated reports + submodule pointers."""
     status = subprocess.run(
@@ -457,6 +491,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/render":             self._post_render,
             "/api/work-start":         self._post_work_start,
             "/api/work-push":          self._post_work_push,
+            "/api/work-create-github-repo": self._post_work_create_github_repo,
             "/api/work-create-pr":     self._post_work_create_pr,
             "/api/work-end":           self._post_work_end,
             "/api/catalog-install":    self._post_catalog_install,
@@ -1720,12 +1755,113 @@ if __name__ == "__main__":
         branch = state.get("active_branch")
         if not branch:
             return self._json({"error": "no active workstream"}, 409)
-        r = subprocess.run(["git", "push", "-u", "origin", branch], cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
+
+        # Pre-flight: refuse cleanly when no origin remote exists (the common
+        # confusion on fresh workspaces). Surface a structured diagnosis the
+        # JS layer can render as a clickable Create-GitHub-repo prompt.
+        if not _has_origin_remote():
+            return self._json({
+                "error": "no GitHub remote configured",
+                "diagnosis": {
+                    "category": "no_origin",
+                    "summary": "This workspace has no `origin` remote yet.",
+                    "suggestion": "Click `Create GitHub repo` in the workstream strip to create one in your account and push in a single step.",
+                },
+            }, 409)
+
+        r = subprocess.run(
+            ["git", "push", "-u", "origin", branch],
+            cwd=WORKSPACE, capture_output=True, text=True, timeout=60,
+        )
         if r.returncode != 0:
-            return self._json({"error": f"push failed: {(r.stderr or r.stdout)[:300]}"}, 500)
+            err = (r.stderr or r.stdout).strip()
+            diag = _diagnose_push_error(err)
+            resp = {"error": f"push failed: {err[:300]}"}
+            if diag:
+                resp["diagnosis"] = diag
+            return self._json(resp, 500)
         state["pushed"] = True
         save_state(state)
         return self._json({"ok": True, "branch": branch, "log": r.stdout[-300:]}, 200)
+
+    def _post_work_create_github_repo(self, body: dict):
+        """gh repo create + set origin + initial push, in one shot.
+
+        Body: {visibility?: "public"|"private", name?: str, description?: str}.
+        Defaults: visibility=private, name=<workspace_name>, description=workspace.yaml.description.
+        """
+        _ws_add_to_sys_path()
+        from scripts._lib.work_state import load_state, save_state
+        state = load_state()
+        branch = state.get("active_branch")
+        if not branch:
+            return self._json({"error": "no active workstream — Start one first so the initial push has commits"}, 409)
+
+        if not shutil.which("gh"):
+            return self._json({
+                "error": "gh CLI not installed",
+                "diagnosis": {
+                    "category": "gh_missing",
+                    "summary": "GitHub CLI (`gh`) is not installed.",
+                    "suggestion": "Install gh (`brew install gh` on macOS), then run `gh auth login`. After that, click Create GitHub repo again.",
+                },
+            }, 500)
+
+        # Verify gh is authenticated
+        auth = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+        if auth.returncode != 0:
+            return self._json({
+                "error": "gh not authenticated",
+                "diagnosis": {
+                    "category": "gh_auth",
+                    "summary": "GitHub CLI isn't logged in.",
+                    "suggestion": "Run `gh auth login` in your terminal, then click Create GitHub repo again.",
+                },
+            }, 500)
+
+        if _has_origin_remote():
+            return self._json({"error": "origin remote already configured — use Push instead"}, 409)
+
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        default_name = ws_data.get("name", WORKSPACE.name)
+        repo_name = (body.get("name") or "").strip() or default_name
+        if not re.match(r"^[A-Za-z0-9._-]+$", repo_name):
+            return self._json({"error": "invalid repo name (must match [A-Za-z0-9._-]+)"}, 400)
+        visibility = (body.get("visibility") or "private").strip().lower()
+        if visibility not in ("public", "private", "internal"):
+            return self._json({"error": "visibility must be one of: public, private, internal"}, 400)
+        description = (body.get("description") or "").strip()
+        if not description:
+            description = ws_data.get("description") or f"Process-bigraph workspace: {repo_name}"
+
+        # gh repo create <name> --<visibility> --source=. --remote=origin --push --description "..."
+        # NOTE: --push pushes the current branch to the new remote.
+        cmd = [
+            "gh", "repo", "create", repo_name,
+            "--" + visibility,
+            "--source=.",
+            "--remote=origin",
+            "--push",
+            "--description", description,
+        ]
+        r = subprocess.run(cmd, cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            return self._json({
+                "error": "gh repo create failed",
+                "log": (r.stderr or r.stdout).strip()[-500:],
+            }, 500)
+
+        # Successful: gh pushed the current branch. Mark workstream pushed.
+        state["pushed"] = True
+        save_state(state)
+
+        url = r.stdout.strip().splitlines()[-1] if r.stdout else ""
+        return self._json({
+            "ok": True,
+            "repo_url": url,
+            "visibility": visibility,
+            "branch": branch,
+        }, 200)
 
     def _post_work_create_pr(self, body: dict):
         _ws_add_to_sys_path()
@@ -1799,6 +1935,8 @@ if __name__ == "__main__":
             "commits_ahead": commits_ahead,
             "unpushed": unpushed,
             "pushed": state.get("pushed", False),
+            "has_origin": _has_origin_remote(),
+            "gh_available": shutil.which("gh") is not None,
             "pr_number": state.get("pr_number"),
             "pr_url": state.get("pr_url"),
         }, 200)
