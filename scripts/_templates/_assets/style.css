@@ -202,3 +202,40 @@ img{max-width:100%}
 .viz-status-committed{ background:#d1fae5; color:#065f46 }
 .viz-actions{ display:flex; gap:6px; flex-wrap:wrap }
 .viz-description{ max-width:480px; color:#374151; font-size:0.92em }
+
+/* ── Suggest buttons (v0.4.8) ─────────────────────────────────────────── */
+.input-with-suggest{
+  display:flex; gap:6px; align-items:flex-start;
+}
+.input-with-suggest input,
+.input-with-suggest textarea{
+  flex:1; min-width:0;
+}
+.btn-suggest{
+  background:#eff6ff; border:1px solid #3b82f6; color:#1e40af;
+  border-radius:4px; padding:6px 12px; cursor:pointer; font-size:0.85em;
+  white-space:nowrap; align-self:stretch;
+}
+.btn-suggest:hover{ background:#dbeafe }
+.btn-suggest:disabled{ opacity:0.6; cursor:default }
+
+/* ── Focus mode (v0.5.0) ──────────────────────────────────────────────── */
+/* ?focus=<panel> hides the menu, strip, branch timeline, and
+ * non-target pages, leaving just the requested panel visible. Useful for
+ * skill-driven modal-like interactions. */
+body.focus-mode header.top-header{ display:none }
+body.focus-mode nav.top-menu{ display:none }
+body.focus-mode .workstream-strip{ display:none }
+body.focus-mode .below-pages{ display:none }
+body.focus-mode .page{ display:none }
+body.focus-mode .page.active{ display:block }
+body.focus-mode main.pages{ padding-top:8px }
+body.focus-mode .page-lead-supplement{ display:none }
+
+/* Add a slim header in focus mode so the user knows what they're looking at */
+body.focus-mode::before{
+  content: "Focus mode — close this tab when done";
+  display:block; background:#fef3c7; color:#92400e;
+  padding:6px 16px; font-size:0.82em; font-weight:500;
+  border-bottom:1px solid #fcd34d;
+}

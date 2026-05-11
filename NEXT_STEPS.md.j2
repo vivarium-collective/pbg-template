@@ -102,6 +102,20 @@ opens the phase panel, drives the implementation, runs the gate.
 - `.pbg/schemas/workspace.schema.json` — JSON schema (lint enforces it)
 - `phases/phase-<n>.md` — per-phase spec (frontmatter + body)
 
+## Focused dashboard panels
+
+Open just one panel for a targeted interaction:
+
+| URL | What |
+|---|---|
+| `http://localhost:<port>/?focus=workspace-inputs` | Just datasets / references / expert docs |
+| `http://localhost:<port>/?focus=registry` | Just the module catalog + installed modules |
+| `http://localhost:<port>/?focus=simulation-setup` | Just observables + simulations |
+| `http://localhost:<port>/?focus=visualizations` | Just the viz lifecycle |
+| `http://localhost:<port>/?focus=build-model` | Just phases/tasks |
+
+Skills in Claude Code can `open <url>` to surface a focused interaction without dumping users into the full 5-tab UI.
+
 ## When stuck
 
 1. `python3 scripts/lint-workspace.py` — most workspace-shape issues surface here.

@@ -449,6 +449,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_catalog()
         if self.path.startswith("/api/work-status"):
             return self._get_work_status()
+        if self.path.startswith("/api/suggest-poll"):
+            return self._get_suggest_poll()
         if self.path.startswith("/api/visualization-status"):
             return self._get_visualization_status()
         rel = self.path.lstrip("/")
@@ -495,6 +497,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/work-create-pr":     self._post_work_create_pr,
             "/api/work-end":           self._post_work_end,
             "/api/catalog-install":    self._post_catalog_install,
+            "/api/suggest":            self._post_suggest,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -1905,6 +1908,67 @@ if __name__ == "__main__":
             state["pr_number"] = int(m.group(1))
             save_state(state)
         return self._json({"ok": True, "pr_url": pr_url, "pr_number": state.get("pr_number")}, 200)
+
+    def _post_suggest(self, body: dict):
+        """Write a Claude-suggestion request file. Body: {kind, context_extras?}."""
+        _ws_add_to_sys_path()
+        from scripts._lib.suggest_requests import write_request, VALID_KINDS
+
+        kind = (body.get("kind") or "").strip()
+        if kind not in VALID_KINDS:
+            return self._json({"error": f"invalid kind (must be one of {VALID_KINDS})"}, 400)
+
+        # Build context: workspace name + description, workstream info, recent commits.
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        from scripts._lib.work_state import load_state
+        state = load_state() or {}
+        branch = state.get("active_branch")
+        commits = []
+        if branch:
+            r = subprocess.run(
+                ["git", "log", "--format=%h %s", f"main..{branch}"],
+                cwd=WORKSPACE, capture_output=True, text=True,
+            )
+            if r.returncode == 0:
+                commits = [line for line in (r.stdout or "").splitlines() if line.strip()]
+
+        context = {
+            "workspace_name": ws_data.get("name", ""),
+            "workspace_description": ws_data.get("description", ""),
+            "active_branch": branch,
+            "commits": commits[:30],
+            "extras": body.get("context_extras") or {},
+        }
+
+        req_id = write_request(WORKSPACE, kind, context)
+        return self._json({
+            "ok": True,
+            "id": req_id,
+            "skill_command": f"/pbg-suggest {req_id}",
+            "instructions": (
+                f"Open Claude Code in this workspace and run `/pbg-suggest {req_id}`. "
+                f"The dashboard will pick up the response automatically."
+            ),
+        }, 200)
+
+    def _get_suggest_poll(self):
+        """GET /api/suggest-poll?id=<id> → returns {ready: bool, suggestion?, rationale?}."""
+        from urllib.parse import urlparse, parse_qs
+        _ws_add_to_sys_path()
+        from scripts._lib.suggest_requests import read_response
+
+        qs = parse_qs(urlparse(self.path).query)
+        req_id = (qs.get("id") or [""])[0]
+        if not req_id:
+            return self._json({"error": "missing id"}, 400)
+        resp = read_response(WORKSPACE, req_id)
+        if not resp:
+            return self._json({"ready": False}, 200)
+        return self._json({
+            "ready": True,
+            "suggestion": resp.get("suggestion", ""),
+            "rationale": resp.get("rationale", ""),
+        }, 200)
 
     def _get_work_status(self):
         _ws_add_to_sys_path()

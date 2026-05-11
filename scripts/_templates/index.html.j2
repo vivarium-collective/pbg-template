@@ -709,6 +709,58 @@
   </div>
 </div>
 
+<!-- Modal: Create GitHub repo -->
+<div id="modal-create-github-repo" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-create-github-repo')">&times;</button>
+    <h3>Create GitHub repo</h3>
+    <form id="form-create-github-repo" onsubmit="event.preventDefault(); _submitCreateGithubRepo(this);">
+      <label>Repo name
+        <div class="input-with-suggest">
+          <input name="repo_name" pattern="^[A-Za-z0-9._-]+$" required>
+          <button type="button" class="btn-suggest" onclick="_suggestInto(this, 'repo-name', 'repo_name')">Suggest</button>
+        </div>
+      </label>
+      <label>Visibility
+        <select name="visibility">
+          <option value="private" selected>private</option>
+          <option value="public">public</option>
+          <option value="internal">internal</option>
+        </select>
+      </label>
+      <label>Description
+        <textarea name="description" rows="2"></textarea>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Create + push</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Create PR -->
+<div id="modal-create-pr" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px">
+    <button class="modal-close" onclick="closeModal('modal-create-pr')">&times;</button>
+    <h3>Create PR</h3>
+    <form id="form-create-pr" onsubmit="event.preventDefault(); _submitCreatePR(this);">
+      <label>Title
+        <div class="input-with-suggest">
+          <input name="title" required maxlength="100">
+          <button type="button" class="btn-suggest" onclick="_suggestInto(this, 'pr-title', 'title')">Suggest</button>
+        </div>
+      </label>
+      <label>Body
+        <div class="input-with-suggest input-with-suggest-textarea">
+          <textarea name="body" rows="6" placeholder="Summary + Test plan (markdown)"></textarea>
+          <button type="button" class="btn-suggest" onclick="_suggestInto(this, 'pr-body', 'body')">Suggest</button>
+        </div>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Create PR</button>
+    </form>
+  </div>
+</div>
+
 <script src="assets/render-helpers.js"></script>
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
 <script src="assets/walkthrough.js" onerror="/* walkthrough unavailable */"></script>

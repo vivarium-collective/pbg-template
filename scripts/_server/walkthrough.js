@@ -256,6 +256,18 @@
   }
 
   function _initMenuNav() {
+    // Focus mode: ?focus=<panel> hides everything except the named panel.
+    var params = new URLSearchParams(window.location.search);
+    var focus = params.get('focus');
+    if (focus) {
+      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'build-model'];
+      if (validPages.indexOf(focus) >= 0) {
+        document.body.classList.add('focus-mode', 'focus-' + focus);
+        _switchPage(focus);
+        return; // skip normal hash-based routing
+      }
+    }
+
     function fromHash() {
       var h = (window.location.hash || '').replace(/^#/, '');
       // phase anchors (#phase-N) auto-route to build-model page
@@ -567,34 +579,39 @@
   }
 
   function _createGithubRepo() {
-    var visibility = prompt("Repo visibility: public, private, or internal", "private");
-    if (visibility === null) return;
-    visibility = visibility.trim().toLowerCase() || "private";
-    if (visibility !== "public" && visibility !== "private" && visibility !== "internal") {
-      alert("Visibility must be one of: public, private, internal."); return;
-    }
+    openModal('modal-create-github-repo');
+  }
+  window._createGithubRepo = _createGithubRepo;
+
+  function _submitCreateGithubRepo(form) {
+    var data = {
+      name: form.repo_name.value.trim(),
+      visibility: form.visibility.value,
+      description: form.description.value.trim() || null,
+    };
+    var errEl = form.querySelector('.form-error');
+    errEl.textContent = '';
     fetch('/api/work-create-github-repo', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({visibility: visibility}),
+      body: JSON.stringify(data),
     })
       .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
       .then(function(parts){
         var ok = parts[0], json = parts[1];
         if (!ok) {
-          var msg = "Could not create GitHub repo:\n" + (json.error || 'unknown');
-          if (json.diagnosis) msg += "\n\n→ " + json.diagnosis.suggestion;
-          if (json.log) msg += "\n\n(log tail: " + json.log + ")";
-          alert(msg);
+          var msg = json.error || 'unknown';
+          if (json.diagnosis) msg += " — " + json.diagnosis.suggestion;
+          errEl.textContent = msg;
           return;
         }
-        alert("Created " + json.visibility + " repo and pushed.\n" + (json.repo_url || ''));
+        closeModal('modal-create-github-repo');
+        alert("Created " + json.visibility + " repo. Opening on GitHub...");
         if (json.repo_url) window.open(json.repo_url, '_blank');
         _refreshWorkStrip();
-      })
-      .catch(function(err){ alert("Network error: " + err); });
+      });
   }
-  window._createGithubRepo = _createGithubRepo;
+  window._submitCreateGithubRepo = _submitCreateGithubRepo;
 
   function _startWork() {
     var name = prompt("Workstream branch name (e.g., feat/baseline-work):");
@@ -634,26 +651,82 @@
   window._pushWork = _pushWork;
 
   function _createPR() {
-    var title = prompt("PR title:");
-    if (title === null) return;
+    openModal('modal-create-pr');
+  }
+  window._createPR = _createPR;
+
+  function _submitCreatePR(form) {
+    var data = {
+      title: form.title.value.trim(),
+      body: form.body.value.trim() || null,
+    };
+    var errEl = form.querySelector('.form-error');
+    errEl.textContent = '';
     fetch('/api/work-create-pr', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({title: (title || '').trim()}),
+      body: JSON.stringify(data),
     })
       .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
       .then(function(parts){
-        if (!parts[0]) {
-          var msg = "Could not create PR:\n" + (parts[1].error || 'unknown');
-          if (parts[1].manual_url) msg += "\n\nOpen manually: " + parts[1].manual_url;
-          alert(msg);
+        var ok = parts[0], json = parts[1];
+        if (!ok) {
+          var msg = json.error || 'unknown';
+          if (json.manual_url) msg += "\n\nOpen manually: " + json.manual_url;
+          errEl.textContent = msg;
           return;
         }
-        window.open(parts[1].pr_url, '_blank');
+        closeModal('modal-create-pr');
+        window.open(json.pr_url, '_blank');
         _refreshWorkStrip();
       });
   }
-  window._createPR = _createPR;
+  window._submitCreatePR = _submitCreatePR;
+
+  // Generic Suggest button: writes a request, polls for response, fills the input.
+  function _suggestInto(btn, kind, fieldName) {
+    var form = btn.closest('form');
+    var input = form.elements[fieldName];
+    btn.disabled = true;
+    btn.textContent = "…";
+    fetch('/api/suggest', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({kind: kind}),
+    })
+      .then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); })
+      .then(function(parts){
+        var ok = parts[0], json = parts[1];
+        if (!ok) { alert("Suggest request failed: " + (json.error || 'unknown')); btn.disabled = false; btn.textContent = "Suggest"; return; }
+        var msg = json.instructions + "\n\nClick OK to start polling.";
+        if (!confirm(msg)) { btn.disabled = false; btn.textContent = "Suggest"; return; }
+        _pollSuggestion(json.id, input, btn, 0);
+      });
+  }
+  window._suggestInto = _suggestInto;
+
+  function _pollSuggestion(id, input, btn, attempts) {
+    if (attempts > 90) {  // ~3 minutes
+      btn.disabled = false; btn.textContent = "Suggest";
+      alert("Timed out waiting for /pbg-suggest. Click Suggest again to retry.");
+      return;
+    }
+    btn.textContent = "polling (" + attempts + ")";
+    fetch('/api/suggest-poll?id=' + encodeURIComponent(id))
+      .then(function(r){ return r.json(); })
+      .then(function(json){
+        if (json.ready) {
+          input.value = json.suggestion;
+          if (json.rationale) input.title = json.rationale;
+          btn.disabled = false; btn.textContent = "Suggest";
+          return;
+        }
+        setTimeout(function(){ _pollSuggestion(id, input, btn, attempts + 1); }, 2000);
+      })
+      .catch(function(){
+        btn.disabled = false; btn.textContent = "Suggest";
+      });
+  }
 
   function _endWork() {
     if (!confirm("End workstream? This switches you back to base. Your branch is preserved.")) return;
