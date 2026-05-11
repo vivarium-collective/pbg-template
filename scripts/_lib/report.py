@@ -58,18 +58,10 @@ def _next_step_hint(ws: dict) -> dict:
             "command": "Dashboard → Build Model → + Add phase",
             "details": "Lay out the mechanisms to integrate, each backed by an expert doc or dataset.",
         }
-    for p in phases:
-        if p.get("status") != "complete":
-            return {
-                "label": f"Phase {p['n']} ({p['name']}): {p.get('status', '?')}",
-                "command": f"Dashboard → Build Model → Phase {p['n']} → Start phase / Evaluate gate",
-                "details": "Or use the /pbg-phase skill to drive the phase from Claude Code.",
-            }
-    return {
-        "label": "All planned phases complete",
-        "command": "Add more phases (Build Model → + Add phase) or publish the workspace.",
-        "details": "",
-    }
+    # Past beginner setup: phases exist. The workstream strip + Build Model tab
+    # (current-phase banner + per-phase Start/Evaluate buttons) surface the next
+    # step contextually. A separate top-of-page banner would just duplicate that.
+    return None
 
 
 def _env(template_dir: Path) -> Environment:

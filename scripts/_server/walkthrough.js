@@ -738,35 +738,12 @@
   window._dropZoneStore = _dropZoneStore;
   window._showBranchDiff = _showBranchDiff;
 
-  // -------------------------------------------------------------------------
-  // Copy-command button (legacy walkthrough-panel support)
-  // -------------------------------------------------------------------------
-
   document.addEventListener("DOMContentLoaded", function () {
     // Initialize menu navigation.
     _initMenuNav();
 
     // Initialize workstream strip.
     _refreshWorkStrip();
-
-    var panel = document.getElementById("walkthrough-panel");
-    if (panel) {
-      var pre = panel.querySelector("pre");
-      if (pre) {
-        var btn = document.createElement("button");
-        btn.textContent = "Copy command";
-        btn.style.cssText = "margin-top:8px;padding:4px 10px;border:1px solid #f5b042;background:#fff;cursor:pointer;border-radius:4px";
-        btn.addEventListener("click", function () {
-          var code = pre.querySelector("code");
-          var text = code ? code.innerText : pre.innerText;
-          navigator.clipboard.writeText(text).then(function () {
-            btn.textContent = "Copied";
-            setTimeout(function () { btn.textContent = "Copy command"; }, 1500);
-          });
-        });
-        pre.parentNode.insertBefore(btn, pre.nextSibling);
-      }
-    }
 
     // Auto-load branches if the branch timeline container exists.
     if (document.getElementById("branch-timeline-body")) {
