@@ -98,3 +98,59 @@ def add_dependency(pyproject_path: Path, package: str, *, version_spec: str | No
 
     pyproject_path.write_text(text)
     return True
+
+
+def add_uv_source(
+    pyproject_path: Path,
+    package: str,
+    *,
+    path: str | None = None,
+    git: str | None = None,
+    editable: bool = True,
+) -> bool:
+    """Append a [tool.uv.sources] entry mapping `package` → local path or git URL.
+
+    Required for git-only packages (pbg-* repos) that aren't on PyPI. Without
+    this, `uv pip install -e .` fails to resolve them. Either path OR git
+    must be set.
+
+    Returns True if a change was made; False if the source was already declared.
+    """
+    if not pyproject_path.exists():
+        raise FileNotFoundError(pyproject_path)
+    if not path and not git:
+        raise ValueError("either path or git must be provided")
+
+    text = pyproject_path.read_text()
+    data = tomllib.loads(text)
+    existing_sources = data.get("tool", {}).get("uv", {}).get("sources", {}) or {}
+    if package in existing_sources:
+        return False  # already declared
+
+    if path is not None:
+        entry = f'{{ path = "{path}", editable = {"true" if editable else "false"} }}'
+    else:
+        entry = f'{{ git = "{git}" }}'
+
+    # Find existing [tool.uv.sources] block; append OR create.
+    block_re = re.compile(r"^\s*\[tool\.uv\.sources\]\s*$", re.MULTILINE)
+    block_m = block_re.search(text)
+
+    if block_m:
+        # Insert the new key right after the section header
+        insertion = f"\n{package} = {entry}"
+        head_end = block_m.end()
+        text = text[:head_end] + insertion + text[head_end:]
+    else:
+        # Append a new [tool.uv.sources] block at the end of the file
+        if not text.endswith("\n"):
+            text += "\n"
+        text += (
+            "\n# Auto-managed by the dashboard catalog Install button. Maps git-only\n"
+            "# pbg-* packages to their local external/<name> submodule path.\n"
+            "[tool.uv.sources]\n"
+            f"{package} = {entry}\n"
+        )
+
+    pyproject_path.write_text(text)
+    return True

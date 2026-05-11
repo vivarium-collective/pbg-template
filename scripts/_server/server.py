@@ -2262,7 +2262,7 @@ if __name__ == "__main__":
             # Step 3: workspace.yaml.
             _ws_add_to_sys_path()
             from scripts._lib.workspace_yaml import load_workspace, save_workspace
-            from scripts._lib.pyproject_edit import add_dependency
+            from scripts._lib.pyproject_edit import add_dependency, add_uv_source
 
             ws_file = WORKSPACE / "workspace.yaml"
             ws = load_workspace(ws_file)
@@ -2278,9 +2278,18 @@ if __name__ == "__main__":
             }
             save_workspace(ws_file, ws)
 
-            # Step 4: pyproject.toml [project.dependencies].
+            # Step 4: pyproject.toml — both [project.dependencies] and
+            # [tool.uv.sources]. The dep line declares the requirement;
+            # the uv-source maps it to the local submodule path so uv can
+            # resolve a git-only pbg-* package in CI without going to PyPI.
             try:
                 add_dependency(WORKSPACE / "pyproject.toml", package_name)
+                add_uv_source(
+                    WORKSPACE / "pyproject.toml",
+                    package_name,
+                    path=f"external/{name}",
+                    editable=True,
+                )
             except Exception as e:
                 # Don't fail the whole install if pyproject edit fails — log it.
                 log_dir = WORKSPACE / ".pbg"
