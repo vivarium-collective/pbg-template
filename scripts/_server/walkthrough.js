@@ -1,4 +1,4 @@
-// walkthrough.js — v0.4.14: Available Composites picker + Emitter Use feedback + drop process multi-select; v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
+// walkthrough.js — v0.5.1: composite explorer page (bigraph-viz + test run + promote to simulation); v0.4.14: Available Composites picker + Emitter Use feedback + drop process multi-select; v0.4.5: _renderInstallError structured diagnosis; v0.4.1: _loadCatalog + _installFromCatalog; v0.4.0b: active-branch workstream strip; v0.3.7-A: _installImport; v0.3.6: Registry tab; v0.1.9: drag-drop uploads; v0.1.7: interactive forms.
 (function () {
   "use strict";
 
@@ -265,6 +265,10 @@
         loadBranches();
       }
     }
+    // Initialize composite explorer when switching to that page.
+    if (pageId === 'composite-explore') {
+      _initCompositeExplorer();
+    }
   }
 
   function _initMenuNav() {
@@ -272,7 +276,7 @@
     var params = new URLSearchParams(window.location.search);
     var focus = params.get('focus');
     if (focus) {
-      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'build-model', 'branches'];
+      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'build-model', 'branches', 'composite-explore'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -288,7 +292,7 @@
         // let the browser scroll to the anchor naturally
         return;
       }
-      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'build-model', 'branches'];
+      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'build-model', 'branches', 'composite-explore'];
       _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
     }
     window.addEventListener('hashchange', fromHash);
@@ -498,7 +502,7 @@
             requires +
             paramSummary +
             '<div class="module-action">' +
-              '<button class="action-btn" onclick="_useComposite(\'' + _esc(c.id) + '\')">Use</button>' +
+              '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Use</button>' +
             '</div>' +
           '</div>';
         });
@@ -1247,5 +1251,176 @@
 
   // Auto-refresh viz statuses on page load
   window.addEventListener('DOMContentLoaded', function() { setTimeout(_vizRefreshAll, 200); });
+
+  // ---------------------------------------------------------------------------
+  // Composite explorer (v0.5.1)
+  // ---------------------------------------------------------------------------
+
+  window._ceCurrent = null;  // current composite + overrides state
+
+  function _openCompositeExplorer(id) {
+    window.location.search = '?focus=composite-explore&id=' + encodeURIComponent(id);
+  }
+  window._openCompositeExplorer = _openCompositeExplorer;
+
+  function _initCompositeExplorer() {
+    // Called when the explorer page is activated. Parses ?id=<spec_id> from
+    // the URL, fetches the resolved composite, populates the page.
+    var params = new URLSearchParams(window.location.search);
+    var id = params.get('id');
+    if (!id) {
+      document.getElementById('ce-loading').textContent =
+        'No composite id specified. Open via the Use button on a composite card.';
+      return;
+    }
+    window._ceCurrent = {id: id, overrides: {}};
+    _ceFetch();
+  }
+  window._initCompositeExplorer = _initCompositeExplorer;
+
+  function _ceFetch() {
+    var url = '/api/composite-resolve?id=' + encodeURIComponent(window._ceCurrent.id) +
+      '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) {
+          document.getElementById('ce-loading').innerHTML =
+            '<span style="color:#c00">Error: ' + _esc(data.error) + '</span>';
+          return;
+        }
+        document.getElementById('ce-loading').style.display = 'none';
+        document.getElementById('ce-main').style.display = '';
+        document.getElementById('ce-name').textContent = data.name;
+        document.getElementById('ce-description').textContent = data.description || '';
+        document.getElementById('ce-id').textContent = data.id;
+        window._ceCurrent.parameters = data.parameters;
+        // Render diagram
+        document.getElementById('ce-diagram').innerHTML = data.svg || '<em>(no diagram)</em>';
+        // Render parameter editor
+        _ceRenderParameters(data.parameters);
+        // Render state JSON
+        document.getElementById('ce-state-json').textContent =
+          JSON.stringify(data.state, null, 2);
+      })
+      .catch(function(err) {
+        document.getElementById('ce-loading').innerHTML =
+          '<span style="color:#c00">Network error: ' + _esc(String(err)) + '</span>';
+      });
+  }
+
+  function _ceRenderParameters(params) {
+    var container = document.getElementById('ce-parameters');
+    var keys = Object.keys(params || {});
+    if (!keys.length) {
+      container.innerHTML = '<p class="muted">No parameters.</p>';
+      return;
+    }
+    container.innerHTML = keys.map(function(k) {
+      var pdef = params[k];
+      var def = pdef.default;
+      var current = (window._ceCurrent.overrides && window._ceCurrent.overrides[k] !== undefined)
+        ? window._ceCurrent.overrides[k] : def;
+      var type = pdef.type || 'string';
+      var inputType = (type === 'int' || type === 'float') ? 'number' : 'text';
+      var step = (type === 'float') ? 'any' : (type === 'int' ? '1' : '');
+      var desc = pdef.description ? '<small class="muted">' + _esc(pdef.description) + '</small>' : '';
+      return '<label>' + _esc(k) + ' <span class="muted">(' + _esc(type) + ')</span>' +
+        '<input data-param="' + _esc(k) + '" data-type="' + _esc(type) + '" type="' + inputType + '"' +
+        (step ? ' step="' + step + '"' : '') +
+        ' value="' + _esc(String(current !== undefined && current !== null ? current : '')) + '">' +
+        desc + '</label>';
+    }).join('');
+  }
+
+  function _ceCollectOverrides() {
+    var inputs = document.querySelectorAll('#ce-parameters input[data-param]');
+    var out = {};
+    inputs.forEach(function(el) {
+      var k = el.dataset.param, t = el.dataset.type;
+      var v = el.value;
+      if (v === '') return;
+      if (t === 'float') v = parseFloat(v);
+      else if (t === 'int') v = parseInt(v, 10);
+      else if (t === 'bool') v = (v === 'true' || v === '1');
+      out[k] = v;
+    });
+    return out;
+  }
+
+  function _ceUpdateDiagram() {
+    window._ceCurrent.overrides = _ceCollectOverrides();
+    document.getElementById('ce-diagram').innerHTML = '<p class="empty-state">Re-rendering diagram&hellip;</p>';
+    _ceFetch();
+  }
+  window._ceUpdateDiagram = _ceUpdateDiagram;
+
+  function _ceTestRun() {
+    var steps = parseInt(document.getElementById('ce-steps').value, 10) || 5;
+    var overrides = _ceCollectOverrides();
+    var resultsEl = document.getElementById('ce-test-results');
+    resultsEl.innerHTML = '<p class="empty-state">Running&hellip;</p>';
+    fetch('/api/composite-test-run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: window._ceCurrent.id, overrides: overrides, steps: steps}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], json = parts[1];
+        if (!ok) {
+          var msg = '<span style="color:#c00"><strong>Test run failed:</strong> ' +
+            _esc(json.error || 'unknown') + '</span>';
+          if (json.traceback) {
+            msg += '<details><summary>traceback</summary><pre style="font-size:0.8em">' +
+              _esc(json.traceback) + '</pre></details>';
+          }
+          resultsEl.innerHTML = msg;
+          return;
+        }
+        // Show first few entries per emitter
+        var resultsHtml = '<p><strong>Completed ' + json.steps + ' steps.</strong></p>';
+        var keys = Object.keys(json.results || {});
+        if (!keys.length) {
+          resultsHtml += '<p class="muted">(No emitters produced output.)</p>';
+        } else {
+          resultsHtml += keys.map(function(k) {
+            var entries = json.results[k];
+            var rows = entries.slice(0, 10).map(function(e, i) {
+              return '<tr><td>' + i + '</td><td><code>' + _esc(JSON.stringify(e)) + '</code></td></tr>';
+            }).join('');
+            return '<h4>' + _esc(k) + ' (' + entries.length + ' entries)</h4>' +
+              '<table style="font-size:0.85em"><thead><tr><th>Step</th><th>Value</th></tr></thead><tbody>' +
+              rows + '</tbody></table>';
+          }).join('');
+        }
+        resultsEl.innerHTML = resultsHtml;
+      })
+      .catch(function(err) {
+        resultsEl.innerHTML = '<span style="color:#c00">Network error: ' + _esc(String(err)) + '</span>';
+      });
+  }
+  window._ceTestRun = _ceTestRun;
+
+  function _cePromoteSimulation() {
+    // Re-use the existing _useComposite flow (Configure modal) with current overrides pre-applied.
+    var c = (window._compositesById || {})[window._ceCurrent.id];
+    if (!c) {
+      // Fetch and try again by loading composites first
+      alert('Composite not in cache. Switch to Simulation Setup tab once to load, then retry.');
+      return;
+    }
+    // Open the Configure modal with the current composite
+    _useComposite(window._ceCurrent.id);
+    // Apply current overrides to the modal inputs
+    var modal = document.getElementById('modal-configure-composite');
+    if (modal) {
+      Object.keys(window._ceCurrent.overrides || {}).forEach(function(k) {
+        var inp = modal.querySelector('input[name="param_' + k + '"]');
+        if (inp) inp.value = window._ceCurrent.overrides[k];
+      });
+    }
+  }
+  window._cePromoteSimulation = _cePromoteSimulation;
 
 })();

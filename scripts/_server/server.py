@@ -470,6 +470,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_pending()
         if self.path.startswith("/api/registry"):
             return self._get_registry()
+        if self.path.startswith("/api/composite-resolve"):
+            return self._get_composite_resolve()
         if self.path.startswith("/api/composites"):
             return self._get_composites()
         if self.path.startswith("/api/catalog"):
@@ -525,6 +527,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/work-end":           self._post_work_end,
             "/api/catalog-install":    self._post_catalog_install,
             "/api/suggest":            self._post_suggest,
+            "/api/composite-test-run": self._post_composite_test_run,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -2173,6 +2176,134 @@ if __name__ == "__main__":
         except Exception as e:
             return self._json({"composites": [], "error": str(e)}, 200)
 
+    def _get_composite_resolve(self):
+        """GET /api/composite-resolve — resolve a composite spec with param overrides, return state + SVG."""
+        from urllib.parse import urlparse, parse_qs
+        _ws_add_to_sys_path()
+        from scripts._lib.composite_lookup import substitute_parameters
+
+        qs = parse_qs(urlparse(self.path).query)
+        spec_id = (qs.get("id") or [""])[0]
+        overrides_raw = (qs.get("overrides") or ["{}"])[0]
+        try:
+            overrides = json.loads(overrides_raw) if overrides_raw else {}
+        except json.JSONDecodeError:
+            return self._json({"error": "invalid overrides JSON"}, 400)
+
+        if not spec_id:
+            return self._json({"error": "missing id"}, 400)
+
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        parts = spec_id.split(".composites.")
+        if len(parts) != 2:
+            return self._json({"error": f"unrecognized composite id: {spec_id}"}, 404)
+        stem = parts[1]
+        # Find the file
+        path = None
+        for suffix in (".composite.yaml", ".composite.yml", ".composite.json"):
+            candidate = WORKSPACE / pkg / "composites" / f"{stem}{suffix}"
+            if candidate.exists():
+                path = candidate
+                break
+        if path is None:
+            return self._json({"error": f"spec file not found for id {spec_id}"}, 404)
+
+        text = path.read_text()
+        if path.suffix.lower() == ".json":
+            spec = json.loads(text)
+        else:
+            spec = yaml.safe_load(text)
+        state = substitute_parameters(spec.get("state") or {},
+                                       spec.get("parameters") or {},
+                                       overrides)
+
+        # Render the wiring diagram via bigraph-viz subprocess.
+        svg = _render_composite_svg(state, pkg)
+
+        return self._json({
+            "id": spec_id,
+            "name": spec.get("name", stem),
+            "description": spec.get("description", ""),
+            "parameters": spec.get("parameters") or {},
+            "state": state,
+            "svg": svg,
+        }, 200)
+
+    def _post_composite_test_run(self, body: dict):
+        """POST /api/composite-test-run — run a composite for N steps, return emitter results."""
+        _ws_add_to_sys_path()
+        from scripts._lib.composite_lookup import substitute_parameters
+
+        spec_id = (body.get("id") or "").strip()
+        overrides = body.get("overrides") or {}
+        steps = int(body.get("steps") or 5)
+
+        if not spec_id:
+            return self._json({"error": "missing id"}, 400)
+
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        parts = spec_id.split(".composites.")
+        if len(parts) != 2:
+            return self._json({"error": f"unrecognized composite id: {spec_id}"}, 404)
+        stem = parts[1]
+        path = None
+        for suffix in (".composite.yaml", ".composite.yml", ".composite.json"):
+            candidate = WORKSPACE / pkg / "composites" / f"{stem}{suffix}"
+            if candidate.exists():
+                path = candidate
+                break
+        if path is None:
+            return self._json({"error": "spec file not found"}, 404)
+
+        text = path.read_text()
+        spec = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
+        state = substitute_parameters(spec.get("state") or {},
+                                       spec.get("parameters") or {},
+                                       overrides)
+
+        py = sys.executable
+        script = textwrap.dedent(f"""
+            import json, sys, traceback
+            try:
+                from {pkg}.core import build_core
+                from process_bigraph import Composite, gather_emitter_results
+                core = build_core()
+                composite = Composite({{'state': {json.dumps(state)}}}, core=core)
+                composite.run({steps})
+                results = gather_emitter_results(composite)
+                # Serialize to JSON-friendly form
+                out = {{}}
+                for path_tuple, entries in results.items():
+                    key = '.'.join(str(p) for p in path_tuple)
+                    out[key] = entries
+                print('@@@RESULTS@@@')
+                print(json.dumps(out, default=str))
+            except Exception as e:
+                print('@@@ERROR@@@')
+                print(traceback.format_exc())
+        """)
+        try:
+            result = subprocess.run(
+                [py, "-c", script],
+                cwd=WORKSPACE, capture_output=True, text=True, timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            return self._json({"error": "test run timed out after 60s"}, 500)
+
+        out = result.stdout
+        if "@@@RESULTS@@@" in out:
+            try:
+                results = json.loads(out.split("@@@RESULTS@@@", 1)[1].strip())
+            except json.JSONDecodeError as e:
+                return self._json({"error": f"invalid runner output: {e}"}, 500)
+            return self._json({"ok": True, "results": results, "steps": steps}, 200)
+        if "@@@ERROR@@@" in out:
+            err = out.split("@@@ERROR@@@", 1)[1].strip()
+            return self._json({"error": "runner failed", "traceback": err[-1500:]}, 500)
+        return self._json({"error": "runner returned nothing", "stdout": out[-500:], "stderr": result.stderr[-500:]}, 500)
+
     def _get_catalog(self):
         """GET /api/catalog — return the curated module catalog with installed annotations."""
         catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
@@ -2481,6 +2612,71 @@ if __name__ == "__main__":
         if rel.endswith(".svg"): return "image/svg+xml"
         if rel.endswith(".html"): return "text/html"
         return "text/plain"
+
+
+# ---------------------------------------------------------------------------
+# Composite diagram rendering helper
+# ---------------------------------------------------------------------------
+
+def _render_composite_svg(state: dict, package_name: str) -> str:
+    """Run bigraph-viz to render the composite state. Return SVG string or error placeholder."""
+    py = sys.executable
+    script = textwrap.dedent(f"""
+        import json, sys, traceback
+        try:
+            from {package_name}.core import build_core
+            from process_bigraph import Composite
+            try:
+                from bigraph_viz import plot_bigraph
+            except ImportError:
+                print("@@@NO_BIGRAPH_VIZ@@@")
+                sys.exit(0)
+
+            core = build_core()
+            state = {json.dumps(state)}
+            composite = Composite({{'state': state}}, core=core)
+            # plot_bigraph signature varies; try several known forms.
+            try:
+                fig = plot_bigraph(composite.composition, out_dir=None, filename=None, show_values=True)
+            except TypeError:
+                try:
+                    fig = plot_bigraph(composite.composition)
+                except Exception as e:
+                    print('@@@ERROR@@@')
+                    print(f'plot_bigraph failed: {{e}}')
+                    sys.exit(0)
+            # fig may be a graphviz.Digraph; convert to SVG
+            try:
+                svg = fig.pipe(format='svg').decode('utf-8')
+                print('@@@SVG@@@')
+                print(svg)
+            except Exception as e:
+                print('@@@ERROR@@@')
+                print(f'failed to render to SVG: {{e}}')
+        except Exception as e:
+            print('@@@ERROR@@@')
+            print(traceback.format_exc())
+    """)
+    try:
+        result = subprocess.run(
+            [py, "-c", script],
+            cwd=WORKSPACE, capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='50'><text x='10' y='30'>diagram render timed out</text></svg>"
+
+    out = result.stdout
+    if "@@@SVG@@@" in out:
+        return out.split("@@@SVG@@@", 1)[1].strip()
+    if "@@@NO_BIGRAPH_VIZ@@@" in out:
+        return ("<svg xmlns='http://www.w3.org/2000/svg' width='600' height='50'>"
+                "<text x='10' y='30'>bigraph-viz not installed. "
+                "Add bigraph-viz to pyproject.toml dependencies and run: uv pip install bigraph-viz. "
+                "Falling back to JSON state below.</text></svg>")
+    if "@@@ERROR@@@" in out:
+        err = out.split("@@@ERROR@@@", 1)[1].strip()[:500]
+        return f"<svg xmlns='http://www.w3.org/2000/svg' width='600' height='50'><text x='10' y='30'>diagram render failed: {err}</text></svg>"
+    return "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='50'><text x='10' y='30'>diagram render returned nothing</text></svg>"
 
 
 # ---------------------------------------------------------------------------

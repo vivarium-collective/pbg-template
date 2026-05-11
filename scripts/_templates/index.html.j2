@@ -59,6 +59,12 @@
   vertical-align: middle;
 }
 .pill-btn:hover { background: #eee; }
+.btn-mini {
+  font-size: 0.78em; padding: 2px 8px; border-radius: 3px;
+  border: 1px solid #1976d2; background: #e3f2fd; cursor: pointer; margin-left: 8px;
+  vertical-align: middle;
+}
+.btn-mini:hover { background: #bbdefb; }
 .section-header {
   margin: 28px 0 6px 0;
   padding-bottom: 6px;
@@ -575,6 +581,53 @@
   <h2 class="page-title">Branches</h2>
   <p class="page-lead">All stage/* branches in this workspace, with one-click merge / PR / diff actions. Branches accumulate as the dashboard creates them on actions (Add observable, Install module, etc.). Use this tab to land them on main.</p>
   <div id="branch-timeline-body"></div>
+</section>
+
+<!-- ===== PAGE: COMPOSITE EXPLORER ===== -->
+<section id="page-composite-explore" class="page" data-page="composite-explore">
+  <h2 class="page-title">Composite explorer</h2>
+  <p class="page-lead">Inspect the wiring of a composite, edit its parameters, run a short test simulation, then promote to a workspace simulation entry.</p>
+
+  <div id="ce-loading" class="empty-state">Loading composite&hellip;</div>
+
+  <div id="ce-main" style="display:none">
+    <div class="panel">
+      <h3 id="ce-name"></h3>
+      <p id="ce-description" class="muted"></p>
+      <p><strong>ID:</strong> <code id="ce-id"></code></p>
+    </div>
+
+    <div class="panel">
+      <h3>Wiring diagram <button class="btn-mini" onclick="_ceUpdateDiagram()">Update diagram</button></h3>
+      <div id="ce-diagram" style="max-height:600px;overflow:auto;background:#fafafa;border:1px solid #e5e7eb;border-radius:4px;padding:8px">
+        <p class="empty-state">No diagram yet&hellip;</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Parameters</h3>
+      <div id="ce-parameters"></div>
+    </div>
+
+    <details class="panel">
+      <summary><strong>Resolved state (JSON)</strong></summary>
+      <pre id="ce-state-json" style="background:#f8f8f8;padding:10px;border-radius:4px;overflow-x:auto;font-size:0.82em"></pre>
+    </details>
+
+    <div class="panel">
+      <h3>Test run</h3>
+      <p class="panel-lead">Run the composite for a short number of steps. Doesn&apos;t create a workspace simulation entry &mdash; useful for sanity-checking before committing.</p>
+      <label>Steps <input type="number" id="ce-steps" value="5" min="1" max="100" style="width:80px;display:inline-block;margin-left:8px"></label>
+      <button class="action-btn" onclick="_ceTestRun()">Test run</button>
+      <div id="ce-test-results" style="margin-top:12px"></div>
+    </div>
+
+    <div class="panel" style="background:#eff6ff">
+      <h3>Create simulation</h3>
+      <p class="panel-lead">Promote these parameter values into a simulation entry in workspace.yaml. Opens the existing Configure modal with the current overrides pre-filled.</p>
+      <button class="action-btn" onclick="_cePromoteSimulation()">Create simulation from these values</button>
+    </div>
+  </div>
 </section>
 
 </main>
