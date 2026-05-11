@@ -1465,6 +1465,7 @@ if __name__ == "__main__":
         initial_state = body.get("initial_state") or None
         parameter_overrides = body.get("parameter_overrides") or None
         emitter_config = body.get("emitter_config") or None
+        composite = (body.get("composite") or "").strip() or None
         phases_raw = body.get("phases", [])
         processes_raw = body.get("processes", [])
 
@@ -1542,6 +1543,8 @@ if __name__ == "__main__":
             entry: dict = {"name": name, "t_start": t_start, "t_end": t_end}
             if description:
                 entry["description"] = description
+            if composite:
+                entry["composite"] = composite
             if initial_state is not None:
                 entry["initial_state"] = initial_state
             if parameter_overrides is not None:
