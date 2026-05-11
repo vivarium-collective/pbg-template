@@ -149,7 +149,7 @@
     <p class="panel-lead">BibTeX bibliography + claim &rarr; paper mapping. Adds entries to <code>references/papers.bib</code> and <code>references/claims.yaml</code>.</p>
     <p>Entries in <code>references/papers.bib</code>: <strong>{{ references_count }}</strong> &nbsp;&middot;&nbsp; PDFs committed: <strong>{{ (references_pdfs or [])|length }}</strong></p>
     {% if references_pdfs %}
-    <table style="font-size:0.86em;margin-bottom:10px"><thead><tr><th>Bib key</th><th>Path</th><th>SHA256 (trunc)</th></tr></thead><tbody>
+    <table style="font-size:0.86em;margin-bottom:10px"><thead><tr><th>Bib key</th><th>File</th></tr></thead><tbody>
     {% for pdf in references_pdfs %}
     <tr>
       <td><code>{{ pdf.bib_key }}</code>{% if pdf._metadata_pending %} <span class="stage-label optional">Needs metadata</span>{% endif %}</td>
@@ -165,7 +165,6 @@
           <small class="muted">{{ pdf.path }}</small>
         {% endif %}
       </td>
-      <td><code>{{ pdf.sha256[:8] }}&hellip;</code></td>
     </tr>
     {% endfor %}
     </tbody></table>
