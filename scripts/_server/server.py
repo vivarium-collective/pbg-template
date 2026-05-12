@@ -29,6 +29,7 @@ import hashlib
 import json
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import textwrap
@@ -2220,13 +2221,17 @@ if __name__ == "__main__":
         }, 200)
 
     def _post_composite_test_run(self, body: dict):
-        """POST /api/composite-test-run — run a composite for N steps, return emitter results."""
+        """POST /api/composite-test-run — run a composite for N steps, persist
+        to .pbg/composite-runs.db via an injected SQLiteEmitter, return
+        {simulation_id, results, steps}."""
         _ws_add_to_sys_path()
         from scripts._lib.composite_lookup import substitute_parameters, find_composite_path
+        from scripts._lib import composite_runs as cr
 
         spec_id = (body.get("id") or "").strip()
         overrides = body.get("overrides") or {}
         steps = int(body.get("steps") or 5)
+        label = (body.get("label") or "").strip() or _auto_label(overrides)
 
         if not spec_id:
             return self._json({"error": "missing id"}, 400)
@@ -2243,17 +2248,25 @@ if __name__ == "__main__":
                                        spec.get("parameters") or {},
                                        overrides)
 
+        # Persistence wiring
+        db_file = str(WORKSPACE / ".pbg" / "composite-runs.db")
+        run_id = cr.generate_run_id(spec_id, overrides)
+        state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+
+        # Subprocess-style run. Match existing pattern: composite.run(steps) + flatten tuple keys.
         py = sys.executable
         script = textwrap.dedent(f"""
             import json, sys, traceback
             try:
                 from {pkg}.core import build_core
                 from process_bigraph import Composite, gather_emitter_results
+                from process_bigraph.emitter import SQLiteEmitter
                 core = build_core()
+                core.register_link('SQLiteEmitter', SQLiteEmitter)
                 composite = Composite({{'state': {json.dumps(state)}}}, core=core)
                 composite.run({steps})
                 results = gather_emitter_results(composite)
-                # Serialize to JSON-friendly form
+                # Flatten tuple keys to JSON-friendly dotted strings
                 out = {{}}
                 for path_tuple, entries in results.items():
                     key = '.'.join(str(p) for p in path_tuple)
@@ -2264,25 +2277,47 @@ if __name__ == "__main__":
                 print('@@@ERROR@@@')
                 print(traceback.format_exc())
         """)
+
+        # Save metadata before running so the row exists even on crash.
+        # save_metadata can raise sqlite3.IntegrityError on duplicate run_id;
+        # the run_id includes a fresh timestamp so duplicates are unexpected.
+        conn = cr.connect(db_file)
         try:
-            result = subprocess.run(
-                [py, "-c", script],
-                cwd=WORKSPACE, capture_output=True, text=True, timeout=60,
-            )
+            cr.save_metadata(conn, spec_id=spec_id, run_id=run_id,
+                              params=overrides, label=label,
+                              started_at=time.time())
+        except sqlite3.IntegrityError:
+            return self._json({
+                "simulation_id": run_id,
+                "error": "duplicate run_id (rare timing collision) — retry",
+            }, 500)
+
+        try:
+            result = subprocess.run([py, "-c", script], cwd=WORKSPACE,
+                                     capture_output=True, text=True, timeout=120)
         except subprocess.TimeoutExpired:
-            return self._json({"error": "test run timed out after 60s"}, 500)
+            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+            return self._json({"simulation_id": run_id,
+                                "error": "test run timed out"}, 200)
 
         out = result.stdout
-        if "@@@RESULTS@@@" in out:
-            try:
-                results = json.loads(out.split("@@@RESULTS@@@", 1)[1].strip())
-            except json.JSONDecodeError as e:
-                return self._json({"error": f"invalid runner output: {e}"}, 500)
-            return self._json({"ok": True, "results": results, "steps": steps}, 200)
         if "@@@ERROR@@@" in out:
-            err = out.split("@@@ERROR@@@", 1)[1].strip()
-            return self._json({"error": "runner failed", "traceback": err[-1500:]}, 500)
-        return self._json({"error": "runner returned nothing", "stdout": out[-500:], "stderr": result.stderr[-500:]}, 500)
+            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+            traceback_text = out.split("@@@ERROR@@@", 1)[1].strip()
+            return self._json({"simulation_id": run_id, "error": "run failed",
+                                "traceback": traceback_text}, 200)
+
+        try:
+            results = json.loads(out.split("@@@RESULTS@@@", 1)[1].strip())
+        except (IndexError, json.JSONDecodeError):
+            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+            return self._json({"simulation_id": run_id,
+                                "error": "could not parse run output",
+                                "stdout": out, "stderr": result.stderr}, 200)
+
+        cr.complete_metadata(conn, run_id=run_id, n_steps=steps, status="completed")
+        return self._json({"simulation_id": run_id, "results": results,
+                            "steps": steps}, 200)
 
     def _get_catalog(self):
         """GET /api/catalog — return the curated module catalog with installed annotations."""
@@ -2671,6 +2706,14 @@ def _ws_add_to_sys_path() -> None:
         sys.path.insert(0, scripts_parent)
 
 
+def _auto_label(overrides: dict) -> str:
+    """Build a short human label from non-default override values."""
+    if not overrides:
+        return "defaults"
+    parts = [f"{k}={v}" for k, v in sorted(overrides.items())]
+    return ", ".join(parts)[:80]
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -2684,6 +2727,12 @@ def main():
     WORKSPACE = args.workspace.resolve()
     _ws_add_to_sys_path()
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    # Write server-info so tests and other tools can detect the server is ready.
+    info_dir = WORKSPACE / ".pbg" / "server"
+    info_dir.mkdir(parents=True, exist_ok=True)
+    (info_dir / "server-info").write_text(
+        json.dumps({"port": args.port, "pid": __import__("os").getpid()})
+    )
     srv.serve_forever()
 
 
