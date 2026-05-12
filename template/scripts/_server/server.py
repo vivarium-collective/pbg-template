@@ -1446,31 +1446,55 @@ if __name__ == "__main__":
                 "error": f"generated file failed to import: {type(e).__name__}: {e}"
             }, 500)
 
-        # Verify the class appears in the registry when class_name is supplied.
+        # Verify the class is discoverable when class_name is supplied.
+        # We walk the imported module's attributes directly (using the
+        # is_visualization() marker) rather than relying on core.link_registry,
+        # because non-installed workspace packages are not discovered by
+        # discover_packages() / importlib.metadata.
         if class_name:
-            try:
-                core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
-                importlib.reload(core_module)
-                core = core_module.build_core()
-                registry = dict(core.link_registry)
-                short_names = {k.split(".")[-1] for k in registry}
-                if class_name not in short_names:
-                    return self._json({
-                        "error": (
-                            f"class {class_name!r} not found in registry after import; "
-                            f"check the @as_visualization name= argument matches"
-                        )
-                    }, 500)
-            except Exception as e:
-                # Registry check failed — don't block the accept; warn instead.
-                pass
+            found = False
+            mod = sys.modules.get(f"{pkg}.visualizations.{snake}")
+            if mod is not None:
+                for attr_val in vars(mod).values():
+                    if not isinstance(attr_val, type):
+                        continue
+                    if getattr(attr_val, "__name__", None) != class_name:
+                        continue
+                    marker = getattr(attr_val, "is_visualization", None)
+                    if callable(marker):
+                        try:
+                            if marker() is True:
+                                found = True
+                                break
+                        except Exception:
+                            pass
+                    # Fallback: check subclass of Visualization base
+                    if not found:
+                        try:
+                            from pbg_superpowers.visualization import Visualization as _VizBase
+                            if issubclass(attr_val, _VizBase) and attr_val is not _VizBase:
+                                found = True
+                                break
+                        except ImportError:
+                            pass
+            if not found:
+                return self._json({
+                    "error": (
+                        f"class {class_name!r} not found in generated file after import; "
+                        f"check the @as_visualization name= argument matches"
+                    )
+                }, 500)
 
         commit_msg = f"feat(viz): generate {class_name or name} via /pbg-viz"
 
         def action():
             pass  # file was already written by the skill; git add -A picks it up
 
-        return self._json(*_active_branch_action(commit_msg, action))
+        try:
+            resp, code = _active_branch_action(commit_msg, action)
+        except Exception as e:
+            resp, code = {"error": f"workstream error: {e}"}, 500
+        return self._json(resp, code)
 
     def _post_simulation(self, body: dict):
         """Register a simulation in workspace.yaml.
