@@ -542,6 +542,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-create":      self._post_investigation_create,
             "/api/investigation-delete":      self._post_investigation_delete,
             "/api/investigation-run":         self._post_investigation_run,
+            "/api/investigation-render-viz":  self._post_investigation_render_viz,
             "/api/investigation-add-viz":     self._post_investigation_add_viz,
             "/api/investigation-run-delete":  self._post_investigation_run_delete,
             "/api/investigation-runs-clear":  self._post_investigation_runs_clear,
@@ -2292,6 +2293,19 @@ if __name__ == "__main__":
         except ImportError:
             pass
 
+        def build_and_run(viz_doc, registry_arg):
+            """Production hook: build a Composite from viz_doc, run 1 step,
+            return the output_store's html string.
+            """
+            from process_bigraph import Composite
+            composite = Composite({'state': viz_doc}, core=core)
+            composite.run(1)
+            state = composite.state
+            html = state.get('output_store')
+            if isinstance(html, dict):
+                html = html.get('value') or html.get('_value') or ''
+            return html if isinstance(html, str) else ''
+
         summary_holder: list = []
 
         def action():
@@ -2300,6 +2314,7 @@ if __name__ == "__main__":
                     WORKSPACE, name,
                     run_one_composite=run_one_composite,
                     core_registry=registry,
+                    build_and_run=build_and_run,
                 )
                 summary_holder.append(summary)
             except InvestigationSpecError as e:
@@ -2319,6 +2334,75 @@ if __name__ == "__main__":
             # files happen to be byte-identical) — still return success.
             return self._json(summary_holder[0], 200)
         return self._json(resp, code)
+
+    def _post_investigation_render_viz(self, body: dict):
+        """POST /api/investigation-render-viz {name} — re-render visualizations
+        against the investigation's existing emitter data. No simulation re-run.
+        """
+        _ws_add_to_sys_path()
+        from scripts._lib.investigations import (
+            load_spec, render_visualizations, InvestigationSpecError,
+        )
+
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._json({"error": "name is required"}, 400)
+        inv_dir = WORKSPACE / "investigations" / name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": f"investigation '{name}' not found"}, 404)
+        try:
+            spec = load_spec(spec_path)
+        except InvestigationSpecError as e:
+            return self._json({"error": f"spec error: {e}"}, 400)
+
+        # Discover workspace package + build core (mirror _post_investigation_run)
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        sys.path.insert(0, str(WORKSPACE))
+        try:
+            core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
+            core = core_module.build_core()
+            registry = dict(core.link_registry)
+        except Exception as e:
+            return self._json({"error": f"failed to build core: {e}"}, 500)
+
+        try:
+            from pbg_superpowers.visualizations import (
+                TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+            )
+            registry["TimeSeriesPlot"] = TimeSeriesPlot
+            registry["ParamVsObservable"] = ParamVsObservable
+            registry["Distribution"] = Distribution
+            registry["PhaseSpace"] = PhaseSpace
+            registry["Heatmap"] = Heatmap
+        except ImportError:
+            pass
+
+        from process_bigraph import Composite
+
+        def build_and_run(viz_doc, registry_arg):
+            composite = Composite({'state': viz_doc}, core=core)
+            composite.run(1)
+            state = composite.state
+            html = state.get('output_store')
+            if isinstance(html, dict):
+                html = html.get('value') or html.get('_value') or ''
+            return html if isinstance(html, str) else ''
+
+        try:
+            viz_paths = render_visualizations(
+                spec, inv_dir, name,
+                core_registry=registry, build_and_run=build_and_run,
+            )
+        except Exception as e:
+            return self._json({"error": f"render failed: {type(e).__name__}: {e}"}, 500)
+
+        return self._json({
+            "ok": True, "investigation": name,
+            "n_visualizations": len(viz_paths),
+            "viz_paths": [str(p) for p in viz_paths],
+        }, 200)
 
     def _post_investigation_add_viz(self, body: dict):
         """POST /api/investigation-add-viz {investigation, name, address, config}
