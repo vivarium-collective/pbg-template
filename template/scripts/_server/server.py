@@ -516,6 +516,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_composite_run()
         if self.path.startswith("/api/composite-runs"):
             return self._get_composite_runs()
+        if self.path.startswith("/api/composite-state"):
+            return self._get_composite_state()
         if self.path.startswith("/api/composite-resolve"):
             return self._get_composite_resolve()
         if self.path.startswith("/api/investigation-composites"):
@@ -3715,6 +3717,48 @@ if __name__ == "__main__":
             return self._json({"composites": out}, 200)
         except Exception as e:
             return self._json({"composites": [], "error": str(e)}, 200)
+
+    def _get_composite_state(self):
+        """GET /api/composite-state?ref=<id-or-path>
+        Returns: {state: <parsed composite YAML/JSON document>}
+        Accepts either a dotted spec ID (pkg.composites.foo) or a workspace-relative file path.
+        """
+        import urllib.parse
+        qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
+        ref = qs.get("ref", "").strip()
+        if not ref:
+            return self._json({"error": "ref required"}, 400)
+
+        _ws_add_to_sys_path()
+
+        path = None
+        # Try to resolve as a dotted spec ID via composite_lookup.
+        try:
+            from scripts._lib.composite_lookup import find_composite_path
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+            found = find_composite_path(WORKSPACE, pkg, ref)
+            if found is not None:
+                path = found
+        except Exception:
+            pass
+
+        # Fall back to workspace-relative path.
+        if path is None:
+            candidate = WORKSPACE / ref
+            if candidate.is_file():
+                path = candidate
+
+        if path is None or not path.is_file():
+            return self._json({"error": f"composite not found: {ref}"}, 404)
+
+        try:
+            text = path.read_text()
+            doc = json.loads(text) if path.suffix.lower() == ".json" else (yaml.safe_load(text) or {})
+        except Exception as e:
+            return self._json({"error": f"parse failed: {e}"}, 500)
+
+        return self._json({"state": doc}, 200)
 
     def _get_composite_resolve(self):
         """GET /api/composite-resolve — resolve a composite spec with param overrides, return state + SVG."""

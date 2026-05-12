@@ -28,6 +28,22 @@
     }
   });
 
+  // Global listener for postMessage events from the loom-explore iframe.
+  window.addEventListener('message', function(ev) {
+    if (ev.data && ev.data.type === 'explore:ready') {
+      // Mark the source iframe as ready so _loadCompositeExplorer can post immediately.
+      var iframe = document.getElementById('composite-explore-frame');
+      if (iframe && ev.source === iframe.contentWindow) {
+        window._loomExploreReady = window._loomExploreReady || {};
+        window._loomExploreReady['composite-explore-frame'] = true;
+      }
+    }
+    if (ev.data && ev.data.type === 'explore:inspect') {
+      console.log('[loom-explore inspect]', ev.data);
+      // TODO: cross-panel highlighting (out of scope for this task)
+    }
+  });
+
   // -------------------------------------------------------------------------
   // Form submission helper
   // -------------------------------------------------------------------------
@@ -1971,8 +1987,8 @@
         document.getElementById('ce-description').textContent = data.description || '';
         document.getElementById('ce-id').textContent = data.id;
         window._ceCurrent.parameters = data.parameters;
-        // Render diagram
-        document.getElementById('ce-diagram').innerHTML = data.svg || '<em>(no diagram)</em>';
+        // Send wiring state to loom-explore iframe via postMessage
+        _loadCompositeExplorer(data.id, data.state, data.name);
         // Render parameter editor
         _ceRenderParameters(data.parameters);
         // Render state JSON
@@ -1984,6 +2000,55 @@
           '<span style="color:#c00">Network error: ' + _esc(String(err)) + '</span>';
       });
   }
+
+  // _loadCompositeExplorer: send composite state to the loom-explore iframe.
+  // Can be called with a pre-resolved state object (from _ceFetch) or with
+  // just a ref string, in which case it fetches /api/composite-state first.
+  function _loadCompositeExplorer(ref, stateObj, nameHint) {
+    var iframe = document.getElementById('composite-explore-frame');
+    if (!iframe) return;
+
+    function _postState(state, name) {
+      var post = function() {
+        iframe.contentWindow.postMessage({
+          type: 'composite:load',
+          state: state,
+          metadata: { name: name || ref },
+        }, '*');
+      };
+      if (window._loomExploreReady && window._loomExploreReady[iframe.id]) {
+        post();
+      } else {
+        var listener = function(ev) {
+          if (ev.source === iframe.contentWindow && ev.data && ev.data.type === 'explore:ready') {
+            window._loomExploreReady = window._loomExploreReady || {};
+            window._loomExploreReady[iframe.id] = true;
+            window.removeEventListener('message', listener);
+            post();
+          }
+        };
+        window.addEventListener('message', listener);
+      }
+    }
+
+    if (stateObj !== undefined) {
+      // Caller already has the resolved state (e.g. from _ceFetch via composite-resolve)
+      _postState(stateObj, nameHint || ref);
+    } else {
+      // Fetch state independently via /api/composite-state
+      fetch('/api/composite-state?ref=' + encodeURIComponent(ref))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.error) {
+            console.error('composite-state error:', data.error);
+            return;
+          }
+          _postState(data.state, nameHint || ref);
+        })
+        .catch(function(err) { console.error('composite load failed:', err); });
+    }
+  }
+  window._loadCompositeExplorer = _loadCompositeExplorer;
 
   function _ceRenderParameters(params) {
     var container = document.getElementById('ce-parameters');
