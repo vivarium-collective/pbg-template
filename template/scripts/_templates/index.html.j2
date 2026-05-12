@@ -523,9 +523,11 @@
     <h3>Create investigation</h3>
     <form id="form-investigation-create" onsubmit="event.preventDefault(); _submitInvestigationCreate(this)">
       <label>Name <input name="name" placeholder="dnaa-binding-baseline" required pattern="[a-zA-Z0-9_-]+"></label>
-      <label>Composite <select name="composite" id="modal-investigation-composite-select" required>
-        <option value="">— pick a composite —</option>
-      </select></label>
+      <label>Starting composite (optional — pick from workspace catalog)
+        <select name="source" id="create-inv-source">
+          <option value="">— blank composites list, add later —</option>
+        </select>
+      </label>
       <div class="form-error"></div>
       <button type="submit">Create</button>
     </form>

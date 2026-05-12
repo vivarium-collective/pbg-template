@@ -2237,15 +2237,19 @@
   });
 
   function _createInvestigation() {
-    var sel = document.getElementById('modal-investigation-composite-select');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">— pick a composite —</option>';
+    var srcSel = document.getElementById('create-inv-source');
+    if (srcSel) srcSel.innerHTML = '<option value="">— blank composites list, add later —</option>';
     fetch('/api/composites').then(function(r) { return r.json(); }).then(function(data) {
       (data.composites || []).forEach(function(c) {
-        var opt = document.createElement('option');
-        opt.value = c.id; opt.textContent = c.name + '   (' + c.id + ')';
-        sel.appendChild(opt);
+        if (srcSel) {
+          var sopt = document.createElement('option');
+          sopt.value = c.id;
+          sopt.textContent = c.name + '  —  ' + (c.description || c.id);
+          srcSel.appendChild(sopt);
+        }
       });
+      openModal('modal-investigation-create');
+    }).catch(function() {
       openModal('modal-investigation-create');
     });
   }
@@ -2253,7 +2257,7 @@
 
   function _submitInvestigationCreate(form) {
     var data = new FormData(form);
-    var payload = { name: data.get('name'), composite: data.get('composite') };
+    var payload = { name: data.get('name'), composite: data.get('composite'), source: data.get('source') || '' };
     fetch('/api/investigation-create', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
@@ -2316,6 +2320,7 @@
         '<button class="investigation-detail-tab" data-tab="runs" onclick="_invDetailTab(\'runs\')">Runs (' + runs.length + ')</button>' +
         '<button class="investigation-detail-tab" data-tab="viz" onclick="_invDetailTab(\'viz\')">Visualizations (' + vizFiles.length + ')</button>' +
         '<button class="investigation-detail-tab" data-tab="composites" onclick="_invDetailTab(\'composites\')">Composites</button>' +
+        '<button class="investigation-detail-tab" data-tab="observables" onclick="_invDetailTab(\'observables\')">Observables</button>' +
       '</div>' +
       '<div class="investigation-detail-panel active" data-tab="spec">' +
         '<pre class="spec-yaml-pre">' + _esc(JSON.stringify(spec, null, 2)) + '</pre>' +
@@ -2343,6 +2348,17 @@
           '<div id="inv-composites-sidebar"></div>' +
           '<div id="inv-composite-detail" style="border-left:1px solid #eee;padding-left:14px"></div>' +
         '</div>' +
+      '</div>' +
+      '<div class="investigation-detail-panel" data-tab="observables">' +
+        '<p class="panel-lead">Tick which state paths the simulation should record. Paths missing in' +
+          ' a given composite are skipped for that run with a warning.</p>' +
+        '<label style="display:block;margin-bottom:10px">' +
+          '<input type="checkbox" id="inv-emit-all" onchange="_setEmitAll(this.checked)">' +
+          ' Emit entire state (root)' +
+        '</label>' +
+        '<div id="inv-observables-tree" style="font-family:monospace;font-size:0.9em"></div>' +
+        '<button class="action-btn" onclick="_saveObservables()">Save observables</button>' +
+        '<div id="inv-observables-status" style="margin-top:8px;font-size:0.9em;color:#555"></div>' +
       '</div>';
   }
 
@@ -2355,6 +2371,9 @@
     });
     if (tab === 'composites' && window._currentInvestigation) {
       _loadInvComposites(window._currentInvestigation);
+    }
+    if (tab === 'observables' && window._currentInvestigation) {
+      _loadInvObservables(window._currentInvestigation);
     }
   }
   window._invDetailTab = _invDetailTab;
@@ -2423,6 +2442,124 @@
       });
   }
   window._loadInvCompositeDetail = _loadInvCompositeDetail;
+
+  // ── Investigation Observables tab handlers ────────────────────────────────
+
+  function _loadInvObservables(invName) {
+    // 1. Get composites list, 2. fetch each one's state tree, 3. union store paths,
+    // 4. pre-check based on spec.observables.
+    fetch('/api/investigation-composites?investigation=' + encodeURIComponent(invName))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var composites = data.composites || [];
+        if (composites.length === 0) {
+          var el = document.getElementById('inv-observables-tree');
+          if (el) el.innerHTML = '<p class="empty-state">Add a composite first.</p>';
+          return;
+        }
+        Promise.all(composites.map(function(c) {
+          return fetch('/api/investigation-state-tree?investigation=' + encodeURIComponent(invName) +
+                       '&composite=' + encodeURIComponent(c.name))
+            .then(function(r) { return r.json(); })
+            .then(function(tree) { return {composite: c.name, nodes: tree.nodes || []}; });
+        })).then(function(trees) {
+          // Union of store paths across composites
+          var union = {};
+          trees.forEach(function(t) {
+            t.nodes.forEach(function(n) {
+              if (n.kind !== 'store') return;
+              var key = (n.path || []).join('.');
+              if (!union[key]) {
+                union[key] = {path: n.path, types: [], composites: []};
+              }
+              var typ = n.type || 'any';
+              if (union[key].types.indexOf(typ) === -1) union[key].types.push(typ);
+              if (union[key].composites.indexOf(t.composite) === -1) union[key].composites.push(t.composite);
+            });
+          });
+          var pathKeys = Object.keys(union).sort();
+
+          // Load current spec.yaml.observables to pre-check checkboxes
+          fetch('/investigations/' + encodeURIComponent(invName) + '/spec.yaml').then(function(r) {
+            return r.ok ? r.text() : '';
+          }).then(function(specText) {
+            var existing = [];
+            var emitAll = false;
+            // Naive YAML scrape — find observables: block and parse {path: [...]} entries.
+            var m = specText.match(/^observables:\s*\n([\s\S]*?)(?=^[a-zA-Z_]|\s*$)/m);
+            if (m) {
+              var block = m[1];
+              var lines = block.split(/\r?\n/);
+              lines.forEach(function(line) {
+                // - {path: [a, b]} OR - path: [a, b]
+                var p = line.match(/path:\s*\[(.*?)\]/);
+                if (p) {
+                  var inner = p[1].trim();
+                  if (!inner) emitAll = true;
+                  else existing.push(inner.split(',').map(function(s) {
+                    return s.trim().replace(/^["']|["']$/g, '');
+                  }).join('.'));
+                }
+              });
+            }
+
+            var emitAllEl = document.getElementById('inv-emit-all');
+            if (emitAllEl) emitAllEl.checked = emitAll;
+            var el = document.getElementById('inv-observables-tree');
+            if (!el) return;
+            el.innerHTML = pathKeys.map(function(k) {
+              var u = union[k];
+              var checked = existing.indexOf(k) !== -1 ? ' checked' : '';
+              var disabled = emitAll ? ' disabled' : '';
+              return '<div style="padding:3px 0"><label>' +
+                     '<input type="checkbox" data-path="' + _esc(k) + '"' + checked + disabled + '> ' +
+                     '<code>' + _esc(k) + '</code> ' +
+                     '<small style="color:#888"> ' + u.types.join(',') +
+                     '  ·  in: ' + u.composites.join(', ') + '</small>' +
+                     '</label></div>';
+            }).join('');
+            if (!pathKeys.length) {
+              el.innerHTML = '<p class="empty-state">No store paths found in this study\'s composites.</p>';
+            }
+          });
+        });
+      });
+  }
+  window._loadInvObservables = _loadInvObservables;
+
+  function _setEmitAll(on) {
+    var tree = document.getElementById('inv-observables-tree');
+    if (!tree) return;
+    tree.querySelectorAll('input[type=checkbox][data-path]').forEach(function(cb) {
+      cb.disabled = on;
+    });
+  }
+  window._setEmitAll = _setEmitAll;
+
+  function _saveObservables() {
+    var invName = window._currentInvestigation || '';
+    var emitAllEl = document.getElementById('inv-emit-all');
+    var emitAll = !!(emitAllEl && emitAllEl.checked);
+    var paths = [];
+    if (!emitAll) {
+      document.querySelectorAll('#inv-observables-tree input[type=checkbox][data-path]:checked')
+        .forEach(function(cb) { paths.push(cb.dataset.path.split('.')); });
+    }
+    fetch('/api/investigation-set-observables', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({investigation: invName, paths: paths, emit_all: emitAll}),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var status = document.getElementById('inv-observables-status');
+        if (!status) return;
+        if (parts[0]) {
+          status.textContent = 'Saved ' + (emitAll ? '(emit entire state)' : (paths.length + ' observable(s)'));
+        } else {
+          status.textContent = 'Save failed: ' + ((parts[1] || {}).error || '');
+        }
+      });
+  }
+  window._saveObservables = _saveObservables;
 
   function _openAddCompositeModal() {
     var sel = document.getElementById('inv-add-composite-source');

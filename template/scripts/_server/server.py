@@ -2428,11 +2428,16 @@ if __name__ == "__main__":
         return self._json({"investigations": out}, 200)
 
     def _post_investigation_create(self, body: dict):
-        """POST /api/investigation-create {name, composite} — scaffold a new investigation."""
+        """POST /api/investigation-create {name, source?} — scaffold a new investigation.
+
+        ``source`` is an optional composite ref (e.g. ``pkg.composites.foo``) that seeds the
+        investigation with a baseline composite.  If omitted an empty study is created.
+        The legacy ``composite`` field is accepted but ignored when ``source`` is provided.
+        """
         name = (body.get("name") or "").strip()
-        composite = (body.get("composite") or "").strip()
-        if not name or not composite:
-            return self._json({"error": "name and composite are required"}, 400)
+        source = (body.get("source") or "").strip()
+        if not name:
+            return self._json({"error": "name is required"}, 400)
         import re
         if not re.match(r"^[a-zA-Z0-9_-]+$", name):
             return self._json({"error": "name must match [a-zA-Z0-9_-]+"}, 400)
@@ -2441,28 +2446,70 @@ if __name__ == "__main__":
         if inv_dir.exists():
             return self._json({"error": f"investigation '{name}' already exists"}, 409)
 
+        # Resolve source composite if provided
+        source_path = None
+        baseline_name = None
+        if source:
+            _ws_add_to_sys_path()
+            from scripts._lib.investigation_migrate import _resolve_composite_source
+            try:
+                source_path, baseline_name = _resolve_composite_source(source, WORKSPACE)
+            except (FileNotFoundError, ValueError) as e:
+                return self._json({"error": f"source composite not found: {e}"}, 404)
+
         def action():
+            import shutil as _shutil
             inv_dir.mkdir(parents=True, exist_ok=False)
             (inv_dir / "data").mkdir()
             (inv_dir / "data" / ".keep").write_text("")
-            stub = (
-                f"name: {name}\n"
-                f"description: \"\"\n"
-                f"composite: {composite}\n"
-                f"\n"
-                f"simulations:\n"
-                f"  - name: baseline\n"
-                f"    kind: single\n"
-                f"    overrides: {{}}\n"
-                f"    steps: 10\n"
-                f"\n"
-                f"observables: []\n"
-                f"\n"
-                f"visualizations: []\n"
-                f"\n"
-                f"status: planned\n"
-            )
-            (inv_dir / "spec.yaml").write_text(stub)
+
+            if source_path and baseline_name:
+                # New-shape spec: seed with a baseline composite entry
+                composites_dir = inv_dir / "composites"
+                composites_dir.mkdir(parents=True, exist_ok=True)
+                sidecar = composites_dir / f"{baseline_name}.yaml"
+                _shutil.copy2(source_path, sidecar)
+                spec = {
+                    "name": name,
+                    "description": "",
+                    "composites": [
+                        {
+                            "name": baseline_name,
+                            "source": source,
+                            "document": f"./composites/{baseline_name}.yaml",
+                        }
+                    ],
+                    "simulations": [
+                        {
+                            "name": "baseline",
+                            "composite": baseline_name,
+                            "kind": "single",
+                            "overrides": {},
+                            "steps": 10,
+                        }
+                    ],
+                    "observables": [],
+                    "visualizations": [],
+                    "status": "planned",
+                }
+                (inv_dir / "spec.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+            else:
+                # Blank study — no composite yet
+                stub = (
+                    f"name: {name}\n"
+                    f"description: \"\"\n"
+                    f"\n"
+                    f"composites: []\n"
+                    f"\n"
+                    f"simulations: []\n"
+                    f"\n"
+                    f"observables: []\n"
+                    f"\n"
+                    f"visualizations: []\n"
+                    f"\n"
+                    f"status: planned\n"
+                )
+                (inv_dir / "spec.yaml").write_text(stub)
 
         commit_msg = f"feat(investigations): scaffold {name}"
         resp, code = _active_branch_action(commit_msg, action)
