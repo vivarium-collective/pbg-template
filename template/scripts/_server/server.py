@@ -1446,6 +1446,27 @@ if __name__ == "__main__":
                 "error": f"generated file failed to import: {type(e).__name__}: {e}"
             }, 500)
 
+        # Smoke-test the workspace's build_core() so a generated class that
+        # breaks bigraph-schema discovery (e.g. malformed inputs type strings,
+        # circular imports, type registration errors) surfaces here rather
+        # than at first investigation run. Invalidate the cached base core so
+        # the rebuild walks the new module too.
+        try:
+            import bigraph_schema.core as _bsc
+            _bsc._cached_base_core = None
+        except Exception:
+            pass
+        try:
+            core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
+            core_module.build_core()
+        except Exception as e:
+            return self._json({
+                "error": (
+                    f"workspace build_core() failed after importing the generated file: "
+                    f"{type(e).__name__}: {e}"
+                )
+            }, 500)
+
         # Verify the class is discoverable when class_name is supplied.
         # We walk the imported module's attributes directly (using the
         # is_visualization() marker) rather than relying on core.link_registry,
