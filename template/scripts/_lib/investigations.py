@@ -35,8 +35,84 @@ _VALID_STATUSES = {"planned", "running", "ran", "complete", "failed", "invalid"}
 #   invalid  — spec.yaml didn't validate
 
 
+def _validate_composites_list(spec: dict) -> None:
+    """Validate the new multi-composite ``composites:`` list shape.
+
+    Checks:
+    - Non-empty list of mappings, each with a ``name`` field.
+    - Each entry has ``source`` (registered) or ``extends`` (derived), or both.
+    - ``extends`` must reference a *previously-declared* composite (no forward refs).
+    - No duplicate ``name`` values.
+    - If ``runs`` is present it must be a list; every run entry must have
+      a ``composite`` field that names a declared composite.
+    """
+    composites = spec["composites"]
+    if not isinstance(composites, list) or not composites:
+        raise InvestigationSpecError(
+            "'composites' must be a non-empty list of mappings"
+        )
+
+    declared_names: list[str] = []
+    for i, entry in enumerate(composites):
+        if not isinstance(entry, dict):
+            raise InvestigationSpecError(f"composites[{i}] must be a mapping")
+        name = entry.get("name")
+        if not name:
+            raise InvestigationSpecError(f"composites[{i}].name is required")
+        if name in declared_names:
+            raise InvestigationSpecError(
+                f"duplicate composite name: {name!r} (composites[{i}])"
+            )
+        # Must have source OR extends (or both — allowed for override + extend)
+        has_source = bool(entry.get("source"))
+        has_extends = bool(entry.get("extends"))
+        if not has_source and not has_extends:
+            raise InvestigationSpecError(
+                f"composites[{i}] ({name!r}) must declare 'source' or 'extends'"
+            )
+        if has_extends:
+            parent = entry["extends"]
+            if parent not in declared_names:
+                raise InvestigationSpecError(
+                    f"composites[{i}] extends {parent!r}, which is not declared "
+                    f"before it (forward references are not allowed)"
+                )
+        declared_names.append(name)
+
+    # Validate runs[] if present
+    runs = spec.get("runs")
+    if runs is not None:
+        if not isinstance(runs, list):
+            raise InvestigationSpecError("'runs' must be a list")
+        for j, run in enumerate(runs):
+            if not isinstance(run, dict):
+                raise InvestigationSpecError(f"runs[{j}] must be a mapping")
+            composite_ref = run.get("composite")
+            if not composite_ref:
+                raise InvestigationSpecError(
+                    f"runs[{j}] must have a 'composite' field referencing a declared composite"
+                )
+            if composite_ref not in declared_names:
+                raise InvestigationSpecError(
+                    f"runs[{j}].composite {composite_ref!r} is not in the declared "
+                    f"composites list ({declared_names})"
+                )
+
+
 def load_spec(path: Path) -> dict:
     """Parse + validate ``investigations/<name>/spec.yaml``.
+
+    Accepts two shapes:
+
+    *New multi-composite shape* (``composites:`` key):
+      - ``name`` (required)
+      - ``composites:`` non-empty list of composite entries (new shape)
+      - ``runs:`` optional list of run entries, each with a ``composite`` field
+      - ``observables:`` / ``visualizations:`` optional lists
+
+    *Legacy single-composite shape* (``composite:`` key):
+      - ``name`` + ``composite`` (both required)
+      - ``simulations:`` list validated as before
 
     Raises:
         InvestigationSpecError: on any structural problem.
@@ -50,46 +126,60 @@ def load_spec(path: Path) -> dict:
     if not isinstance(spec, dict):
         raise InvestigationSpecError("spec must be a YAML mapping at top level")
 
-    for field in _REQUIRED_TOP_LEVEL:
-        if field not in spec or not spec[field]:
-            raise InvestigationSpecError(f"missing required field: {field}")
+    # name is always required
+    if not spec.get("name"):
+        raise InvestigationSpecError("missing required field: name")
 
-    sims = spec.get("simulations") or []
-    if not isinstance(sims, list):
-        raise InvestigationSpecError("simulations must be a list")
+    has_composites_list = "composites" in spec
+    has_legacy_composite = "composite" in spec and spec["composite"]
 
-    for i, sim in enumerate(sims):
-        if not isinstance(sim, dict):
-            raise InvestigationSpecError(f"simulations[{i}] must be a mapping")
-        if not sim.get("name"):
-            raise InvestigationSpecError(f"simulations[{i}].name is required")
-        kind = sim.get("kind")
-        if kind not in _VALID_KINDS:
-            raise InvestigationSpecError(
-                f"simulations[{i}].kind must be one of {sorted(_VALID_KINDS)}; got {kind!r}"
-            )
-        if kind == "sweep":
-            sweep_over = sim.get("sweep_over") or {}
-            if not isinstance(sweep_over, dict) or not sweep_over:
+    if has_composites_list:
+        # New multi-composite shape
+        _validate_composites_list(spec)
+    elif has_legacy_composite:
+        # Legacy single-composite shape — validate the simulations block as before
+        sims = spec.get("simulations") or []
+        if not isinstance(sims, list):
+            raise InvestigationSpecError("simulations must be a list")
+
+        for i, sim in enumerate(sims):
+            if not isinstance(sim, dict):
+                raise InvestigationSpecError(f"simulations[{i}] must be a mapping")
+            if not sim.get("name"):
+                raise InvestigationSpecError(f"simulations[{i}].name is required")
+            kind = sim.get("kind")
+            if kind not in _VALID_KINDS:
                 raise InvestigationSpecError(
-                    f"simulations[{i}].sweep_over must be a non-empty mapping"
+                    f"simulations[{i}].kind must be one of {sorted(_VALID_KINDS)}; got {kind!r}"
                 )
-            for k, vals in sweep_over.items():
-                if not isinstance(vals, list) or not vals:
+            if kind == "sweep":
+                sweep_over = sim.get("sweep_over") or {}
+                if not isinstance(sweep_over, dict) or not sweep_over:
                     raise InvestigationSpecError(
-                        f"simulations[{i}].sweep_over.{k} must be a non-empty list"
+                        f"simulations[{i}].sweep_over must be a non-empty mapping"
                     )
-        elif kind == "seeds":
-            n = sim.get("n_seeds", 0)
-            if not isinstance(n, int) or n < 1:
+                for k, vals in sweep_over.items():
+                    if not isinstance(vals, list) or not vals:
+                        raise InvestigationSpecError(
+                            f"simulations[{i}].sweep_over.{k} must be a non-empty list"
+                        )
+            elif kind == "seeds":
+                n = sim.get("n_seeds", 0)
+                if not isinstance(n, int) or n < 1:
+                    raise InvestigationSpecError(
+                        f"simulations[{i}].n_seeds must be a positive integer; got {n!r}"
+                    )
+            steps = sim.get("steps", 0)
+            if not isinstance(steps, int) or steps < 1:
                 raise InvestigationSpecError(
-                    f"simulations[{i}].n_seeds must be a positive integer; got {n!r}"
+                    f"simulations[{i}].steps must be a positive integer"
                 )
-        steps = sim.get("steps", 0)
-        if not isinstance(steps, int) or steps < 1:
-            raise InvestigationSpecError(
-                f"simulations[{i}].steps must be a positive integer"
-            )
+    else:
+        # Neither shape present
+        raise InvestigationSpecError(
+            "spec must declare either 'composites' (new multi-composite shape) "
+            "or 'composite' (legacy single-composite shape)"
+        )
 
     observables = spec.get("observables") or []
     if not isinstance(observables, list):

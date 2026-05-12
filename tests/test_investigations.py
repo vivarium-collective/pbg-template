@@ -395,3 +395,108 @@ def test_render_visualizations_v2_writes_html(tmp_path):
     assert html_path.is_file()
     text = html_path.read_text()
     assert '<p>obs=' in text
+
+
+# ---------------------------------------------------------------------------
+# Multi-composite (composites: list) shape tests
+# ---------------------------------------------------------------------------
+
+def test_load_spec_accepts_composites_list(tmp_path):
+    from scripts._lib.investigations import load_spec
+    spec_path = tmp_path / 'spec.yaml'
+    spec_path.write_text(
+        'name: multi\n'
+        'composites:\n'
+        '  - {name: baseline, source: pkg.composites.foo, document: ./composites/baseline.yaml}\n'
+        '  - {name: hi, extends: baseline, parameter_overrides: {rate: 2.0}, document: ./composites/hi.yaml}\n'
+        'observables:\n'
+        '  - {path: [chromosome, DnaA_count]}\n'
+        'runs:\n'
+        '  - {composite: baseline, params: {seed: 1}, steps: 10}\n'
+        '  - {composite: hi, params: {seed: 1}, steps: 10}\n'
+        'visualizations: []\n'
+    )
+    spec = load_spec(spec_path)
+    assert len(spec['composites']) == 2
+    assert spec['composites'][0]['name'] == 'baseline'
+    assert spec['composites'][1]['extends'] == 'baseline'
+    assert spec['runs'][0]['composite'] == 'baseline'
+
+
+def test_load_spec_rejects_runs_without_composite_when_multi():
+    from scripts._lib.investigations import load_spec, InvestigationSpecError
+    import tempfile, pathlib, yaml
+    bad = {
+        'name': 'x',
+        'composites': [{'name': 'baseline', 'source': 'pkg.x', 'document': './c/b.yaml'}],
+        'runs': [{'steps': 10}],
+    }
+    with tempfile.TemporaryDirectory() as d:
+        p = pathlib.Path(d) / 'spec.yaml'
+        p.write_text(yaml.safe_dump(bad))
+        try:
+            load_spec(p)
+        except InvestigationSpecError as e:
+            assert 'composite' in str(e).lower()
+            return
+    raise AssertionError('expected InvestigationSpecError')
+
+
+def test_load_spec_rejects_extends_referencing_undeclared():
+    from scripts._lib.investigations import load_spec, InvestigationSpecError
+    import tempfile, pathlib, yaml
+    bad = {
+        'name': 'x',
+        'composites': [
+            {'name': 'a', 'extends': 'nonexistent', 'document': './c/a.yaml'},
+        ],
+        'runs': [],
+    }
+    with tempfile.TemporaryDirectory() as d:
+        p = pathlib.Path(d) / 'spec.yaml'
+        p.write_text(yaml.safe_dump(bad))
+        try:
+            load_spec(p)
+        except InvestigationSpecError as e:
+            assert 'nonexistent' in str(e).lower() or 'extends' in str(e).lower()
+            return
+    raise AssertionError('expected InvestigationSpecError')
+
+
+def test_load_spec_rejects_duplicate_composite_names():
+    from scripts._lib.investigations import load_spec, InvestigationSpecError
+    import tempfile, pathlib, yaml
+    bad = {
+        'name': 'x',
+        'composites': [
+            {'name': 'baseline', 'source': 'pkg.x', 'document': './c/b.yaml'},
+            {'name': 'baseline', 'source': 'pkg.y', 'document': './c/b2.yaml'},
+        ],
+        'runs': [],
+    }
+    with tempfile.TemporaryDirectory() as d:
+        p = pathlib.Path(d) / 'spec.yaml'
+        p.write_text(yaml.safe_dump(bad))
+        try:
+            load_spec(p)
+        except InvestigationSpecError as e:
+            assert 'duplicate' in str(e).lower() or 'baseline' in str(e)
+            return
+    raise AssertionError('expected InvestigationSpecError')
+
+
+def test_load_spec_legacy_single_composite_still_accepted(tmp_path):
+    """During migration window, the old single-composite shape must still load."""
+    from scripts._lib.investigations import load_spec
+    spec_path = tmp_path / 'spec.yaml'
+    spec_path.write_text(
+        'name: legacy\n'
+        'composite: pkg.composites.foo\n'
+        'simulations: [{name: s1, kind: single, overrides: {}, steps: 10}]\n'
+        'observables: []\n'
+        'visualizations: []\n'
+    )
+    spec = load_spec(spec_path)
+    assert 'name' in spec
+    # The legacy field must remain so migration can detect it
+    assert spec.get('composite') == 'pkg.composites.foo' or spec.get('composites')
