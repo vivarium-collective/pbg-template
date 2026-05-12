@@ -142,3 +142,107 @@ def test_expand_simulations_mixed():
     assert len(runs) == 1 + 2 + 3
     names = {r["sim_name"] for r in runs}
     assert names == {"a", "b", "c"}
+
+
+import json
+import sqlite3
+
+from scripts._lib.investigations import gather_results, load_overlays
+
+
+def _setup_runs_db(tmp_path):
+    """Create a minimal runs.db matching the SQLiteEmitter + runs_meta shape."""
+    db = tmp_path / "runs.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("""
+        CREATE TABLE runs_meta (
+            run_id TEXT PRIMARY KEY, spec_id TEXT, sim_name TEXT,
+            label TEXT, params_json TEXT, started_at REAL,
+            completed_at REAL, n_steps INTEGER, status TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            simulation_id TEXT, step INTEGER, global_time REAL, state TEXT
+        )
+    """)
+    # one sim "single" with one run, three step rows
+    conn.execute(
+        "INSERT INTO runs_meta VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("r1", "spec", "single", "single", json.dumps({"rate": 1.0}),
+         0.0, 1.0, 3, "completed"),
+    )
+    for i in range(3):
+        conn.execute(
+            "INSERT INTO history (simulation_id, step, global_time, state) VALUES (?, ?, ?, ?)",
+            ("r1", i, float(i), json.dumps({"level": float(i + 1)})),
+        )
+    conn.commit()
+    conn.close()
+    return db
+
+
+def test_gather_results_one_sim_one_run(tmp_path):
+    db = _setup_runs_db(tmp_path)
+    spec = {"simulations": [{"name": "single", "kind": "single",
+                              "overrides": {"rate": 1.0}, "steps": 3}]}
+    results = gather_results(spec, db)
+    assert "single" in results
+    assert len(results["single"]["runs"]) == 1
+    run = results["single"]["runs"][0]
+    assert run["run_id"] == "r1"
+    assert run["params"] == {"rate": 1.0}
+    assert len(run["trajectory"]) == 3
+    assert run["trajectory"][2]["state"] == {"level": 3.0}
+
+
+def test_load_overlays_reference_range(tmp_path):
+    spec = {}
+    viz = {"overlays": [{"kind": "reference-range", "y_min": 1.0, "y_max": 5.0,
+                          "label": "x"}]}
+    payload = load_overlays(spec, viz, tmp_path, "demo")
+    assert len(payload) == 1
+    assert payload[0]["kind"] == "reference-range"
+    assert payload[0]["y_min"] == 1.0
+
+
+def test_load_overlays_experimental_points_missing_csv(tmp_path):
+    spec = {}
+    viz = {"overlays": [{"kind": "experimental-points",
+                          "data": "data/missing.csv",
+                          "x_column": "t", "y_column": "v",
+                          "label": "experiments"}]}
+    payload = load_overlays(spec, viz, tmp_path, "demo")
+    assert len(payload) == 1
+    assert payload[0]["kind"] == "warning"
+    assert "missing" in payload[0]["message"]
+
+
+def test_load_overlays_experimental_points_ok(tmp_path):
+    inv_dir = tmp_path / "investigations" / "demo"
+    inv_dir.mkdir(parents=True)
+    data_dir = inv_dir / "data"
+    data_dir.mkdir()
+    (data_dir / "exp.csv").write_text("t,v\n0,1.0\n1,2.5\n2,3.7\n")
+    spec = {}
+    viz = {"overlays": [{"kind": "experimental-points",
+                          "data": "data/exp.csv",
+                          "x_column": "t", "y_column": "v",
+                          "label": "exp"}]}
+    payload = load_overlays(spec, viz, tmp_path, "demo")
+    assert len(payload) == 1
+    assert payload[0]["kind"] == "experimental-points"
+    assert payload[0]["points"] == [
+        {"x": "0", "y": "1.0"}, {"x": "1", "y": "2.5"}, {"x": "2", "y": "3.7"},
+    ]
+
+
+def test_load_overlays_cross_investigation_missing(tmp_path):
+    spec = {}
+    viz = {"overlays": [{"kind": "cross-investigation-series",
+                          "investigation": "ghost", "observable": "x",
+                          "label": "ghost"}]}
+    payload = load_overlays(spec, viz, tmp_path, "demo")
+    assert len(payload) == 1
+    assert payload[0]["kind"] == "warning"
