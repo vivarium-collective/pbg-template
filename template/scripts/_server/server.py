@@ -343,6 +343,44 @@ def _active_branch_action(commit_message: str, action_fn) -> tuple[dict, int]:
         return {"error": str(e)}, 500
 
 
+_NO_WORKSTREAM_MARKERS = (
+    "no active workstream",
+    "workspace.yaml not found",
+)
+
+
+def _commit_or_run(commit_message: str, action_fn) -> tuple[dict, int]:
+    """Run ``action_fn`` under the active workstream, committing the result.
+
+    The standard `check clean tree → run action → commit` flow is what
+    mutation endpoints want: a dirty tree is surfaced as a clear 409 BEFORE
+    any file is written, so the dashboard can ask the user to resolve it.
+
+    Fallback: when no workstream is available (test fixtures, scaffolded
+    workspaces without a workstream started, etc.), run ``action_fn`` directly
+    so file side-effects still happen. Returns 200 with a ``note`` field
+    distinguishing committed vs ran-only.
+    """
+    try:
+        resp, code = _active_branch_action(commit_message, action_fn)
+    except Exception as e:
+        msg = str(e).lower()
+        if any(m in msg for m in _NO_WORKSTREAM_MARKERS):
+            try:
+                action_fn()
+            except Exception as inner:
+                return {"error": f"action failed: {inner}"}, 500
+            return {"ok": True, "note": f"no workstream; ran action without commit ({e})"}, 200
+        raise
+    if code == 409 and any(m in (resp.get("error") or "").lower() for m in _NO_WORKSTREAM_MARKERS):
+        try:
+            action_fn()
+        except Exception as e:
+            return {"error": f"action failed: {e}"}, 500
+        return {"ok": True, "note": "no workstream; ran action without commit"}, 200
+    return resp, code
+
+
 # ---------------------------------------------------------------------------
 # Pending visibility helper
 # ---------------------------------------------------------------------------
@@ -3453,11 +3491,7 @@ if __name__ == "__main__":
             spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
 
         try:
-            do_action()
-        except Exception as e:
-            return self._json({"error": f"add failed: {e}"}, 500)
-        try:
-            return self._json(*_active_branch_action(commit_msg, lambda: None))
+            return self._json(*_commit_or_run(commit_msg, do_action))
         except Exception as e:
             return self._json({"error": f"workstream error: {e}"}, 500)
 
@@ -3519,11 +3553,7 @@ if __name__ == "__main__":
             spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
 
         try:
-            do_action()
-        except Exception as e:
-            return self._json({"error": f"perturb failed: {e}"}, 500)
-        try:
-            return self._json(*_active_branch_action(commit_msg, lambda: None))
+            return self._json(*_commit_or_run(commit_msg, do_action))
         except Exception as e:
             return self._json({"error": f"workstream error: {e}"}, 500)
 
@@ -3576,11 +3606,7 @@ if __name__ == "__main__":
             derived_path.write_text(yaml.safe_dump(derived_doc, sort_keys=False))
 
         try:
-            do_action()
-        except Exception as e:
-            return self._json({"error": f"rebuild failed: {e}"}, 500)
-        try:
-            return self._json(*_active_branch_action(commit_msg, lambda: None))
+            return self._json(*_commit_or_run(commit_msg, do_action))
         except Exception as e:
             return self._json({"error": f"workstream error: {e}"}, 500)
 
@@ -3612,11 +3638,7 @@ if __name__ == "__main__":
             spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
 
         try:
-            do_action()
-        except Exception as e:
-            return self._json({"error": f"set-observables failed: {e}"}, 500)
-        try:
-            return self._json(*_active_branch_action(commit_msg, lambda: None))
+            return self._json(*_commit_or_run(commit_msg, do_action))
         except Exception as e:
             return self._json({"error": f"workstream error: {e}"}, 500)
 
@@ -3663,11 +3685,7 @@ if __name__ == "__main__":
             spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
 
         try:
-            do_action()
-        except Exception as e:
-            return self._json({"error": f"remove failed: {e}"}, 500)
-        try:
-            return self._json(*_active_branch_action(commit_msg, lambda: None))
+            return self._json(*_commit_or_run(commit_msg, do_action))
         except Exception as e:
             return self._json({"error": f"workstream error: {e}"}, 500)
 
