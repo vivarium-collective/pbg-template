@@ -269,6 +269,12 @@
     if (pageId === 'composite-explore') {
       _initCompositeExplorer();
     }
+    if (pageId === 'investigations') {
+      if (!window._investigationsLoaded) {
+        window._investigationsLoaded = true;
+        _loadInvestigations();
+      }
+    }
   }
 
   function _initMenuNav() {
@@ -2064,5 +2070,267 @@
       });
   }
   window._cePromoteSimulation = _cePromoteSimulation;
+
+  // ─── Investigations tab (v0.5.0) ──────────────────────────────────────
+  window._investigations = [];
+  window._investigationsFilter = { search: '', tags: new Set() };
+  window._investigationsView = 'grid';
+
+  function _loadInvestigations() {
+    fetch('/api/investigations')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        window._investigations = data.investigations || [];
+        _buildInvestigationTagChips();
+        _renderInvestigations();
+      })
+      .catch(function(err) {
+        var grid = document.getElementById('investigations-grid');
+        if (grid) grid.innerHTML = '<p style="color:#c00">Failed to load: ' + _esc(String(err)) + '</p>';
+      });
+  }
+  window._loadInvestigations = _loadInvestigations;
+
+  function _buildInvestigationTagChips() {
+    var container = document.getElementById('investigations-tag-chips');
+    if (!container) return;
+    var tags = new Set();
+    window._investigations.forEach(function(inv) {
+      (inv.tags || []).forEach(function(t) { tags.add(t); });
+    });
+    var chips = Array.from(tags).sort().map(function(t) {
+      var active = window._investigationsFilter.tags.has(t) ? ' active' : '';
+      return '<button class="card-browse-chip' + active + '"' +
+             ' onclick="_toggleInvestigationChip(\'' + _esc(t) + '\', this)">' +
+             _esc(t) + '</button>';
+    }).join('');
+    container.innerHTML = chips;
+  }
+
+  function _toggleInvestigationChip(tag, btn) {
+    var s = window._investigationsFilter.tags;
+    if (s.has(tag)) { s.delete(tag); btn.classList.remove('active'); }
+    else { s.add(tag); btn.classList.add('active'); }
+    _renderInvestigations();
+  }
+  window._toggleInvestigationChip = _toggleInvestigationChip;
+
+  function _renderInvestigations() {
+    var grid = document.getElementById('investigations-grid');
+    if (!grid) return;
+    var f = window._investigationsFilter;
+    var q = f.search.toLowerCase();
+    var filtered = window._investigations.filter(function(inv) {
+      if (q) {
+        var hay = (inv.name + ' ' + (inv.description || '') + ' ' +
+                    (inv.tags || []).join(' ')).toLowerCase();
+        if (hay.indexOf(q) < 0) return false;
+      }
+      if (f.tags.size > 0) {
+        var match = (inv.tags || []).some(function(t) { return f.tags.has(t); });
+        if (!match) return false;
+      }
+      return true;
+    });
+    if (!filtered.length) {
+      grid.innerHTML = '<p class="empty-state">No investigations match the filter. ' +
+                       'Click <em>New investigation</em> to create one.</p>';
+      grid.classList.remove('list-view');
+      return;
+    }
+    grid.classList.toggle('list-view', window._investigationsView === 'list');
+    grid.innerHTML = filtered.map(_renderInvestigationCard).join('');
+  }
+
+  function _renderInvestigationCard(inv) {
+    var status = inv.status || 'planned';
+    var statusClass = ({planned:'planned', running:'in_progress', complete:'complete',
+                        failed:'gate_pending', invalid:'gate_pending'})[status] || 'planned';
+    var lastRun = inv.last_run ? new Date(inv.last_run + 'Z').toLocaleString() : '—';
+    return '<div class="investigation-card" onclick="_openInvestigation(\'' + _esc(inv.name) + '\')">' +
+      '<div class="name">' + _esc(inv.name) + '</div>' +
+      '<div class="composite"><code>' + _esc(inv.composite || '?') + '</code></div>' +
+      '<div class="meta">' +
+        '<span class="status-pill ' + statusClass + '">' + _esc(status) + '</span>' +
+        '<span>' + (inv.n_simulations || 0) + ' sim' + ((inv.n_simulations || 0) === 1 ? '' : 's') + '</span>' +
+        '<span>last run: ' + _esc(lastRun) + '</span>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function _setInvestigationsView(view) {
+    window._investigationsView = view;
+    document.querySelectorAll('#investigations-toolbar .view-btn').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.view === view);
+    });
+    _renderInvestigations();
+  }
+  window._setInvestigationsView = _setInvestigationsView;
+
+  // Search input live-filter
+  document.addEventListener('input', function(e) {
+    if (e.target && e.target.id === 'investigations-search') {
+      window._investigationsFilter.search = e.target.value;
+      _renderInvestigations();
+    }
+  });
+
+  function _createInvestigation() {
+    var sel = document.getElementById('modal-investigation-composite-select');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— pick a composite —</option>';
+    fetch('/api/composites').then(function(r) { return r.json(); }).then(function(data) {
+      (data.composites || []).forEach(function(c) {
+        var opt = document.createElement('option');
+        opt.value = c.id; opt.textContent = c.name + '   (' + c.id + ')';
+        sel.appendChild(opt);
+      });
+      openModal('modal-investigation-create');
+    });
+  }
+  window._createInvestigation = _createInvestigation;
+
+  function _submitInvestigationCreate(form) {
+    var data = new FormData(form);
+    var payload = { name: data.get('name'), composite: data.get('composite') };
+    fetch('/api/investigation-create', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok) {
+          var err = form.querySelector('.form-error');
+          if (err) err.textContent = j.error || 'create failed';
+          return;
+        }
+        closeModal('modal-investigation-create');
+        window._investigationsLoaded = false;
+        _switchPage('investigations');
+      });
+  }
+  window._submitInvestigationCreate = _submitInvestigationCreate;
+
+  function _openInvestigation(name) {
+    var detail = document.getElementById('investigation-detail');
+    detail.style.display = '';
+    detail.innerHTML = '<p class="empty-state">Loading…</p>';
+    fetch('/api/investigation/' + encodeURIComponent(name))
+      .then(function(r) { return r.json(); })
+      .then(function(data) { _renderInvestigationDetail(name, data); })
+      .catch(function(err) {
+        detail.innerHTML = '<p style="color:#c00">Failed: ' + _esc(String(err)) + '</p>';
+      });
+  }
+  window._openInvestigation = _openInvestigation;
+
+  function _renderInvestigationDetail(name, data) {
+    var detail = document.getElementById('investigation-detail');
+    if (data.error) {
+      detail.innerHTML = '<p style="color:#c00">' + _esc(data.error) + '</p>';
+      return;
+    }
+    var spec = data.spec || {};
+    var vizFiles = data.viz_files || [];
+    var runs = data.runs_summary || [];
+    var lastRun = spec.last_run ? new Date(spec.last_run + 'Z').toLocaleString() : '—';
+    var status = spec.status || 'planned';
+    var statusClass = ({planned:'planned', running:'in_progress', complete:'complete',
+                        failed:'gate_pending'})[status] || 'planned';
+
+    detail.innerHTML =
+      '<div class="investigation-detail-header">' +
+        '<div><strong style="font-size:1.1em">' + _esc(name) + '</strong> ' +
+        '<span class="status-pill ' + statusClass + '" style="margin-left:8px">' + _esc(status) + '</span><br>' +
+        '<small class="muted">composite: <code>' + _esc(spec.composite || '?') + '</code> · last run: ' + _esc(lastRun) + '</small></div>' +
+        '<div>' +
+          '<button class="action-btn" onclick="_runInvestigation(\'' + _esc(name) + '\')">' +
+          (status === 'planned' ? 'Run' : 'Re-run') + '</button>' +
+          '<button class="btn-mini" onclick="_deleteInvestigation(\'' + _esc(name) + '\')">Delete</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="investigation-detail-tabs">' +
+        '<button class="investigation-detail-tab active" data-tab="spec" onclick="_invDetailTab(\'spec\')">Spec</button>' +
+        '<button class="investigation-detail-tab" data-tab="runs" onclick="_invDetailTab(\'runs\')">Runs (' + runs.length + ')</button>' +
+        '<button class="investigation-detail-tab" data-tab="viz" onclick="_invDetailTab(\'viz\')">Visualizations (' + vizFiles.length + ')</button>' +
+      '</div>' +
+      '<div class="investigation-detail-panel active" data-tab="spec">' +
+        '<pre class="spec-yaml-pre">' + _esc(JSON.stringify(spec, null, 2)) + '</pre>' +
+      '</div>' +
+      '<div class="investigation-detail-panel" data-tab="runs">' +
+        (runs.length ? _renderInvestigationRunsTable(runs) : '<p class="empty-state">No runs yet — click Run to generate them.</p>') +
+      '</div>' +
+      '<div class="investigation-detail-panel" data-tab="viz">' +
+        (vizFiles.length ?
+          vizFiles.map(function(v) {
+            return '<h4 style="margin-bottom:4px">' + _esc(v.name) + '</h4>' +
+                   '<iframe class="viz-frame" src="/' + _esc(v.path) + '?ts=' + Date.now() + '"></iframe>';
+          }).join('') :
+          '<p class="empty-state">No visualizations rendered yet.</p>') +
+      '</div>';
+  }
+
+  function _invDetailTab(tab) {
+    document.querySelectorAll('.investigation-detail-tab').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    document.querySelectorAll('.investigation-detail-panel').forEach(function(p) {
+      p.classList.toggle('active', p.dataset.tab === tab);
+    });
+  }
+  window._invDetailTab = _invDetailTab;
+
+  function _renderInvestigationRunsTable(runs) {
+    var rows = runs.map(function(r) {
+      var pstr = Object.keys(r.params || {}).map(function(k) {
+        return k + '=' + r.params[k];
+      }).join(', ') || '—';
+      var statusClass = ({completed: 'completed', failed: 'failed',
+                          running: 'running'})[r.status] || 'planned';
+      return '<tr><td>' + _esc(r.sim_name) + '</td>' +
+             '<td><code>' + _esc(pstr) + '</code></td>' +
+             '<td>' + (r.n_steps || 0) + '</td>' +
+             '<td><span class="ce-history-status ' + statusClass + '">' + _esc(r.status) + '</span></td>' +
+             '<td><code style="font-size:0.78em">' + _esc(r.run_id.slice(-12)) + '</code></td></tr>';
+    }).join('');
+    return '<table style="width:100%"><thead><tr>' +
+      '<th>Simulation</th><th>Params</th><th>Steps</th><th>Status</th><th>Run id</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  function _runInvestigation(name) {
+    var detail = document.getElementById('investigation-detail');
+    var btn = detail.querySelector('button.action-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
+    fetch('/api/investigation-run', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name}),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok) { alert('Run failed: ' + (j.error || 'unknown')); }
+        // Refresh both the list (status update) and the detail panel
+        window._investigationsLoaded = false;
+        _loadInvestigations();
+        _openInvestigation(name);
+      })
+      .catch(function(err) { alert('Network error: ' + err); });
+  }
+  window._runInvestigation = _runInvestigation;
+
+  function _deleteInvestigation(name) {
+    if (!confirm('Delete investigation "' + name + '"? This removes its runs.db, visualizations, and spec.yaml.')) return;
+    fetch('/api/investigation-delete', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name}),
+    }).then(function(r) { return r.json(); }).then(function(j) {
+      if (!j.ok) { alert('Delete failed: ' + (j.error || 'unknown')); return; }
+      var detail = document.getElementById('investigation-detail');
+      if (detail) { detail.style.display = 'none'; detail.innerHTML = ''; }
+      window._investigationsLoaded = false;
+      _loadInvestigations();
+    });
+  }
+  window._deleteInvestigation = _deleteInvestigation;
 
 })();
