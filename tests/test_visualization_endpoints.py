@@ -550,3 +550,70 @@ def test_delete_composite_removes_when_no_dependents(workspace_server):
     names = [c['name'] for c in spec['composites']]
     assert 'orphan' not in names
     assert 'baseline' in names
+
+
+# ---------------------------------------------------------------------------
+# Investigation set-observables endpoint tests
+# ---------------------------------------------------------------------------
+
+def test_post_set_observables_writes_spec_yaml(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-observables',
+        {'investigation': 'demo',
+         'paths': [['chromosome', 'DnaA_count'], ['chromosome', 'free_DnaA']],
+         'emit_all': False},
+    )
+    assert code in (200, 500), j
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    paths = [tuple(o['path']) for o in spec['observables']]
+    assert ('chromosome', 'DnaA_count') in paths
+    assert ('chromosome', 'free_DnaA') in paths
+
+
+def test_post_set_observables_emit_all(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [],
+    }, sort_keys=False))
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-observables',
+        {'investigation': 'demo', 'paths': [], 'emit_all': True},
+    )
+    assert code in (200, 500), j
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    # emit_all: True is represented by a single {path: []} sentinel
+    assert spec['observables'] == [{'path': []}]
+
+
+def test_post_set_observables_rejects_missing_investigation(workspace_server):
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-observables',
+        {'paths': []},
+    )
+    assert code == 400
+
+
+def test_post_set_observables_rejects_non_list_paths(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text('name: demo\ncomposites: []\nruns: []\n')
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-observables',
+        {'investigation': 'demo', 'paths': 'not-a-list'},
+    )
+    assert code == 400
+
+
+def test_post_set_observables_rejects_missing_investigation_dir(workspace_server):
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-observables',
+        {'investigation': 'nonexistent', 'paths': []},
+    )
+    assert code == 404

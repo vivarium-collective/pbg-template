@@ -561,6 +561,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-composite-add":      self._post_investigation_composite_add,
             "/api/investigation-composite-perturb":  self._post_investigation_composite_perturb,
             "/api/investigation-composite-rebuild":  self._post_investigation_composite_rebuild,
+            "/api/investigation-set-observables":    self._post_investigation_set_observables,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -3492,6 +3493,42 @@ if __name__ == "__main__":
             do_action()
         except Exception as e:
             return self._json({"error": f"rebuild failed: {e}"}, 500)
+        try:
+            return self._json(*_active_branch_action(commit_msg, lambda: None))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_investigation_set_observables(self, body: dict):
+        """POST /api/investigation-set-observables {investigation, paths, emit_all}
+        Rewrites spec.yaml.observables. The orchestrator builds the emitter
+        step at run time.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        paths = body.get("paths")
+        emit_all = bool(body.get("emit_all"))
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if paths is None or not isinstance(paths, list):
+            return self._json({"error": "paths must be a list of arrays"}, 400)
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        commit_msg = f"feat(investigations/{inv_name}): set observables"
+
+        def do_action():
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+            if emit_all:
+                spec['observables'] = [{'path': []}]
+            else:
+                spec['observables'] = [{'path': list(p)} for p in paths if p]
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            do_action()
+        except Exception as e:
+            return self._json({"error": f"set-observables failed: {e}"}, 500)
         try:
             return self._json(*_active_branch_action(commit_msg, lambda: None))
         except Exception as e:
