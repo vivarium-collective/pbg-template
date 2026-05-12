@@ -541,6 +541,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/catalog-uninstall":  self._post_catalog_uninstall,
             "/api/suggest":            self._post_suggest,
             "/api/composite-test-run": self._post_composite_test_run,
+            "/api/investigation-create": self._post_investigation_create,
+            "/api/investigation-delete": self._post_investigation_delete,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -2337,6 +2339,68 @@ if __name__ == "__main__":
                     "name": d.name, "status": "invalid", "error": str(e),
                 })
         return self._json({"investigations": out}, 200)
+
+    def _post_investigation_create(self, body: dict):
+        """POST /api/investigation-create {name, composite} — scaffold a new investigation."""
+        name = (body.get("name") or "").strip()
+        composite = (body.get("composite") or "").strip()
+        if not name or not composite:
+            return self._json({"error": "name and composite are required"}, 400)
+        import re
+        if not re.match(r"^[a-zA-Z0-9_-]+$", name):
+            return self._json({"error": "name must match [a-zA-Z0-9_-]+"}, 400)
+
+        inv_dir = WORKSPACE / "investigations" / name
+        if inv_dir.exists():
+            return self._json({"error": f"investigation '{name}' already exists"}, 409)
+
+        def action():
+            inv_dir.mkdir(parents=True, exist_ok=False)
+            (inv_dir / "data").mkdir()
+            (inv_dir / "data" / ".keep").write_text("")
+            stub = (
+                f"name: {name}\n"
+                f"description: \"\"\n"
+                f"composite: {composite}\n"
+                f"\n"
+                f"simulations:\n"
+                f"  - name: baseline\n"
+                f"    kind: single\n"
+                f"    overrides: {{}}\n"
+                f"    steps: 10\n"
+                f"\n"
+                f"observables: []\n"
+                f"\n"
+                f"visualizations: []\n"
+                f"\n"
+                f"status: planned\n"
+            )
+            (inv_dir / "spec.yaml").write_text(stub)
+
+        commit_msg = f"feat(investigations): scaffold {name}"
+        resp, code = _active_branch_action(commit_msg, action)
+        if code == 200:
+            resp.update({"ok": True, "name": name})
+        return self._json(resp, code)
+
+    def _post_investigation_delete(self, body: dict):
+        """POST /api/investigation-delete {name} — remove investigation directory."""
+        import shutil
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._json({"error": "name is required"}, 400)
+        inv_dir = WORKSPACE / "investigations" / name
+        if not inv_dir.is_dir():
+            return self._json({"error": f"investigation '{name}' not found"}, 404)
+
+        def action():
+            shutil.rmtree(inv_dir)
+
+        commit_msg = f"feat(investigations): delete {name}"
+        resp, code = _active_branch_action(commit_msg, action)
+        if code == 200:
+            resp.update({"ok": True, "name": name})
+        return self._json(resp, code)
 
     def _get_composites(self):
         """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package."""
