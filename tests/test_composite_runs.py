@@ -1,9 +1,6 @@
 """Unit tests for scripts._lib.composite_runs."""
 import sys
-import time
 from pathlib import Path
-
-import pytest
 
 _SCRIPTS_PARENT = Path(__file__).parent.parent
 if str(_SCRIPTS_PARENT) not in sys.path:
@@ -85,3 +82,70 @@ def test_query_run_returns_empty_when_no_history(tmp_path):
                   started_at=0.0)
     trajectory = query_run(conn, run_id="r1")
     assert trajectory == []
+
+
+from scripts._lib.composite_runs import inject_sqlite_emitter
+
+
+def _example_state_with_emitter():
+    return {
+        "increase": {
+            "_type": "process",
+            "address": "local:IncreaseProcess",
+            "config": {"rate": 2.0},
+            "inputs": {"level": ["stores", "level"]},
+            "outputs": {"level": ["stores", "level"]},
+            "interval": 1.0,
+        },
+        "stores": {"level": 1.0},
+        "emitter": {
+            "_type": "step",
+            "address": "local:RAMEmitter",
+            "config": {"emit": {"level": "float"}},
+            "inputs": {"level": ["stores", "level"]},
+        },
+    }
+
+
+def test_inject_sqlite_emitter_adds_step():
+    state = _example_state_with_emitter()
+    out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
+    # Original state unchanged
+    assert "_sqlite_emitter" not in state
+    # New emitter present in returned state
+    assert "_sqlite_emitter" in out
+    sql_em = out["_sqlite_emitter"]
+    assert sql_em["_type"] == "step"
+    assert sql_em["address"] == "local:SQLiteEmitter"
+    assert sql_em["config"]["simulation_id"] == "r1"
+    assert sql_em["config"]["db_file"] == "/tmp/x.db"
+
+
+def test_inject_sqlite_emitter_copies_existing_emitter_inputs():
+    """When the spec already declares an emitter, the SQLite emitter should
+    consume the same input ports so persistence captures the same observables."""
+    state = _example_state_with_emitter()
+    out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
+    assert out["_sqlite_emitter"]["inputs"] == {"level": ["stores", "level"]}
+    assert out["_sqlite_emitter"]["config"]["emit"] == {"level": "float"}
+
+
+def test_inject_sqlite_emitter_no_emitter_in_spec():
+    """When the spec has no emitter, inject a SQLite emitter with an empty
+    schema — the run still persists step counts even without observables."""
+    state = {
+        "p": {"_type": "process", "address": "local:Foo",
+              "outputs": {}, "interval": 1.0},
+        "stores": {},
+    }
+    out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
+    assert "_sqlite_emitter" in out
+    assert out["_sqlite_emitter"]["config"]["emit"] == {}
+    assert out["_sqlite_emitter"]["inputs"] == {}
+
+
+def test_inject_sqlite_emitter_idempotent():
+    state = _example_state_with_emitter()
+    once = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
+    twice = inject_sqlite_emitter(once, run_id="r1", db_file="/tmp/x.db")
+    assert once == twice

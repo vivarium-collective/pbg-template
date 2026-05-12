@@ -144,3 +144,49 @@ def query_run_state(conn: sqlite3.Connection, *, run_id: str,
         return json.loads(row["state"])
     except json.JSONDecodeError:
         return None
+
+
+def inject_sqlite_emitter(state: dict, *, run_id: str,
+                          db_file: str) -> dict:
+    """Return a copy of `state` with a SQLiteEmitter step appended.
+
+    The injected step consumes the same input ports declared by the first
+    `_type='step'` entry whose `address` ends with `Emitter` — so the
+    SQLiteEmitter captures the same observables the spec's primary emitter
+    already declared. When no such step exists, the SQLiteEmitter is added
+    with an empty `emit` schema and no inputs (step counts persist anyway).
+
+    Idempotent: a second call with the same run_id is a no-op.
+    """
+    if "_sqlite_emitter" in state:
+        existing = state["_sqlite_emitter"]
+        if (existing.get("config", {}).get("simulation_id") == run_id
+                and existing.get("config", {}).get("db_file") == db_file):
+            return state
+
+    emit_schema: dict = {}
+    inputs: dict = {}
+    for key, node in state.items():
+        if not isinstance(node, dict):
+            continue
+        if node.get("_type") != "step":
+            continue
+        addr = node.get("address", "")
+        if not addr.endswith("Emitter") and "emitter" not in addr.lower():
+            continue
+        emit_schema = dict((node.get("config") or {}).get("emit") or {})
+        inputs = dict(node.get("inputs") or {})
+        break
+
+    new_state = dict(state)
+    new_state["_sqlite_emitter"] = {
+        "_type": "step",
+        "address": "local:SQLiteEmitter",
+        "config": {
+            "emit": emit_schema,
+            "db_file": db_file,
+            "simulation_id": run_id,
+        },
+        "inputs": inputs,
+    }
+    return new_state
