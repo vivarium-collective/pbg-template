@@ -250,6 +250,7 @@ def test_load_overlays_cross_investigation_missing(tmp_path):
 
 from scripts._lib.investigations import (
     update_spec_status, acquire_run_lock, release_run_lock,
+    gather_emitter_outputs, build_viz_composite,
 )
 
 
@@ -279,3 +280,77 @@ def test_acquire_and_release_run_lock(tmp_path):
     # After release, acquire succeeds again
     assert acquire_run_lock(tmp_path, "x") is True
     release_run_lock(tmp_path, "x")
+
+
+# ---------------------------------------------------------------------------
+# Visualization v2 helpers
+# ---------------------------------------------------------------------------
+
+
+def _setup_db_with_schema(tmp_path):
+    db = tmp_path / 'runs.db'
+    conn = sqlite3.connect(str(db))
+    conn.execute('CREATE TABLE runs_meta ('
+                 ' run_id TEXT PRIMARY KEY, spec_id TEXT, sim_name TEXT,'
+                 ' label TEXT, params_json TEXT, started_at REAL,'
+                 ' completed_at REAL, n_steps INTEGER, status TEXT)')
+    conn.execute('CREATE TABLE history (simulation_id TEXT, step INTEGER, '
+                 'global_time REAL, state TEXT)')
+    conn.execute('CREATE TABLE simulations (simulation_id TEXT PRIMARY KEY, '
+                 'name TEXT, started_at TEXT, emit_schema TEXT)')
+    conn.execute('INSERT INTO runs_meta VALUES (?,?,?,?,?,?,?,?,?)',
+                 ('r1', 'spec', 'baseline', 'baseline',
+                  json.dumps({'rate': 1.0}), 0.0, 1.0, 3, 'completed'))
+    conn.execute('INSERT INTO simulations(simulation_id, started_at, emit_schema) '
+                 'VALUES (?, ?, ?)',
+                 ('r1', '2026-05-12', json.dumps({'level': 'float', 'time': 'float'})))
+    for i in range(3):
+        conn.execute('INSERT INTO history VALUES (?,?,?,?)',
+                     ('r1', i, float(i),
+                      json.dumps({'level': float(i + 1), 'time': float(i)})))
+    conn.commit(); conn.close()
+    return db
+
+
+def test_gather_emitter_outputs_returns_schema(tmp_path):
+    db = _setup_db_with_schema(tmp_path)
+    out = gather_emitter_outputs(db)
+    assert 'schemas' in out
+    assert out['schemas']['r1'] == {'level': 'float', 'time': 'float'}
+
+
+def test_gather_emitter_outputs_by_sim(tmp_path):
+    db = _setup_db_with_schema(tmp_path)
+    out = gather_emitter_outputs(db)
+    assert 'baseline' in out['by_sim']
+    runs = out['by_sim']['baseline']
+    assert len(runs) == 1
+    run = runs[0]
+    assert run['run_id'] == 'r1'
+    assert run['params'] == {'rate': 1.0}
+    assert run['observables']['level'] == [1.0, 2.0, 3.0]
+    assert run['observables']['time'] == [0.0, 1.0, 2.0]
+
+
+def test_build_viz_composite_shape():
+    viz_spec = {
+        'name': 'levels', 'address': 'local:TimeSeriesPlot',
+        'config': {'title': 'Demo'},
+    }
+    gathered = {
+        'schemas': {'r1': {'level': 'float', 'time': 'float'}},
+        'by_sim': {'baseline': [{
+            'run_id': 'r1', 'params': {}, 'sim_name': 'baseline',
+            'observables': {'level': [1.0, 2.0, 4.0], 'time': [0.0, 1.0, 2.0]},
+        }]},
+    }
+    class _Stub:
+        def inputs(self): return {'observable': 'list[float]', 'time': 'list[float]'}
+        def outputs(self): return {'html': 'string'}
+    registry = {'TimeSeriesPlot': _Stub}
+    doc = build_viz_composite(viz_spec, gathered, registry)
+    assert 'visualization' in doc
+    assert doc['visualization']['_type'] == 'step'
+    assert doc['visualization']['address'] == 'local:TimeSeriesPlot'
+    assert 'outputs' in doc['visualization']
+    assert doc['visualization']['outputs']['html'] == ['output_store']

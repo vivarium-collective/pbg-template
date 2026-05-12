@@ -233,6 +233,155 @@ def gather_results(spec: dict, db_path: Path) -> dict:
     return out
 
 
+# ----------------------------------------------------------------------------
+# Visualization v2 — emitter-driven, composite-dispatched
+# ----------------------------------------------------------------------------
+
+def gather_emitter_outputs(db_path: Path) -> dict:
+    """Flatten runs.db into per-observable trajectories + emitter schemas.
+
+    Returns:
+        {
+          "schemas": {<run_id>: {<observable>: <type_str>}, ...},
+          "by_sim": {<sim_name>: [{run_id, sim_name, params, observables}, ...]},
+        }
+    """
+    db_path = Path(db_path)
+    if not db_path.is_file():
+        return {"schemas": {}, "by_sim": {}}
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        meta_rows = conn.execute(
+            "SELECT run_id, sim_name, params_json FROM runs_meta"
+        ).fetchall()
+        run_meta = {}
+        for r in meta_rows:
+            try:
+                params = json.loads(r["params_json"] or "{}")
+            except json.JSONDecodeError:
+                params = {}
+            run_meta[r["run_id"]] = {
+                "sim_name": r["sim_name"] or "default",
+                "params": params,
+            }
+
+        schemas = {}
+        try:
+            sim_rows = conn.execute(
+                "SELECT simulation_id, emit_schema FROM simulations"
+            ).fetchall()
+            for r in sim_rows:
+                if r["emit_schema"]:
+                    try:
+                        schemas[r["simulation_id"]] = json.loads(r["emit_schema"])
+                    except json.JSONDecodeError:
+                        pass
+        except sqlite3.OperationalError:
+            pass
+
+        by_sim = {}
+        has_history = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='history'"
+        ).fetchone() is not None
+        for run_id, meta in run_meta.items():
+            observables = {}
+            if has_history:
+                rows = conn.execute(
+                    "SELECT step, global_time, state FROM history "
+                    "WHERE simulation_id=? ORDER BY step ASC",
+                    (run_id,),
+                ).fetchall()
+                for row in rows:
+                    try:
+                        state = json.loads(row["state"]) if row["state"] else {}
+                    except json.JSONDecodeError:
+                        continue
+                    for k, v in state.items():
+                        observables.setdefault(k, []).append(v)
+                    # Only fall back to global_time if state doesn't carry a "time" key
+                    if "time" not in state:
+                        observables.setdefault("time", []).append(row["global_time"])
+            sim_name = meta["sim_name"]
+            by_sim.setdefault(sim_name, []).append({
+                "run_id": run_id,
+                "sim_name": sim_name,
+                "params": meta["params"],
+                "observables": observables,
+            })
+        return {"schemas": schemas, "by_sim": by_sim}
+    finally:
+        conn.close()
+
+
+def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict) -> dict:
+    """Build the small composite that dispatches one visualization."""
+    address = viz_spec["address"]
+    class_key = address.split(":", 1)[1] if ":" in address else address
+    viz_class = core_registry.get(class_key)
+    if viz_class is None:
+        raise KeyError(f"Visualization class not registered: {address}")
+
+    config = dict(viz_spec.get("config") or {})
+    inputs_map = config.get("inputs_map") or {}
+    sources = config.get("sources")
+
+    try:
+        instance = viz_class.__new__(viz_class)
+        declared_inputs = instance.inputs()
+    except Exception:
+        declared_inputs = {}
+
+    candidate_runs = []
+    by_sim = gathered.get("by_sim") or {}
+    for sim_name, runs in by_sim.items():
+        if sources and sim_name not in sources:
+            continue
+        candidate_runs.extend(runs)
+
+    inputs_store = {}
+    run_labels = []
+    for port, port_type in declared_inputs.items():
+        observable_name = inputs_map.get(port, port)
+        per_run_values = []
+        for run in candidate_runs:
+            vals = run.get("observables", {}).get(observable_name)
+            if vals is None:
+                continue
+            per_run_values.append(vals)
+            params = run.get("params") or {}
+            label = ", ".join(f"{k}={v}" for k, v in sorted(params.items())) \
+                    or run["run_id"][-8:]
+            if label not in run_labels:
+                run_labels.append(label)
+        if port_type == "list[float]":
+            if len(per_run_values) == 1:
+                inputs_store[port] = per_run_values[0]
+            else:
+                inputs_store[port] = per_run_values
+        elif port_type == "float":
+            inputs_store[port] = per_run_values[0][-1] if per_run_values else None
+        elif port_type == "list[list[float]]":
+            inputs_store[port] = per_run_values
+        else:
+            inputs_store[port] = per_run_values[0] if per_run_values else None
+
+    inputs_store["_run_labels"] = run_labels
+
+    return {
+        "inputs_store": inputs_store,
+        "output_store": "",
+        "visualization": {
+            "_type": "step",
+            "address": address,
+            "config": {k: v for k, v in config.items() if k not in ("inputs_map", "sources")},
+            "inputs": {port: ["inputs_store", port] for port in declared_inputs},
+            "outputs": {"html": ["output_store"]},
+        },
+    }
+
+
 def load_overlays(spec: dict, viz_config: dict, ws_root: Path,
                   investigation_name: str) -> list[dict]:
     """Resolve each overlay entry into a uniform payload.
