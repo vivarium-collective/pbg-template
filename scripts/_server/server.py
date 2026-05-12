@@ -472,6 +472,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_pending()
         if self.path.startswith("/api/registry"):
             return self._get_registry()
+        if self.path.startswith("/api/composite-runs"):
+            return self._get_composite_runs()
         if self.path.startswith("/api/composite-resolve"):
             return self._get_composite_resolve()
         if self.path.startswith("/api/composites"):
@@ -2157,6 +2159,27 @@ if __name__ == "__main__":
         except Exception as e:
             data = {"error": str(e), "processes": [], "types": []}
         return self._json(data, 200)
+
+    def _get_composite_runs(self):
+        """GET /api/composite-runs?spec_id=X — list runs for one composite spec."""
+        from urllib.parse import urlparse, parse_qs
+        _ws_add_to_sys_path()
+        from scripts._lib import composite_runs as cr
+
+        qs = parse_qs(urlparse(self.path).query)
+        spec_id = (qs.get("spec_id") or [""])[0]
+        if not spec_id:
+            return self._json({"runs": [], "error": "missing spec_id"}, 400)
+
+        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        if not db_file.is_file():
+            return self._json({"runs": []}, 200)
+        conn = cr.connect(db_file)
+        try:
+            runs = cr.query_runs(conn, spec_id=spec_id)
+        finally:
+            conn.close()
+        return self._json({"runs": runs}, 200)
 
     def _get_composites(self):
         """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package."""

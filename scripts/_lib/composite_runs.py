@@ -171,11 +171,13 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
 
     Idempotent: a second call with the same run_id is a no-op.
     """
-    db_file = str(db_file)
-    if "_sqlite_emitter" in state:
-        existing = state["_sqlite_emitter"]
-        if (existing.get("config", {}).get("simulation_id") == run_id
-                and existing.get("config", {}).get("db_file") == db_file):
+    db_file = Path(db_file)
+    if "sqlite_emitter" in state:
+        existing = state["sqlite_emitter"]
+        cfg = existing.get("config", {})
+        if (cfg.get("simulation_id") == run_id
+                and cfg.get("file_path") == str(db_file.parent)
+                and cfg.get("db_file") == db_file.name):
             return dict(state)
 
     emit_schema: dict = {}
@@ -192,13 +194,17 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
         inputs = dict(node.get("inputs") or {})
         break
 
+    # SQLiteEmitter joins file_path (directory) + db_file (filename) via
+    # os.path.join, so we must split the absolute path accordingly.
+    # (db_file is already a Path from the top of this function.)
     new_state = dict(state)
-    new_state["_sqlite_emitter"] = {
+    new_state["sqlite_emitter"] = {
         "_type": "step",
         "address": "local:SQLiteEmitter",
         "config": {
             "emit": emit_schema,
-            "db_file": db_file,
+            "file_path": str(db_file.parent),
+            "db_file": db_file.name,
             "simulation_id": run_id,
         },
         "inputs": inputs,
