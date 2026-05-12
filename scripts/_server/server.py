@@ -472,6 +472,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_pending()
         if self.path.startswith("/api/registry"):
             return self._get_registry()
+        if self.path.startswith("/api/composite-run/") and "/state" in self.path:
+            return self._get_composite_run_state()
+        if self.path.startswith("/api/composite-run/"):
+            return self._get_composite_run()
         if self.path.startswith("/api/composite-runs"):
             return self._get_composite_runs()
         if self.path.startswith("/api/composite-resolve"):
@@ -2180,6 +2184,31 @@ if __name__ == "__main__":
         finally:
             conn.close()
         return self._json({"runs": runs}, 200)
+
+    def _get_composite_run(self):
+        """GET /api/composite-run/<run_id> — return trajectory list."""
+        _ws_add_to_sys_path()
+        from scripts._lib import composite_runs as cr
+
+        path_only = self.path.split("?", 1)[0]
+        rest = path_only[len("/api/composite-run/"):]
+        # Strip a trailing '/state' if a more specific route should handle it;
+        # this handler matches the bare /api/composite-run/<id> form.
+        if "/" in rest:
+            return self._json({"error": "use /state subpath"}, 400)
+        run_id = rest
+
+        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        if not db_file.is_file():
+            return self._json({"error": "no run database"}, 404)
+        conn = cr.connect(db_file)
+        try:
+            trajectory = cr.query_run(conn, run_id=run_id)
+        finally:
+            conn.close()
+        if not trajectory:
+            return self._json({"error": "run not found"}, 404)
+        return self._json({"run_id": run_id, "trajectory": trajectory}, 200)
 
     def _get_composites(self):
         """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package."""

@@ -111,7 +111,7 @@ def query_run(conn: sqlite3.Connection, *, run_id: str) -> list[dict]:
     if not has_history:
         return []
     rows = conn.execute(
-        "SELECT step, time, state FROM history WHERE simulation_id=? "
+        "SELECT step, global_time AS time, state FROM history WHERE simulation_id=? "
         "ORDER BY step ASC",
         (run_id,),
     ).fetchall()
