@@ -536,7 +536,8 @@ def release_run_lock(ws_root: Path, name: str) -> None:
 
 def run_investigation(ws_root: Path, name: str, *,
                       run_one_composite: callable,
-                      core_registry: dict) -> dict:
+                      core_registry: dict,
+                      build_and_run=None) -> dict:
     """Top-level orchestrator. Returns a summary dict.
 
     Args:
@@ -549,6 +550,10 @@ def run_investigation(ws_root: Path, name: str, *,
             composite + subprocess-runs it the same way _post_composite_test_run does)
         core_registry: process_bigraph core.link_registry — used to look up
             Visualization classes by address (e.g. "local:TimeSeriesPlot")
+        build_and_run: optional callable(doc, core_registry) -> str passed through
+            to render_visualizations.  When None and the spec has no visualizations,
+            the viz pass is skipped cleanly.  When None but visualizations are
+            present, render_visualizations raises ValueError.
 
     Side effects: writes runs.db + viz/<name>.html, updates spec.yaml.
     Each invocation APPENDS new runs to runs.db (does not clear prior runs).
@@ -609,10 +614,11 @@ def run_investigation(ws_root: Path, name: str, *,
                 errors.append({"run_id": run_id, "error": res.get("error", "")})
         conn.close()
 
-        # Visualization pass
-        results = gather_results(spec, Path(db_file))
-        viz_paths = render_visualizations(spec, results, ws_root, name,
-                                           core_registry=core_registry)
+        # Visualization pass — skipped cleanly when build_and_run is None and
+        # spec has no visualizations (backward-compat with tests that omit both).
+        viz_paths = render_visualizations(spec, inv_dir, name,
+                                          core_registry=core_registry,
+                                          build_and_run=build_and_run)
 
         # 'ran' = runs finished without error; user explicitly sets 'complete'
         # after analyzing results (avoids over-claiming "complete" before the
@@ -636,41 +642,53 @@ def run_investigation(ws_root: Path, name: str, *,
         release_run_lock(ws_root, name)
 
 
-def render_visualizations(spec: dict, results: dict, ws_root: Path,
-                          name: str, *, core_registry: dict) -> list[Path]:
-    """For each viz in the spec, look up its Visualization class and call render_final.
+def render_visualizations(spec: dict, inv_dir: Path, name: str, *,
+                          core_registry: dict,
+                          build_and_run=None) -> list[Path]:
+    """Render every viz in ``spec.visualizations`` against the investigation's runs.db.
 
-    Writes HTML to investigations/<name>/viz/<viz-name>.html. Returns paths written.
+    For each viz:
+      1. Build the viz composite via ``build_viz_composite``.
+      2. Run it for 1 step via ``build_and_run(doc, core_registry) -> str``.
+      3. Write the resulting HTML to ``<inv_dir>/viz/<viz_name>.html``.
+      4. On any error, write an error stub HTML (other vizzes still render).
+
+    Args:
+        spec: investigation spec dict
+        inv_dir: path to the investigation directory (contains runs.db)
+        name: investigation name (used only for error messages / doc purposes)
+        core_registry: mapping of class key -> Visualization class
+        build_and_run: callable(doc, core_registry) -> str that runs the composite
+            and returns an HTML string.  Must be provided when there are
+            visualizations to render; raises ValueError otherwise.
     """
-    inv_dir = Path(ws_root) / "investigations" / name
+    inv_dir = Path(inv_dir)
     viz_dir = inv_dir / "viz"
     viz_dir.mkdir(parents=True, exist_ok=True)
-    paths: list[Path] = []
-    for viz in spec.get("visualizations") or []:
-        addr = viz["address"]
-        # Strip the optional "local:" prefix to match registry keys
-        class_key = addr.split(":", 1)[1] if ":" in addr else addr
-        viz_class = core_registry.get(class_key)
-        if viz_class is None:
-            # Skip — write a stub HTML so the UI shows an error
-            stub = viz_dir / f"{viz['name']}.html"
-            stub.write_text(
-                f"<p style='color:#991b1b'>Visualization class not registered: "
-                f"<code>{addr}</code>. Install the package that ships it.</p>"
-            )
-            paths.append(stub)
-            continue
-        config = dict(viz.get("config") or {})
-        config["_overlays"] = load_overlays(spec, viz, ws_root, name)
+
+    visualizations = spec.get("visualizations") or []
+    if not visualizations:
+        return []
+
+    if build_and_run is None:
+        raise ValueError(
+            "render_visualizations requires a build_and_run hook "
+            "(production path: see server._post_investigation_run_viz_hook)."
+        )
+
+    gathered = gather_emitter_outputs(inv_dir / "runs.db")
+    paths = []
+    for viz_spec in visualizations:
+        target = viz_dir / f"{viz_spec['name']}.html"
         try:
-            instance = viz_class.__new__(viz_class)
-            html = instance.render_final(results, config=config)
+            doc = build_viz_composite(viz_spec, gathered, core_registry)
+            html = build_and_run(doc, core_registry)
         except Exception as e:
             html = (
-                f"<p style='color:#991b1b'>render_final failed for "
-                f"<code>{viz['name']}</code>: <code>{e}</code></p>"
+                f'<p style="color:#991b1b">Failed to render '
+                f'<code>{viz_spec.get("name", "?")}</code>: '
+                f'<code>{type(e).__name__}: {e}</code></p>'
             )
-        target = viz_dir / f"{viz['name']}.html"
         target.write_text(html)
         paths.append(target)
     return paths

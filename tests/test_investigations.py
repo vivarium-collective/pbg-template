@@ -354,3 +354,49 @@ def test_build_viz_composite_shape():
     assert doc['visualization']['address'] == 'local:TimeSeriesPlot'
     assert 'outputs' in doc['visualization']
     assert doc['visualization']['outputs']['html'] == ['output_store']
+
+
+def test_render_visualizations_v2_writes_html(tmp_path):
+    """End-to-end: build_viz_composite + Composite.run(1) writes html to viz/."""
+    from scripts._lib.investigations import render_visualizations
+
+    inv_dir = tmp_path / "investigations" / "demo"
+    inv_dir.mkdir(parents=True)
+    _setup_db_with_schema(inv_dir)  # writes investigations/demo/runs.db
+
+    class _Stub:
+        @classmethod
+        def is_visualization(cls): return True
+        def inputs(self): return {'observable': 'list[float]', 'time': 'list[float]'}
+        def outputs(self): return {'html': 'string'}
+        def update(self, state):
+            return {'html': '<p>obs=' + str(state.get('observable')) + '</p>'}
+
+    registry = {'TimeSeriesPlot': _Stub}
+    spec = {
+        'composite': 'pkg.composites.demo',
+        'simulations': [{'name': 'baseline', 'kind': 'single',
+                          'overrides': {}, 'steps': 3}],
+        'observables': ['level'],
+        'visualizations': [{
+            'name': 'levels',
+            'address': 'local:TimeSeriesPlot',
+            'config': {'title': 'T', 'inputs_map': {'observable': 'level'}},
+        }],
+    }
+
+    def fake_build_and_run(doc, registry_arg):
+        viz_class = registry_arg[doc['visualization']['address'].split(':', 1)[1]]
+        inst = viz_class.__new__(viz_class)
+        state = dict(doc['inputs_store'])
+        out = inst.update(state)
+        return out.get('html', '')
+
+    paths = render_visualizations(spec, inv_dir, 'demo',
+                                   core_registry=registry,
+                                   build_and_run=fake_build_and_run)
+    assert paths
+    html_path = inv_dir / 'viz' / 'levels.html'
+    assert html_path.is_file()
+    text = html_path.read_text()
+    assert '<p>obs=' in text
