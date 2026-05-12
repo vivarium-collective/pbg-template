@@ -2293,6 +2293,17 @@ if __name__ == "__main__":
         spec_path = inv_dir / "spec.yaml"
         if not spec_path.is_file():
             return self._json({"error": "investigation not found"}, 404)
+
+        # Auto-migrate legacy single-composite investigations on first open.
+        try:
+            from scripts._lib.investigation_migrate import needs_migration, migrate_investigation
+            if needs_migration(spec_path):
+                migrate_investigation(spec_path, workspace_root=WORKSPACE)
+        except Exception:
+            # Migration failure must not block the viewer; the dashboard
+            # surfaces the issue via the normal spec-load error path.
+            pass
+
         try:
             spec = load_spec(spec_path)
         except InvestigationSpecError as e:
