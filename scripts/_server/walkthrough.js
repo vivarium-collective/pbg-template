@@ -2258,15 +2258,19 @@
         '<pre class="spec-yaml-pre">' + _esc(JSON.stringify(spec, null, 2)) + '</pre>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="runs">' +
-        (runs.length ? _renderInvestigationRunsTable(runs) : '<p class="empty-state">No runs yet — click Run to generate them.</p>') +
+        (runs.length ? _renderInvestigationRunsTable(runs, name) : '<p class="empty-state">No runs yet — click Run to generate them.</p>') +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="viz">' +
         (vizFiles.length ?
+          '<button class="btn-mini" style="margin-bottom:8px" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>' +
           vizFiles.map(function(v) {
             return '<h4 style="margin-bottom:4px">' + _esc(v.name) + '</h4>' +
                    '<iframe class="viz-frame" src="/' + _esc(v.path) + '?ts=' + Date.now() + '"></iframe>';
           }).join('') :
-          '<p class="empty-state">No visualizations rendered yet.</p>') +
+          '<p class="empty-state">No visualizations declared in <code>spec.yaml</code> yet. ' +
+            'Click <em>Add visualization</em> to scaffold one, or edit ' +
+            '<code>investigations/' + _esc(name) + '/spec.yaml</code> directly and click <em>Run</em>.</p>' +
+          '<button class="action-btn" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>') +
       '</div>';
   }
 
@@ -2280,21 +2284,28 @@
   }
   window._invDetailTab = _invDetailTab;
 
-  function _renderInvestigationRunsTable(runs) {
+  function _renderInvestigationRunsTable(runs, investigationName) {
     var rows = runs.map(function(r) {
       var pstr = Object.keys(r.params || {}).map(function(k) {
         return k + '=' + r.params[k];
       }).join(', ') || '—';
       var statusClass = ({completed: 'completed', failed: 'failed',
                           running: 'running'})[r.status] || 'planned';
+      var rowId = _esc(r.run_id);
+      var paramsJson = _esc(JSON.stringify(r.params || {}));
       return '<tr><td>' + _esc(r.sim_name) + '</td>' +
              '<td><code>' + _esc(pstr) + '</code></td>' +
              '<td>' + (r.n_steps || 0) + '</td>' +
              '<td><span class="ce-history-status ' + statusClass + '">' + _esc(r.status) + '</span></td>' +
-             '<td><code style="font-size:0.78em">' + _esc(r.run_id.slice(-12)) + '</code></td></tr>';
+             '<td><code style="font-size:0.78em">' + rowId.slice(-12) + '</code></td>' +
+             '<td><button class="btn-mini" onclick=\'_dupRun("' + _esc(investigationName) + '","' + rowId + '","' + _esc(r.sim_name) + '",' + paramsJson + ',' + (r.n_steps || 10) + ')\'>Duplicate</button> ' +
+                  '<button class="btn-mini" style="color:#c00" onclick="_deleteRun(\'' + _esc(investigationName) + '\',\'' + rowId + '\')">Delete</button></td>' +
+           '</tr>';
     }).join('');
-    return '<table style="width:100%"><thead><tr>' +
-      '<th>Simulation</th><th>Params</th><th>Steps</th><th>Status</th><th>Run id</th>' +
+    var clearBtn = '<div style="margin-bottom:6px"><button class="btn-mini" style="color:#c00" ' +
+                   'onclick="_clearRuns(\'' + _esc(investigationName) + '\')">Clear all runs</button></div>';
+    return clearBtn + '<table style="width:100%"><thead><tr>' +
+      '<th>Simulation</th><th>Params</th><th>Steps</th><th>Status</th><th>Run id</th><th>Actions</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>';
   }
 
@@ -2332,5 +2343,103 @@
     });
   }
   window._deleteInvestigation = _deleteInvestigation;
+
+  function _deleteRun(investigationName, runId) {
+    if (!confirm('Delete run ' + runId.slice(-12) + '?')) return;
+    fetch('/api/investigation-run-delete', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({investigation: investigationName, run_id: runId}),
+    }).then(function(r) { return r.json(); }).then(function(j) {
+      if (!j.ok) { alert('Delete failed: ' + (j.error || 'unknown')); return; }
+      _openInvestigation(investigationName);
+    });
+  }
+  window._deleteRun = _deleteRun;
+
+  function _clearRuns(investigationName) {
+    if (!confirm('Clear ALL runs from ' + investigationName + '? (visualizations will be empty until you re-run)')) return;
+    fetch('/api/investigation-runs-clear', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({investigation: investigationName}),
+    }).then(function(r) { return r.json(); }).then(function(j) {
+      if (!j.ok) { alert('Clear failed: ' + (j.error || 'unknown')); return; }
+      _openInvestigation(investigationName);
+    });
+  }
+  window._clearRuns = _clearRuns;
+
+  function _dupRun(investigationName, runId, simName, params, steps) {
+    // Prompt the user to edit params as JSON, then submit.
+    var current = JSON.stringify(params, null, 2);
+    var edited = prompt('Edit overrides for the duplicated run:\n(JSON; will append as a new ad-hoc run)', current);
+    if (edited === null) return;
+    var overrides;
+    try { overrides = JSON.parse(edited); }
+    catch (e) { alert('Invalid JSON: ' + e); return; }
+    fetch('/api/investigation-run-one', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        investigation: investigationName,
+        sim_name: simName + '-copy',
+        overrides: overrides,
+        steps: steps,
+      }),
+    }).then(function(r) { return r.json(); }).then(function(j) {
+      if (!j.ok) { alert('Duplicate-run failed: ' + (j.error || 'unknown')); return; }
+      _openInvestigation(investigationName);
+    });
+  }
+  window._dupRun = _dupRun;
+
+  function _openAddVizModal(investigationName) {
+    document.getElementById('add-viz-investigation').value = investigationName;
+    var sel = document.getElementById('add-viz-class');
+    sel.innerHTML = '<option value="">— pick a class —</option>';
+    fetch('/api/visualization-classes').then(function(r) { return r.json(); }).then(function(data) {
+      (data.classes || []).forEach(function(c) {
+        var opt = document.createElement('option');
+        opt.value = c.address;
+        opt.textContent = c.name + (c.doc ? '  —  ' + c.doc : '');
+        sel.appendChild(opt);
+      });
+      openModal('modal-investigation-add-viz');
+    });
+  }
+  window._openAddVizModal = _openAddVizModal;
+
+  function _submitAddViz(form) {
+    var data = new FormData(form);
+    var errEl = form.querySelector('.form-error');
+    if (errEl) errEl.textContent = '';
+    var configRaw = (data.get('config') || '').trim();
+    var config = {};
+    if (configRaw) {
+      try { config = JSON.parse(configRaw); }
+      catch (e) {
+        if (errEl) errEl.textContent = 'Invalid JSON in config: ' + String(e);
+        return;
+      }
+    }
+    var payload = {
+      investigation: data.get('investigation'),
+      name: data.get('name'),
+      address: data.get('address'),
+      config: config,
+    };
+    fetch('/api/investigation-add-viz', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok) {
+          if (errEl) errEl.textContent = j.error || 'add failed';
+          return;
+        }
+        closeModal('modal-investigation-add-viz');
+        _openInvestigation(payload.investigation);  // refresh detail panel
+      });
+  }
+  window._submitAddViz = _submitAddViz;
 
 })();

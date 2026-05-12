@@ -384,6 +384,7 @@ def run_investigation(ws_root: Path, name: str, *,
             Visualization classes by address (e.g. "local:TimeSeriesPlot")
 
     Side effects: writes runs.db + viz/<name>.html, updates spec.yaml.
+    Each invocation APPENDS new runs to runs.db (does not clear prior runs).
 
     Returns:
         {name, n_runs, n_visualizations, status, viz_paths, errors}
@@ -402,10 +403,6 @@ def run_investigation(ws_root: Path, name: str, *,
     try:
         update_spec_status(ws_root, name, status="running")
         db_file = str(inv_dir / "runs.db")
-        # Clear prior runs (re-runs replace results)
-        prior = inv_dir / "runs.db"
-        if prior.exists():
-            prior.unlink()
         conn = cr.connect(db_file)
         # Add sim_name column to runs_meta if our local copy doesn't have it.
         try:

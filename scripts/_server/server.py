@@ -493,6 +493,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_suggest_poll()
         if self.path.startswith("/api/visualization-status"):
             return self._get_visualization_status()
+        if self.path.startswith("/api/visualization-classes"):
+            return self._get_visualization_classes()
         rel = self.path.lstrip("/")
         # Refuse path traversal and absolute paths.
         if ".." in rel.split("/") or rel.startswith("/"):
@@ -537,9 +539,13 @@ class Handler(BaseHTTPRequestHandler):
             "/api/catalog-uninstall":  self._post_catalog_uninstall,
             "/api/suggest":            self._post_suggest,
             "/api/composite-test-run": self._post_composite_test_run,
-            "/api/investigation-create": self._post_investigation_create,
-            "/api/investigation-delete": self._post_investigation_delete,
-            "/api/investigation-run":    self._post_investigation_run,
+            "/api/investigation-create":      self._post_investigation_create,
+            "/api/investigation-delete":      self._post_investigation_delete,
+            "/api/investigation-run":         self._post_investigation_run,
+            "/api/investigation-add-viz":     self._post_investigation_add_viz,
+            "/api/investigation-run-delete":  self._post_investigation_run_delete,
+            "/api/investigation-runs-clear":  self._post_investigation_runs_clear,
+            "/api/investigation-run-one":     self._post_investigation_run_one,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -2313,6 +2319,203 @@ if __name__ == "__main__":
             # files happen to be byte-identical) — still return success.
             return self._json(summary_holder[0], 200)
         return self._json(resp, code)
+
+    def _post_investigation_add_viz(self, body: dict):
+        """POST /api/investigation-add-viz {investigation, name, address, config}
+        — append a visualization entry to spec.yaml."""
+        _ws_add_to_sys_path()
+        import yaml as _y
+        import re as _re
+
+        inv = (body.get("investigation") or "").strip()
+        viz_name = (body.get("name") or "").strip()
+        address = (body.get("address") or "").strip()
+        viz_config = body.get("config") or {}
+
+        if not inv or not viz_name or not address:
+            return self._json({"error": "investigation, name, address required"}, 400)
+        if not _re.match(r"^[a-zA-Z0-9_-]+$", viz_name):
+            return self._json({"error": "viz name must match [a-zA-Z0-9_-]+"}, 400)
+
+        spec_path = WORKSPACE / "investigations" / inv / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": f"investigation '{inv}' not found"}, 404)
+
+        def action():
+            spec = _y.safe_load(spec_path.read_text()) or {}
+            vizzes = spec.setdefault("visualizations", []) or []
+            if any(v.get("name") == viz_name for v in vizzes):
+                raise RuntimeError(f"visualization '{viz_name}' already exists in spec")
+            vizzes.append({"name": viz_name, "address": address, "config": viz_config})
+            spec["visualizations"] = vizzes
+            spec_path.write_text(_y.safe_dump(spec, sort_keys=False))
+
+        commit_msg = f"feat(investigations/{inv}): add viz {viz_name} ({address})"
+        resp, code = _active_branch_action(commit_msg, action)
+        if code == 200:
+            resp["ok"] = True
+            resp["investigation"] = inv
+            resp["viz_name"] = viz_name
+        return self._json(resp, code)
+
+    def _get_visualization_classes(self):
+        """GET /api/visualization-classes — list registered Visualization classes
+        (the ones that have a render_final method).
+        Returns: [{address, name, doc}, ...]
+        """
+        _ws_add_to_sys_path()
+        try:
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+            sys.path.insert(0, str(WORKSPACE))
+            core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
+            core = core_module.build_core()
+            registry = dict(core.link_registry)
+        except Exception:
+            registry = {}
+        try:
+            from pbg_superpowers.visualizations import (
+                TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+            )
+            for cls in [TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap]:
+                registry[cls.__name__] = cls
+        except ImportError:
+            pass
+        out = []
+        for name, cls in sorted(registry.items()):
+            if not callable(getattr(cls, "render_final", None)):
+                continue
+            # Skip the base class itself (its render_final is the NotImplementedError stub)
+            if name == "Visualization":
+                continue
+            try:
+                doc = (cls.__doc__ or "").strip().split("\n", 1)[0] if cls.__doc__ else ""
+            except Exception:
+                doc = ""
+            out.append({"address": f"local:{name}", "name": name, "doc": doc})
+        return self._json({"classes": out}, 200)
+
+    def _post_investigation_run_delete(self, body: dict):
+        """POST /api/investigation-run-delete {investigation, run_id} — delete one run from runs.db."""
+        _ws_add_to_sys_path()
+        from scripts._lib import composite_runs as cr
+
+        inv = (body.get("investigation") or "").strip()
+        run_id = (body.get("run_id") or "").strip()
+        if not inv or not run_id:
+            return self._json({"error": "investigation and run_id required"}, 400)
+        db = WORKSPACE / "investigations" / inv / "runs.db"
+        if not db.is_file():
+            return self._json({"error": "runs.db not found"}, 404)
+        conn = cr.connect(db)
+        try:
+            conn.execute("DELETE FROM history WHERE simulation_id=?", (run_id,))
+            conn.execute("DELETE FROM runs_meta WHERE run_id=?", (run_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        return self._json({"ok": True, "run_id": run_id}, 200)
+
+    def _post_investigation_runs_clear(self, body: dict):
+        """POST /api/investigation-runs-clear {investigation} — wipe runs.db."""
+        inv = (body.get("investigation") or "").strip()
+        if not inv:
+            return self._json({"error": "investigation required"}, 400)
+        db = WORKSPACE / "investigations" / inv / "runs.db"
+        if db.is_file():
+            db.unlink()
+        return self._json({"ok": True, "investigation": inv}, 200)
+
+    def _post_investigation_run_one(self, body: dict):
+        """POST /api/investigation-run-one {investigation, sim_name, overrides, steps}
+        — run a single ad-hoc composite execution and append to the investigation's runs.db.
+
+        Used by the 'Duplicate run' flow: user takes an existing run's params,
+        tweaks them in a modal, submits as a one-off addition.
+        """
+        _ws_add_to_sys_path()
+        from scripts._lib.investigations import load_spec, InvestigationSpecError
+        from scripts._lib.composite_lookup import substitute_parameters, find_composite_path
+        from scripts._lib import composite_runs as cr
+
+        inv = (body.get("investigation") or "").strip()
+        sim_name = (body.get("sim_name") or "").strip() or "ad-hoc"
+        overrides = body.get("overrides") or {}
+        steps = int(body.get("steps") or 10)
+        if not inv:
+            return self._json({"error": "investigation required"}, 400)
+
+        spec_path = WORKSPACE / "investigations" / inv / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "spec.yaml not found"}, 404)
+        try:
+            spec = load_spec(spec_path)
+        except InvestigationSpecError as e:
+            return self._json({"error": str(e)}, 400)
+
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        path = find_composite_path(WORKSPACE, pkg, spec["composite"])
+        if path is None:
+            return self._json({"error": f"composite not found: {spec['composite']}"}, 404)
+
+        text = path.read_text()
+        composite_spec = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
+        state = substitute_parameters(composite_spec.get("state") or {},
+                                       composite_spec.get("parameters") or {},
+                                       overrides)
+        db_file = str(WORKSPACE / "investigations" / inv / "runs.db")
+        run_id = cr.generate_run_id(spec["composite"], overrides)
+        state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+
+        # Ensure the DB exists + the runs_meta table has sim_name column
+        import sqlite3 as _sql
+        conn = cr.connect(db_file)
+        try:
+            conn.execute("ALTER TABLE runs_meta ADD COLUMN sim_name TEXT")
+            conn.commit()
+        except _sql.OperationalError:
+            pass
+
+        label = body.get("label") or f"ad-hoc {sim_name}"
+        import time as _time
+        cr.save_metadata(conn, spec_id=spec["composite"], run_id=run_id,
+                          params=overrides, label=label, started_at=_time.time())
+        conn.execute("UPDATE runs_meta SET sim_name=? WHERE run_id=?", (sim_name, run_id))
+        conn.commit()
+        conn.close()
+
+        py = sys.executable
+        script = textwrap.dedent(f"""
+            import json, sys, traceback
+            try:
+                from {pkg}.core import build_core
+                from process_bigraph import Composite
+                from process_bigraph.emitter import SQLiteEmitter
+                core = build_core()
+                core.register_link('SQLiteEmitter', SQLiteEmitter)
+                composite = Composite({{'state': {json.dumps(state)}}}, core=core)
+                composite.run({steps})
+                print('@@@OK@@@')
+            except Exception:
+                print('@@@ERROR@@@')
+                print(traceback.format_exc())
+        """)
+        result = subprocess.run([py, "-c", script], cwd=WORKSPACE,
+                                 capture_output=True, text=True, timeout=300)
+        conn = cr.connect(db_file)
+        try:
+            if "@@@OK@@@" in result.stdout:
+                cr.complete_metadata(conn, run_id=run_id, n_steps=steps, status="completed")
+                return self._json({"ok": True, "run_id": run_id,
+                                   "investigation": inv, "sim_name": sim_name}, 200)
+            else:
+                cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+                err = result.stdout.split("@@@ERROR@@@", 1)[-1].strip()[-500:] \
+                      if "@@@ERROR@@@" in result.stdout else "unknown error"
+                return self._json({"ok": False, "run_id": run_id, "error": err}, 200)
+        finally:
+            conn.close()
 
     def _get_composites(self):
         """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package."""

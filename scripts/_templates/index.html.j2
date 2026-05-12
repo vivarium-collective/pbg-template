@@ -491,6 +491,24 @@
   </div>
 </div>
 
+<!-- Modal: add visualization to an investigation -->
+<div id="modal-investigation-add-viz" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-investigation-add-viz')">&times;</button>
+    <h3>Add visualization</h3>
+    <form id="form-investigation-add-viz" onsubmit="event.preventDefault(); _submitAddViz(this)">
+      <input type="hidden" name="investigation" id="add-viz-investigation">
+      <label>Name <input name="name" placeholder="trajectory" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Visualization class <select name="address" id="add-viz-class" required></select></label>
+      <label>Config (JSON; e.g. <code>{"observable":"level","sources":["baseline"]}</code>)
+        <textarea name="config" rows="4" placeholder='{"observable": "level", "sources": ["baseline"]}'></textarea>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit">Add</button>
+    </form>
+  </div>
+</div>
+
 <!-- ===== PAGE: BRANCHES ===== -->
 <section id="page-branches" class="page" data-page="branches">
   <h2 class="page-title">Branches</h2>
