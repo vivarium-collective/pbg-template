@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import html as _html
 import json
 import os
 import re
@@ -493,6 +494,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_suggest_poll()
         if self.path.startswith("/api/visualization-status"):
             return self._get_visualization_status()
+        if self.path.startswith("/api/visualization-instances"):
+            return self._get_visualization_instances()
         if self.path.startswith("/api/visualization-classes"):
             return self._get_visualization_classes()
         rel = self.path.lstrip("/")
@@ -527,6 +530,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/visualization-create":         self._post_visualization_create,
             "/api/visualization-add-to-project": self._post_visualization_add_to_project,
             "/api/visualization-commit-batch":   self._post_visualization_commit_batch,
+            "/api/visualization-preview":          self._post_visualization_preview,
+            "/api/visualization-preview-instance": self._post_visualization_preview_instance,
+            "/api/visualization-generate":         self._post_visualization_generate,
+            "/api/visualization-accept":           self._post_visualization_accept,
             "/api/simulation":                   self._post_simulation,
             "/api/run-tests":          self._post_run_tests,
             "/api/render":             self._post_render,
@@ -998,15 +1005,15 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_visualization(self, body: dict):
-        """Register a visualization in workspace.yaml (v0.4.2: name+description primary path).
+        """Register a visualization in workspace.yaml.
 
-        Body (description-first, v0.4.2):
-            {name, description?}
-        Body (structured, legacy / backward-compat):
-            {name, type, observables, config?, phases?, simulation?}
+        Three entry modes (mutually compatible — combine fields as needed):
+            description-first: {name, description}  → Create → /pbg-viz skill
+            class-backed:      {name, class, config}  → configured instance of
+                               a registered Visualization v2 class
+            structured legacy: {name, type, observables, config?, simulation?}
 
-        Only `name` is required. When `type`/`observables` are omitted the visualization
-        enters the description-first lifecycle (Create → /pbg-viz skill → Add → Commit).
+        Only `name` is required.
         """
         name = (body.get("name") or "").strip()
         if not name:
@@ -1015,10 +1022,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "name must match ^[a-zA-Z0-9_-]+$"}, 400)
 
         description = (body.get("description") or "").strip() or None
+        viz_class = (body.get("class") or "").strip() or None
         viz_type = (body.get("type") or "").strip() or None
         obs_list = body.get("observables") or []
         config = body.get("config") or {}
         simulation_name = (body.get("simulation") or "").strip() or None
+
+        if viz_class:
+            known = {c["name"] for c in self._list_visualization_classes()}
+            if viz_class not in known:
+                return self._json(
+                    {"error": f"class '{viz_class}' is not a registered Visualization. "
+                              f"Available: {sorted(known)}"},
+                    400,
+                )
 
         # Structured path: if type or observables are provided, validate them fully.
         if viz_type or obs_list:
@@ -1070,6 +1087,8 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(existing, dict) and existing.get("name") == name:
                     raise ValueError(f"visualization '{name}' already registered")
             entry: dict = {"name": name}
+            if viz_class:
+                entry["class"] = viz_class
             if description:
                 entry["description"] = description
             if viz_type:
@@ -1293,6 +1312,165 @@ if __name__ == "__main__":
             resp["ok"] = True
             resp["committed"] = moved_names
         return self._json(resp, code)
+
+    def _post_visualization_generate(self, body: dict):
+        """POST /api/visualization-generate {name, description} — write a
+        new-contract viz-request file at .pbg/viz-requests/<name>.md. The
+        /pbg-viz skill consumes the request and writes a decorated function
+        to <workspace_pkg>/visualizations/<snake>.py.
+        """
+        name = (body.get("name") or "").strip()
+        if not name or not re.match(r"^[a-zA-Z0-9_-]+$", name):
+            return self._json({"error": "name must match ^[a-zA-Z0-9_-]+$"}, 400)
+        description = (body.get("description") or "").strip()
+        if not description:
+            return self._json({"error": "description is required"}, 400)
+
+        snake = name.lower().replace("-", "_")
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        target = f"{pkg}/visualizations/{snake}.py"
+
+        observables = ws_data.get("observables") or []
+        simulations = ws_data.get("simulations") or []
+        obs_lines = "\n".join(
+            f'  - `{o.get("name")}` (path: `{o.get("store_path")}`'
+            + (f', units: {o["units"]}' if o.get("units") else "")
+            + ")"
+            for o in observables if isinstance(o, dict)
+        ) or "  (none)"
+        sim_lines = "\n".join(
+            f'  - `{s.get("name")}`: t={s.get("t_start")}->{s.get("t_end")}'
+            for s in simulations if isinstance(s, dict)
+        ) or "  (none)"
+
+        body_md = (
+            f"# Visualization request: {name}\n\n"
+            f"## Description (from user)\n\n"
+            f"{description}\n\n"
+            f"## Workspace context\n\n"
+            f"- Workspace package: `{pkg}`\n"
+            f"- Available observables:\n{obs_lines}\n"
+            f"- Available simulations:\n{sim_lines}\n\n"
+            f"## Instructions for the agent\n\n"
+            f"Write a single function decorated with `@as_visualization` and save it to "
+            f"`{target}`.\n\n"
+            f"Output file structure (the only thing this file should contain):\n\n"
+            f"```python\n"
+            f'"""<class-name> — one-line description.\n\n'
+            f"Generated by /pbg-viz from request '{name}'.\n"
+            f'"""\n'
+            f"from __future__ import annotations\n"
+            f"import html as _html, json\n"
+            f"from pbg_superpowers.visualization import as_visualization\n\n\n"
+            f"@as_visualization(\n"
+            f"    inputs={{'<port>': '<bigraph-type>', ...}},  # typed input ports\n"
+            f"    name='<ClassName>',\n"
+            f"    demo={{...}},                                  # synthetic state for dashboard preview\n"
+            f")\n"
+            f"def update_{snake}(state):\n"
+            f"    # ... build the Plotly figure from state ...\n"
+            f"    return {{'html': '<...Plotly HTML...>'}}\n"
+            f"```\n\n"
+            f"Constraints:\n\n"
+            f"- The function MUST be named `update_{snake}` (snake_case).\n"
+            f"- `inputs` MUST use bigraph-schema type strings: `'list[float]'`, `'float'`, "
+            f"`'list[list[float]]'`, `'string'`. For trajectory ports prefer `'list[float]'`.\n"
+            f"- `demo` MUST be realistic synthetic state matching `inputs` so the dashboard "
+            f"preview is meaningful.\n"
+            f"- Do NOT define a class manually; the decorator synthesizes the Visualization "
+            f"subclass.\n"
+            f"- Do NOT edit `__init__.py` — `bigraph_schema.discover_packages()` walks the "
+            f"package automatically.\n"
+            f"- The file must be self-contained (only `pbg_superpowers`, `process_bigraph`, "
+            f"`html`, `json`, and standard `plotly`/`matplotlib` imports allowed).\n"
+        )
+
+        req_dir = WORKSPACE / ".pbg" / "viz-requests"
+        req_dir.mkdir(parents=True, exist_ok=True)
+        req_path = req_dir / f"{name}.md"
+        req_path.write_text(body_md)
+        return self._json({
+            "ok": True,
+            "request_path": str(req_path),
+            "target_file": target,
+            "skill_command": f"/pbg-viz {name}",
+            "instructions": (
+                "In your active Claude Code session, run `/pbg-viz "
+                f"{name}`. The skill will read this request and write the "
+                "decorated function to the target file. Click Accept here "
+                "when it's done."
+            ),
+        }, 200)
+
+    def _post_visualization_accept(self, body: dict):
+        """POST /api/visualization-accept {name, class_name?} — finalize a
+        generated viz: invalidate the registry cache, verify the file imports
+        cleanly, confirm the class is visible, then commit on the active branch.
+        """
+        name = (body.get("name") or "").strip()
+        class_name = (body.get("class_name") or "").strip()
+        if not name:
+            return self._json({"error": "name is required"}, 400)
+
+        snake = name.lower().replace("-", "_")
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+        target_rel = f"{pkg}/visualizations/{snake}.py"
+        target_abs = WORKSPACE / target_rel
+        if not target_abs.is_file():
+            return self._json({"error": f"generated file not found at {target_rel}"}, 404)
+
+        # Invalidate the module-level registry cache so the next registry
+        # fetch will rebuild from disk.
+        global _REGISTRY_CACHE
+        _REGISTRY_CACHE["data"] = None
+
+        # Attempt a fresh in-process import to verify the file loads cleanly.
+        try:
+            _ws_add_to_sys_path()
+            sys.path.insert(0, str(WORKSPACE))
+            import importlib
+            mod_name = f"{pkg}.visualizations.{snake}"
+            if mod_name in sys.modules:
+                importlib.reload(sys.modules[mod_name])
+            else:
+                __import__(mod_name)
+            # Also reload the visualizations package itself so the new module
+            # is picked up by subsequent _list_visualization_classes calls.
+            pkg_viz_mod = f"{pkg}.visualizations"
+            if pkg_viz_mod in sys.modules:
+                importlib.reload(sys.modules[pkg_viz_mod])
+        except Exception as e:
+            return self._json({
+                "error": f"generated file failed to import: {type(e).__name__}: {e}"
+            }, 500)
+
+        # Verify the class appears in the registry when class_name is supplied.
+        if class_name:
+            try:
+                core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
+                importlib.reload(core_module)
+                core = core_module.build_core()
+                registry = dict(core.link_registry)
+                short_names = {k.split(".")[-1] for k in registry}
+                if class_name not in short_names:
+                    return self._json({
+                        "error": (
+                            f"class {class_name!r} not found in registry after import; "
+                            f"check the @as_visualization name= argument matches"
+                        )
+                    }, 500)
+            except Exception as e:
+                # Registry check failed — don't block the accept; warn instead.
+                pass
+
+        commit_msg = f"feat(viz): generate {class_name or name} via /pbg-viz"
+
+        def action():
+            pass  # file was already written by the skill; git add -A picks it up
+
+        return self._json(*_active_branch_action(commit_msg, action))
 
     def _post_simulation(self, body: dict):
         """Register a simulation in workspace.yaml.
@@ -2442,10 +2620,11 @@ if __name__ == "__main__":
             resp["viz_name"] = viz_name
         return self._json(resp, code)
 
-    def _get_visualization_classes(self):
-        """GET /api/visualization-classes — list registered Visualization classes
-        (the ones that have a render_final method).
-        Returns: [{address, name, doc}, ...]
+    def _list_visualization_classes(self) -> list:
+        """Shared lookup: returns the deduped list of v2 Visualization classes
+        currently registered in this workspace, in the same shape as
+        ``_get_visualization_classes`` returns over HTTP. Used by both that
+        endpoint and the workspace-level Add-Viz validator.
         """
         _ws_add_to_sys_path()
         try:
@@ -2465,19 +2644,323 @@ if __name__ == "__main__":
                 registry[cls.__name__] = cls
         except ImportError:
             pass
+
+        try:
+            from pbg_superpowers.visualization import Visualization as _VizBase
+        except ImportError:
+            _VizBase = None
+
+        def _is_viz(cls):
+            if cls is _VizBase:
+                return False
+            marker = getattr(cls, "is_visualization", None)
+            if callable(marker):
+                try:
+                    if marker() is True:
+                        return True
+                except Exception:
+                    pass
+            if _VizBase is not None:
+                try:
+                    if isinstance(cls, type) and issubclass(cls, _VizBase):
+                        return True
+                except TypeError:
+                    pass
+            return False
+
+        per_cls: dict = {}
+        for name, cls in registry.items():
+            if not _is_viz(cls) or name == "Visualization":
+                continue
+            existing = per_cls.get(id(cls))
+            if existing is None or len(name) < len(existing[0]):
+                per_cls[id(cls)] = (name, cls)
         out = []
-        for name, cls in sorted(registry.items()):
-            if not callable(getattr(cls, "render_final", None)):
-                continue
-            # Skip the base class itself (its render_final is the NotImplementedError stub)
-            if name == "Visualization":
-                continue
+        for name, cls in sorted(per_cls.values(), key=lambda kv: kv[0]):
             try:
                 doc = (cls.__doc__ or "").strip().split("\n", 1)[0] if cls.__doc__ else ""
             except Exception:
                 doc = ""
             out.append({"address": f"local:{name}", "name": name, "doc": doc})
-        return self._json({"classes": out}, 200)
+        return out
+
+    def _get_visualization_classes(self):
+        """GET /api/visualization-classes — list registered Visualization v2 classes.
+
+        Detection: a class is a Visualization if it (a) declares the marker via
+        ``is_visualization()`` returning True, or (b) is a subclass of
+        ``pbg_superpowers.visualization.Visualization``. The v2 base class itself
+        is filtered out.
+        Returns: [{address, name, doc}, ...]
+        """
+        return self._json({"classes": self._list_visualization_classes()}, 200)
+
+    def _get_visualization_instances(self):
+        """GET /api/visualization-instances — list class-backed configured viz
+        instances from workspace.yaml.visualizations (entries with a ``class:`` key).
+
+        Returns: [{name, class, address, config, description?}, ...]
+        """
+        try:
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        except Exception:
+            ws_data = {}
+        out = []
+        for entry in (ws_data.get("visualizations") or []):
+            if not isinstance(entry, dict):
+                continue
+            cls = (entry.get("class") or "").strip()
+            if not cls:
+                continue
+            out.append({
+                "name": entry.get("name"),
+                "class": cls,
+                "address": f"local:{cls}",
+                "config": entry.get("config") or {},
+                "description": entry.get("description") or "",
+            })
+        return self._json({"instances": out}, 200)
+
+    # Synthetic demo states for the 5 built-in pbg-superpowers Visualization
+    # classes. Each key is the class's short name; value is a state dict that
+    # matches the class's declared inputs(). Used when previewing a viz without
+    # real run data, or as a fallback when investigation data is incompatible.
+    _BUILTIN_VIZ_DEMOS = {
+        "TimeSeriesPlot": {
+            "observable": [1.0, 1.4, 2.1, 3.0, 4.2, 5.7, 7.1, 8.0, 8.3, 8.4],
+            "time":       [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5],
+            "_run_labels": ["demo"],
+        },
+        "ParamVsObservable": {
+            "sweep_param_values": [0.1, 0.5, 1.0, 2.0, 5.0],
+            "reduced_observable": [3.0, 7.5, 12.0, 17.5, 21.0],
+        },
+        "Distribution": {
+            "samples": [
+                10.0, 10.3, 10.1, 10.6, 10.4, 10.2, 10.5, 10.9, 10.7, 10.4,
+                10.8, 10.3, 10.5, 11.0, 10.6, 10.2, 10.4, 10.7, 10.5, 10.8,
+            ],
+        },
+        "PhaseSpace": {
+            "x": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 3.0, 2.0, 1.0],
+            "y": [0.0, 0.8, 1.5, 1.8, 1.5, 0.8, 0.0, -0.8, -1.5, -0.8],
+        },
+        "Heatmap": {
+            "x_params": [0.1, 0.5, 1.0, 2.0, 5.0],
+            "y_params": [10.0, 20.0, 30.0],
+            "z_values": [
+                [1.0, 2.0, 3.0, 4.0, 5.0],
+                [2.0, 4.0, 6.0, 8.0, 10.0],
+                [3.0, 6.0, 9.0, 12.0, 15.0],
+            ],
+        },
+    }
+
+    def _resolve_viz_class(self, address: str):
+        """Resolve an 'local:<Name>' address (or bare class name) to the class
+        object. Returns (class_obj, short_name) or (None, None) if not found.
+        """
+        class_key = address.split(":", 1)[1] if ":" in address else address
+        for entry in self._list_visualization_classes():
+            if entry["name"] == class_key or entry["address"] == address:
+                # Re-import to get the actual class (the list endpoint discards it)
+                _ws_add_to_sys_path()
+                try:
+                    ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+                    pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+                    sys.path.insert(0, str(WORKSPACE))
+                    core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
+                    core = core_module.build_core()
+                    registry = dict(core.link_registry)
+                except Exception:
+                    registry = {}
+                try:
+                    from pbg_superpowers.visualizations import (
+                        TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+                    )
+                    for cls in [TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap]:
+                        registry[cls.__name__] = cls
+                except ImportError:
+                    pass
+                cls = registry.get(class_key)
+                if cls is not None:
+                    return cls, class_key
+        return None, None
+
+    def _demo_state_for(self, cls, class_key: str) -> dict:
+        """Return a synthetic state dict for previewing a class.
+
+        Priority: cls.demo() classmethod (user-provided) → built-in demo map →
+        empty dict.
+        """
+        if hasattr(cls, "demo") and callable(getattr(cls, "demo")):
+            try:
+                state = cls.demo()
+                if isinstance(state, dict):
+                    return state
+            except Exception:
+                pass
+        return dict(self._BUILTIN_VIZ_DEMOS.get(class_key, {}))
+
+    def _post_visualization_preview(self, body: dict):
+        """POST /api/visualization-preview — render a viz against demo data or
+        an existing investigation's emitter outputs.
+
+        Body:
+            address: 'local:<Class>' (required) — the Visualization class to render
+            config:  {} — config dict (used for both demo and investigation paths)
+            source:  'demo' | 'investigation:<name>' (default 'demo')
+
+        Returns:
+            {ok, html, source_used, notes}
+        """
+        address = (body.get("address") or "").strip()
+        if not address:
+            return self._json({"error": "address is required"}, 400)
+        config = body.get("config") or {}
+        source = (body.get("source") or "demo").strip()
+
+        cls, class_key = self._resolve_viz_class(address)
+        if cls is None:
+            return self._json({"error": f"class not registered: {address}"}, 404)
+
+        notes = []
+        # Try investigation source first if requested.
+        if source.startswith("investigation:"):
+            inv_name = source.split(":", 1)[1].strip()
+            inv_dir = WORKSPACE / "investigations" / inv_name
+            runs_db = inv_dir / "runs.db"
+            if not runs_db.is_file():
+                notes.append(f"investigation '{inv_name}' has no runs.db; falling back to demo")
+            else:
+                try:
+                    from scripts._lib.investigations import (
+                        gather_emitter_outputs, build_viz_composite,
+                    )
+                    gathered = gather_emitter_outputs(runs_db)
+                    viz_spec = {
+                        "name": "preview", "address": address,
+                        "config": dict(config),
+                    }
+                    registry = {class_key: cls}
+                    doc = build_viz_composite(viz_spec, gathered, registry)
+                    inst = cls.__new__(cls)
+                    inst.config = config or {}
+                    html = inst.update(dict(doc.get("inputs_store") or {})).get("html", "")
+                    if html:
+                        return self._json({
+                            "ok": True, "html": html,
+                            "source_used": f"investigation:{inv_name}",
+                            "notes": "; ".join(notes),
+                        }, 200)
+                    notes.append("investigation render produced empty html; falling back to demo")
+                except Exception as e:
+                    notes.append(f"investigation render failed ({type(e).__name__}: {e}); falling back to demo")
+
+        # Demo path (default or fallback).
+        try:
+            state = self._demo_state_for(cls, class_key)
+            inst = cls.__new__(cls)
+            inst.config = config or {}
+            html = inst.update(state).get("html", "")
+            if not html:
+                html = f'<p style="color:#991b1b">{class_key}: empty render (no demo data?)</p>'
+            return self._json({
+                "ok": True, "html": html, "source_used": "demo",
+                "notes": "; ".join(notes),
+            }, 200)
+        except Exception as e:
+            return self._json({
+                "ok": False,
+                "html": f'<p style="color:#991b1b">demo render failed: {type(e).__name__}: {e}</p>',
+                "source_used": "demo",
+                "notes": "; ".join(notes),
+            }, 200)
+
+    def _post_visualization_preview_instance(self, body: dict):
+        """POST /api/visualization-preview-instance — preview a registered
+        workspace.yaml instance by name. Looks up the instance's class + config
+        and delegates to _post_visualization_preview.
+
+        Body: {name, source?}
+        """
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._json({"error": "name is required"}, 400)
+        try:
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        except Exception:
+            ws_data = {}
+        entry = next(
+            (v for v in (ws_data.get("visualizations") or [])
+             if isinstance(v, dict) and v.get("name") == name),
+            None,
+        )
+        if not entry:
+            return self._json({"error": f"visualization '{name}' not registered"}, 404)
+        cls = (entry.get("class") or "").strip()
+        if not cls:
+            # Description-only entry — there's no class to render against demo
+            # data. Show a friendly stub instead of erroring out, so the user
+            # sees what's there and what to do next.
+            desc = entry.get("description") or "(no description)"
+            resp_path = WORKSPACE / ".pbg" / "viz-responses" / f"{name}.py"
+            req_path = WORKSPACE / ".pbg" / "viz-requests" / f"{name}.md"
+            if resp_path.is_file():
+                status_block = (
+                    '<p style="margin:8px 0;color:#1f7a3a">'
+                    '<strong>Code generated</strong> at <code>.pbg/viz-responses/'
+                    + name + '.py</code>. '
+                    'It hasn\'t been added to the project yet — use the '
+                    '<strong>Add to project</strong> button on this row to stage it.'
+                    '</p>'
+                )
+            elif req_path.is_file():
+                status_block = (
+                    '<p style="margin:8px 0;color:#b45309">'
+                    '<strong>Request pending</strong>. A <code>/pbg-viz</code> request '
+                    'has been written to <code>.pbg/viz-requests/' + name + '.md</code> '
+                    'but no response file exists yet.<br>'
+                    'In your Claude Code session, run <code>/pbg-viz ' + name + '</code> '
+                    'and wait for it to write <code>.pbg/viz-responses/' + name + '.py</code>.'
+                    '</p>'
+                )
+            else:
+                status_block = (
+                    '<p style="margin:8px 0;color:#555">'
+                    'This is a <strong>description-only</strong> visualization — '
+                    'no class is configured and no code has been generated yet. '
+                    'To make it renderable:'
+                    '<ol style="margin:6px 0 0 18px">'
+                    '<li>Click <strong>Create</strong> on this row to write a '
+                    '<code>/pbg-viz</code> request.</li>'
+                    '<li>In your Claude Code session, run <code>/pbg-viz '
+                    + name + '</code>.</li>'
+                    '<li>When the skill writes <code>.pbg/viz-responses/'
+                    + name + '.py</code>, click <strong>Add to project</strong>, '
+                    'then <strong>Commit</strong>.</li>'
+                    '<li>Or — easier — re-register this entry with a '
+                    '<strong>Class</strong> picked from the catalog and a '
+                    'Config dict; that path doesn\'t need code generation.</li>'
+                    '</ol>'
+                    '</p>'
+                )
+            stub_html = (
+                '<div style="font-family:system-ui,sans-serif;padding:8px;color:#222">'
+                '<h3 style="margin:0 0 8px">' + name + '</h3>'
+                '<p style="margin:0 0 8px;color:#444"><em>' + _html.escape(desc) + '</em></p>'
+                + status_block +
+                '</div>'
+            )
+            return self._json({
+                "ok": True, "html": stub_html, "source_used": "stub",
+                "notes": "description-only entry; nothing to render against demo data",
+            }, 200)
+        return self._post_visualization_preview({
+            "address": f"local:{cls}",
+            "config": entry.get("config") or {},
+            "source": (body.get("source") or "demo"),
+        })
 
     def _post_investigation_run_delete(self, body: dict):
         """POST /api/investigation-run-delete {investigation, run_id} — delete one run from runs.db."""
