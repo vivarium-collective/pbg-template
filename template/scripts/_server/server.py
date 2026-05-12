@@ -540,6 +540,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_visualization_instances()
         if self.path.startswith("/api/visualization-classes"):
             return self._get_visualization_classes()
+        # Serve the bundled loom-explore viewer.
+        if self.path.startswith("/loom-explore"):
+            rel = self.path[len("/loom-explore"):].lstrip("/") or "index.html"
+            if ".." in rel.split("/"):
+                self.send_response(403); self.end_headers(); return
+            target = WORKSPACE / "scripts" / "_assets" / "loom-explore" / rel
+            return self._serve_file(target, self._guess_mime(rel))
+
         rel = self.path.lstrip("/")
         # Refuse path traversal and absolute paths.
         if ".." in rel.split("/") or rel.startswith("/"):
