@@ -1404,6 +1404,94 @@
   }
   window._ceClearCompareSelection = _ceClearCompareSelection;
 
+  // ─── Compare tab ──────────────────────────────────────────────────────
+  var _CE_COMPARE_PALETTE = ['#6366f1', '#10b981', '#f43f5e', '#f59e0b',
+                              '#8b5cf6', '#06b6d4', '#84cc16', '#ec4899'];
+
+  function _ceRenderCompare() {
+    var ids = Array.from(window._ceCompareSet);
+    if (ids.length < 2) return;
+    var body = document.getElementById('ce-compare-body');
+    body.innerHTML = '<p class="empty-state">Loading&hellip;</p>';
+    Promise.all(ids.map(function(id) {
+      return fetch('/api/composite-run/' + encodeURIComponent(id))
+        .then(function(r) { return r.json(); });
+    })).then(function(results) {
+      var runs = ids.map(function(id, i) {
+        return { run_id: id, meta: window._ceRuns[id] || {},
+                  trajectory: results[i].trajectory || [],
+                  color: _CE_COMPARE_PALETTE[i % _CE_COMPARE_PALETTE.length] };
+      });
+
+      // Find observable keys (numeric leaves) across all trajectories
+      var observables = {};
+      runs.forEach(function(run) {
+        run.trajectory.forEach(function(point) {
+          Object.keys(point.state || {}).forEach(function(k) {
+            var v = point.state[k];
+            if (typeof v === 'number') observables[k] = true;
+          });
+        });
+      });
+      var obsList = Object.keys(observables);
+
+      // Legend
+      var legend = '<div class="ce-compare-legend">' + runs.map(function(run) {
+        return '<span><span class="swatch" style="background:' + run.color + '"></span>' +
+                _esc(run.meta.label || run.run_id.slice(-12)) + '</span>';
+      }).join('') + '</div>';
+
+      // One chart div per observable
+      var chartContainers = obsList.map(function(k) {
+        return '<div id="ce-cmp-' + _esc(k) + '" style="height:280px;margin-bottom:12px"></div>';
+      }).join('');
+
+      // Param diff table
+      var allKeys = new Set();
+      runs.forEach(function(run) {
+        Object.keys(run.meta.params || {}).forEach(function(k) { allKeys.add(k); });
+      });
+      var paramKeys = Array.from(allKeys);
+      var diffHead = '<tr><th>parameter</th>' + runs.map(function(run) {
+        return '<th style="border-bottom:3px solid ' + run.color + '">' +
+                _esc(run.meta.label || run.run_id.slice(-12)) + '</th>';
+      }).join('') + '</tr>';
+      var diffRows = paramKeys.map(function(k) {
+        var values = runs.map(function(run) { return (run.meta.params || {})[k]; });
+        var uniq = new Set(values.map(function(v) { return JSON.stringify(v); }));
+        var differs = uniq.size > 1;
+        return '<tr><td><code>' + _esc(k) + '</code></td>' +
+                values.map(function(v) {
+                  return '<td' + (differs ? ' class="differs"' : '') + '>' +
+                          _esc(String(v === undefined ? '—' : v)) + '</td>';
+                }).join('') + '</tr>';
+      }).join('');
+      var diffTable = '<table class="ce-diff-table"><thead>' + diffHead +
+                      '</thead><tbody>' + diffRows + '</tbody></table>';
+
+      body.innerHTML = legend + chartContainers + diffTable;
+
+      // Plot each observable
+      obsList.forEach(function(k) {
+        var traces = runs.map(function(run) {
+          var times = run.trajectory.map(function(p) { return p.time; });
+          var ys = run.trajectory.map(function(p) { return p.state[k]; });
+          return { x: times, y: ys, type: 'scatter', mode: 'lines',
+                    name: run.meta.label || run.run_id.slice(-12),
+                    line: { color: run.color, width: 2 } };
+        });
+        Plotly.newPlot('ce-cmp-' + k, traces, {
+          title: { text: k, font: { size: 13 } },
+          margin: { l: 55, r: 15, t: 35, b: 40 },
+          showlegend: false,
+        }, { responsive: true, displayModeBar: false });
+      });
+    }).catch(function(err) {
+      body.innerHTML = '<span style="color:#c00">Failed to fetch runs: ' + _esc(String(err)) + '</span>';
+    });
+  }
+  window._ceRenderCompare = _ceRenderCompare;
+
   function _ceFetch() {
     var url = '/api/composite-resolve?id=' + encodeURIComponent(window._ceCurrent.id) +
       '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
