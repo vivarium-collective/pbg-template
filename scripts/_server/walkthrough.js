@@ -1492,6 +1492,106 @@
   }
   window._ceRenderCompare = _ceRenderCompare;
 
+  // ─── State tab ────────────────────────────────────────────────────────
+  window._ceTrajectoryCache = {};  // run_id → trajectory array
+
+  function _ceLoadState(run_id, step) {
+    var cached = window._ceTrajectoryCache[run_id];
+    if (cached) {
+      _ceShowState(run_id, step, cached);
+      return;
+    }
+    fetch('/api/composite-run/' + encodeURIComponent(run_id))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var trajectory = data.trajectory || [];
+        window._ceTrajectoryCache[run_id] = trajectory;
+        _ceShowState(run_id, step, trajectory);
+      })
+      .catch(function(err) {
+        var tree = document.getElementById('ce-state-tree');
+        if (tree) tree.innerHTML = '<span style="color:#c00">Failed to fetch run: ' + _esc(String(err)) + '</span>';
+      });
+  }
+  window._ceLoadState = _ceLoadState;
+
+  function _ceShowState(run_id, step, trajectory) {
+    var ctrls = document.getElementById('ce-state-controls');
+    var tree = document.getElementById('ce-state-tree');
+    var actions = document.getElementById('ce-state-actions');
+    if (!trajectory.length) {
+      ctrls.innerHTML = '<p class="empty-state">No state recorded for this run.</p>';
+      tree.innerHTML = '';
+      actions.style.display = 'none';
+      return;
+    }
+    var maxStep = trajectory.length - 1;
+    var safeStep = Math.max(0, Math.min(step, maxStep));
+    ctrls.innerHTML =
+      '<label>run: <code>' + _esc(run_id) + '</code></label>' +
+      '<br><label>step: <input type="range" id="ce-state-slider" min="0" max="' +
+        maxStep + '" value="' + safeStep + '"' +
+        ' oninput="_ceShowState(\'' + _esc(run_id) + '\', parseInt(this.value), window._ceTrajectoryCache[\'' + _esc(run_id) + '\'])"></label> ' +
+      '<span id="ce-state-step-val">step ' + safeStep + ' of ' + maxStep + '</span>';
+    document.getElementById('ce-state-step-label').textContent = safeStep;
+    var pt = trajectory[safeStep];
+    tree.innerHTML = '';
+    _ceRenderStateTree(pt && pt.state || {}, tree, 0);
+    actions.style.display = '';
+    window._ceCurrentStateForSnapshot = pt && pt.state || {};
+  }
+  window._ceShowState = _ceShowState;
+
+  function _ceRenderStateTree(obj, container, depth) {
+    var node = _ceRenderJSON(obj, depth);
+    if (typeof node === 'string') container.innerHTML = node;
+    else { container.innerHTML = ''; container.appendChild(node); }
+  }
+  window._ceRenderStateTree = _ceRenderStateTree;
+
+  function _ceRenderJSON(obj, depth) {
+    if (obj === null) return '<span class="ce-jt-null">null</span>';
+    if (typeof obj === 'boolean') return '<span class="ce-jt-bool">' + obj + '</span>';
+    if (typeof obj === 'number') return '<span class="ce-jt-num">' + obj + '</span>';
+    if (typeof obj === 'string') return '<span class="ce-jt-str">"' + _esc(obj) + '"</span>';
+    if (Array.isArray(obj)) {
+      if (obj.length === 0) return '<span class="ce-jt-bracket">[]</span>';
+      if (depth >= 5) return '<span class="ce-jt-bracket">[…' + obj.length + ' items]</span>';
+      var id = 'ce-jt-' + Math.random().toString(36).slice(2, 9);
+      var html = '<span class="ce-jt-toggle" onclick="_ceToggleJt(\'' + id + '\')">&blacktriangledown;</span>';
+      html += '<span class="ce-jt-bracket">[</span><span style="color:#94a3b8;font-size:0.85em"> ' + obj.length + ' items</span>';
+      html += '<div id="' + id + '" style="margin-left:1.2em">';
+      obj.forEach(function(v, i) {
+        html += '<div>' + _ceRenderJSON(v, depth + 1) + (i < obj.length - 1 ? ',' : '') + '</div>';
+      });
+      html += '</div><span class="ce-jt-bracket">]</span>';
+      return html;
+    }
+    if (typeof obj === 'object') {
+      var keys = Object.keys(obj);
+      if (keys.length === 0) return '<span class="ce-jt-bracket">{}</span>';
+      if (depth >= 5) return '<span class="ce-jt-bracket">{…' + keys.length + ' keys}</span>';
+      var id = 'ce-jt-' + Math.random().toString(36).slice(2, 9);
+      var html = '<span class="ce-jt-toggle" onclick="_ceToggleJt(\'' + id + '\')">&blacktriangledown;</span>';
+      html += '<span class="ce-jt-bracket">{</span>';
+      html += '<div id="' + id + '" style="margin-left:1.2em">';
+      keys.forEach(function(k, i) {
+        html += '<div><span class="ce-jt-key">' + _esc(k) + '</span>: ' +
+                _ceRenderJSON(obj[k], depth + 1) + (i < keys.length - 1 ? ',' : '') + '</div>';
+      });
+      html += '</div><span class="ce-jt-bracket">}</span>';
+      return html;
+    }
+    return String(obj);
+  }
+
+  function _ceToggleJt(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('ce-jt-collapsed');
+  }
+  window._ceToggleJt = _ceToggleJt;
+
   function _ceFetch() {
     var url = '/api/composite-resolve?id=' + encodeURIComponent(window._ceCurrent.id) +
       '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
