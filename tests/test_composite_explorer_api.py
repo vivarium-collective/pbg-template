@@ -4,6 +4,7 @@ Spins up the dashboard server in-process against a fixture workspace and
 exercises POST /api/composite-test-run and the three new GET endpoints.
 """
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -28,7 +29,7 @@ def _free_port() -> int:
 
 
 @pytest.fixture
-def server(tmp_path, monkeypatch):
+def server(tmp_path):
     """Render a tiny fixture workspace and start the dashboard server."""
     if not FIXTURE_WORKSPACE.is_dir():
         pytest.skip(f"Fixture workspace not present at {FIXTURE_WORKSPACE}")
@@ -36,13 +37,14 @@ def server(tmp_path, monkeypatch):
     import shutil
     ws = tmp_path / "ws"
     shutil.copytree(FIXTURE_WORKSPACE, ws)
-    # The server imports scripts._lib from WORKSPACE; copy scripts/ from repo root.
-    shutil.copytree(_REPO_ROOT / "scripts", ws / "scripts")
     port = _free_port()
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(_REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.Popen(
         [sys.executable, str(_REPO_ROOT / "scripts" / "_server" / "server.py"),
          "--workspace", str(ws), "--port", str(port)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env,
     )
     # Wait for the server-info file to appear (server writes it on bind)
     info_path = ws / ".pbg" / "server" / "server-info"
@@ -57,7 +59,11 @@ def server(tmp_path, monkeypatch):
                     f"stderr:\n{err.decode()}")
     yield {"url": f"http://127.0.0.1:{port}", "ws": ws}
     proc.terminate()
-    proc.wait(timeout=5)
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
 
 
 def _post(url, payload):
@@ -101,6 +107,15 @@ def test_list_runs_includes_the_persisted_run(server):
     assert len(runs) >= 1
     assert runs[0]["status"] == "completed"
     assert runs[0]["n_steps"] >= 1
+    # Verify the run actually produced trajectory rows in the SQLiteEmitter's table.
+    import sqlite3
+    db_path = server["ws"] / ".pbg" / "composite-runs.db"
+    with sqlite3.connect(str(db_path)) as c:
+        n = c.execute(
+            "SELECT COUNT(*) FROM history WHERE simulation_id=?",
+            (runs[0]["run_id"],),
+        ).fetchone()[0]
+    assert n >= 1, "expected SQLiteEmitter to have written history rows"
 
 
 def test_fetch_single_run_trajectory(server):

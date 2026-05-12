@@ -8,7 +8,7 @@ if str(_SCRIPTS_PARENT) not in sys.path:
 
 from scripts._lib.composite_runs import (
     connect, save_metadata, complete_metadata, query_runs, query_run,
-    inject_sqlite_emitter,
+    inject_sqlite_emitter, auto_label,
 )
 
 
@@ -153,3 +153,17 @@ def test_inject_sqlite_emitter_accepts_path(tmp_path):
     state = _example_state_with_emitter()
     out = inject_sqlite_emitter(state, run_id="r1", db_file=tmp_path / "x.db")
     assert isinstance(out["_sqlite_emitter"]["config"]["db_file"], str)
+
+
+def test_auto_label_empty():
+    assert auto_label({}) == "defaults"
+
+
+def test_auto_label_sorted_concat():
+    assert auto_label({"b": 2, "a": 1}) == "a=1, b=2"
+
+
+def test_auto_label_truncated_to_80():
+    overrides = {f"k{i}": i for i in range(50)}
+    out = auto_label(overrides)
+    assert len(out) <= 80

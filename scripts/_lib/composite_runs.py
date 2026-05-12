@@ -146,6 +146,19 @@ def query_run_state(conn: sqlite3.Connection, *, run_id: str,
         return None
 
 
+def auto_label(overrides: dict) -> str:
+    """Build a short human-readable label from non-default override values.
+
+    Returns ``'defaults'`` when *overrides* is empty, otherwise a
+    comma-separated ``key=value`` string of the sorted items, truncated to 80
+    characters so it fits neatly in the dashboard.
+    """
+    if not overrides:
+        return "defaults"
+    parts = [f"{k}={v}" for k, v in sorted(overrides.items())]
+    return ", ".join(parts)[:80]
+
+
 def inject_sqlite_emitter(state: dict, *, run_id: str,
                           db_file: str | Path) -> dict:
     """Return a copy of `state` with a SQLiteEmitter step appended.

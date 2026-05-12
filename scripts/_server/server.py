@@ -27,6 +27,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -2228,10 +2229,11 @@ if __name__ == "__main__":
         from scripts._lib.composite_lookup import substitute_parameters, find_composite_path
         from scripts._lib import composite_runs as cr
 
+        from scripts._lib.composite_runs import auto_label
         spec_id = (body.get("id") or "").strip()
         overrides = body.get("overrides") or {}
         steps = int(body.get("steps") or 5)
-        label = (body.get("label") or "").strip() or _auto_label(overrides)
+        label = (body.get("label") or "").strip() or auto_label(overrides)
 
         if not spec_id:
             return self._json({"error": "missing id"}, 400)
@@ -2283,41 +2285,50 @@ if __name__ == "__main__":
         # the run_id includes a fresh timestamp so duplicates are unexpected.
         conn = cr.connect(db_file)
         try:
-            cr.save_metadata(conn, spec_id=spec_id, run_id=run_id,
-                              params=overrides, label=label,
-                              started_at=time.time())
-        except sqlite3.IntegrityError:
-            return self._json({
-                "simulation_id": run_id,
-                "error": "duplicate run_id (rare timing collision) — retry",
-            }, 500)
+            try:
+                cr.save_metadata(conn, spec_id=spec_id, run_id=run_id,
+                                  params=overrides, label=label,
+                                  started_at=time.time())
+            except sqlite3.IntegrityError:
+                return self._json({
+                    "simulation_id": run_id,
+                    "error": "duplicate run_id (rare timing collision) — retry",
+                }, 500)
 
-        try:
-            result = subprocess.run([py, "-c", script], cwd=WORKSPACE,
-                                     capture_output=True, text=True, timeout=120)
-        except subprocess.TimeoutExpired:
-            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
-            return self._json({"simulation_id": run_id,
-                                "error": "test run timed out"}, 200)
+            try:
+                result = subprocess.run([py, "-c", script], cwd=WORKSPACE,
+                                         capture_output=True, text=True, timeout=120)
+            except subprocess.TimeoutExpired as exc:
+                try:
+                    if exc.process is not None:
+                        exc.process.kill()
+                        exc.process.communicate(timeout=2)
+                except Exception:
+                    pass
+                cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+                return self._json({"simulation_id": run_id,
+                                    "error": "test run timed out"}, 504)
 
-        out = result.stdout
-        if "@@@ERROR@@@" in out:
-            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
-            traceback_text = out.split("@@@ERROR@@@", 1)[1].strip()
-            return self._json({"simulation_id": run_id, "error": "run failed",
-                                "traceback": traceback_text}, 200)
+            out = result.stdout
+            if "@@@ERROR@@@" in out:
+                cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+                traceback_text = out.split("@@@ERROR@@@", 1)[1].strip()
+                return self._json({"simulation_id": run_id, "error": "run failed",
+                                    "traceback": traceback_text}, 502)
 
-        try:
-            results = json.loads(out.split("@@@RESULTS@@@", 1)[1].strip())
-        except (IndexError, json.JSONDecodeError):
-            cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
-            return self._json({"simulation_id": run_id,
-                                "error": "could not parse run output",
-                                "stdout": out, "stderr": result.stderr}, 200)
+            try:
+                results = json.loads(out.split("@@@RESULTS@@@", 1)[1].strip())
+            except (IndexError, json.JSONDecodeError):
+                cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+                return self._json({"simulation_id": run_id,
+                                    "error": "could not parse run output",
+                                    "stdout": out, "stderr": result.stderr}, 502)
 
-        cr.complete_metadata(conn, run_id=run_id, n_steps=steps, status="completed")
-        return self._json({"simulation_id": run_id, "results": results,
-                            "steps": steps}, 200)
+            cr.complete_metadata(conn, run_id=run_id, n_steps=steps, status="completed")
+            return self._json({"simulation_id": run_id, "results": results,
+                                "steps": steps}, 200)
+        finally:
+            conn.close()
 
     def _get_catalog(self):
         """GET /api/catalog — return the curated module catalog with installed annotations."""
@@ -2706,14 +2717,6 @@ def _ws_add_to_sys_path() -> None:
         sys.path.insert(0, scripts_parent)
 
 
-def _auto_label(overrides: dict) -> str:
-    """Build a short human label from non-default override values."""
-    if not overrides:
-        return "defaults"
-    parts = [f"{k}={v}" for k, v in sorted(overrides.items())]
-    return ", ".join(parts)[:80]
-
-
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -2730,9 +2733,14 @@ def main():
     # Write server-info so tests and other tools can detect the server is ready.
     info_dir = WORKSPACE / ".pbg" / "server"
     info_dir.mkdir(parents=True, exist_ok=True)
-    (info_dir / "server-info").write_text(
-        json.dumps({"port": args.port, "pid": __import__("os").getpid()})
-    )
+    (info_dir / "server-info").write_text(json.dumps({
+        "port": args.port,
+        "host": "127.0.0.1",
+        "url": f"http://127.0.0.1:{args.port}",
+        "pid": os.getpid(),
+        "screen_dir": str(info_dir / "content"),
+        "state_dir": str(info_dir / "state"),
+    }))
     srv.serve_forever()
 
 
