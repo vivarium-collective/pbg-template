@@ -480,6 +480,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_composite_runs()
         if self.path.startswith("/api/composite-resolve"):
             return self._get_composite_resolve()
+        if self.path.startswith("/api/investigation/"):
+            return self._get_investigation_detail()
         if self.path.startswith("/api/investigations"):
             return self._get_investigations()
         if self.path.startswith("/api/composites"):
@@ -2246,6 +2248,63 @@ if __name__ == "__main__":
             return self._json({"error": "state not found for run+step"}, 404)
         return self._json({"run_id": run_id, "step": step,
                             "state": state}, 200)
+
+    def _get_investigation_detail(self):
+        """GET /api/investigation/<name> — full spec + viz file paths + runs summary."""
+        _ws_add_to_sys_path()
+        from scripts._lib.investigations import load_spec, InvestigationSpecError
+        from scripts._lib import composite_runs as cr
+
+        path_only = self.path.split("?", 1)[0]
+        rest = path_only[len("/api/investigation/"):]
+        if "/" in rest or not rest:
+            return self._json({"error": "bad route"}, 400)
+        name = rest
+
+        inv_dir = WORKSPACE / "investigations" / name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+        try:
+            spec = load_spec(spec_path)
+        except InvestigationSpecError as e:
+            return self._json({"error": str(e), "name": name, "status": "invalid"}, 200)
+
+        viz_dir = inv_dir / "viz"
+        viz_files = []
+        if viz_dir.is_dir():
+            for v in sorted(viz_dir.glob("*.html")):
+                viz_files.append({"name": v.stem, "path": str(v.relative_to(WORKSPACE))})
+
+        runs_summary = []
+        db = inv_dir / "runs.db"
+        if db.is_file():
+            conn = cr.connect(db)
+            try:
+                rows = conn.execute(
+                    "SELECT run_id, sim_name, label, params_json, status, n_steps "
+                    "FROM runs_meta ORDER BY started_at DESC"
+                ).fetchall()
+                for r in rows:
+                    import json as _j
+                    try:
+                        params = _j.loads(r["params_json"] or "{}")
+                    except _j.JSONDecodeError:
+                        params = {}
+                    runs_summary.append({
+                        "run_id": r["run_id"], "sim_name": r["sim_name"] or "",
+                        "label": r["label"] or "", "params": params,
+                        "status": r["status"], "n_steps": r["n_steps"] or 0,
+                    })
+            finally:
+                conn.close()
+
+        return self._json({
+            "name": name,
+            "spec": spec,
+            "viz_files": viz_files,
+            "runs_summary": runs_summary,
+        }, 200)
 
     def _get_investigations(self):
         """GET /api/investigations — return summaries of all investigations."""
