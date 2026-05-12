@@ -1291,6 +1291,37 @@
   }
   window._initCompositeExplorer = _initCompositeExplorer;
 
+  function _ceSwitchTab(tab) {
+    document.querySelectorAll('.ce-tab').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    document.querySelectorAll('.ce-tab-panel').forEach(function(p) {
+      p.classList.toggle('active', p.dataset.tab === tab);
+    });
+    // Lazy-load each tab's content on first switch
+    if (tab === 'history' && !window._ceHistoryLoaded) {
+      window._ceHistoryLoaded = true;
+      if (typeof _ceLoadHistory === 'function') _ceLoadHistory();
+    }
+    if (tab === 'compare' && window._ceCompareSet && window._ceCompareSet.size >= 2) {
+      if (typeof _ceRenderCompare === 'function') _ceRenderCompare();
+    }
+  }
+  window._ceSwitchTab = _ceSwitchTab;
+
+  function _ceOpenPopout() {
+    if (!window._ceCurrent || !window._ceCurrent.id) return;
+    var url = location.pathname + '?focus=composite-explore&id=' +
+              encodeURIComponent(window._ceCurrent.id);
+    var w = window.open(url, '_blank', 'width=1200,height=900');
+    if (!w) {
+      // Popup blocked — same-tab fallback
+      window.location.search = '?focus=composite-explore&id=' +
+                                encodeURIComponent(window._ceCurrent.id);
+    }
+  }
+  window._ceOpenPopout = _ceOpenPopout;
+
   function _ceFetch() {
     var url = '/api/composite-resolve?id=' + encodeURIComponent(window._ceCurrent.id) +
       '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
