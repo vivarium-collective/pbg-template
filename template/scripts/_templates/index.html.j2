@@ -550,6 +550,50 @@
   </div>
 </div>
 
+<!-- Modal: Investigation — Add composite from Registry -->
+<div id="modal-inv-add-composite" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-inv-add-composite')">&times;</button>
+    <h3>Add composite from Registry</h3>
+    <form id="form-inv-add-composite"
+          onsubmit="event.preventDefault(); _submitAddComposite(this)">
+      <label>Composite (workspace catalog)
+        <select name="source" id="inv-add-composite-source" required></select>
+      </label>
+      <label>Name in this study
+        <input name="name" pattern="^[a-zA-Z0-9_-]+$" required placeholder="baseline">
+      </label>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Add</button>
+    </form>
+  </div>
+</div>
+
+<!-- Modal: Investigation — Perturb composite -->
+<div id="modal-inv-perturb" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-inv-perturb')">&times;</button>
+    <h3>Perturb composite</h3>
+    <form id="form-inv-perturb"
+          onsubmit="event.preventDefault(); _submitPerturb(this)">
+      <input type="hidden" name="extends">
+      <label>New composite name
+        <input name="name" pattern="^[a-zA-Z0-9_-]+$" required placeholder="high-rate">
+      </label>
+      <label>Parameter overrides (JSON; dotted-path keys)
+        <textarea name="parameter_overrides" rows="3"
+                  placeholder='{"state.replication.config.rate": 2.0}'></textarea>
+      </label>
+      <label>Process overrides (JSON; null to remove, str for new address, dict for both)
+        <textarea name="process_overrides" rows="3"
+                  placeholder='{"replication": null}'></textarea>
+      </label>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Perturb</button>
+    </form>
+  </div>
+</div>
+
 <!-- ===== PAGE: BRANCHES ===== -->
 <section id="page-branches" class="page" data-page="branches">
   <h2 class="page-title">Branches</h2>

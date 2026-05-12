@@ -2273,6 +2273,7 @@
   window._submitInvestigationCreate = _submitInvestigationCreate;
 
   function _openInvestigation(name) {
+    window._currentInvestigation = name;
     var detail = document.getElementById('investigation-detail');
     detail.style.display = '';
     detail.innerHTML = '<p class="empty-state">Loading…</p>';
@@ -2314,6 +2315,7 @@
         '<button class="investigation-detail-tab active" data-tab="spec" onclick="_invDetailTab(\'spec\')">Spec</button>' +
         '<button class="investigation-detail-tab" data-tab="runs" onclick="_invDetailTab(\'runs\')">Runs (' + runs.length + ')</button>' +
         '<button class="investigation-detail-tab" data-tab="viz" onclick="_invDetailTab(\'viz\')">Visualizations (' + vizFiles.length + ')</button>' +
+        '<button class="investigation-detail-tab" data-tab="composites" onclick="_invDetailTab(\'composites\')">Composites</button>' +
       '</div>' +
       '<div class="investigation-detail-panel active" data-tab="spec">' +
         '<pre class="spec-yaml-pre">' + _esc(JSON.stringify(spec, null, 2)) + '</pre>' +
@@ -2332,6 +2334,15 @@
             'Click <em>Add visualization</em> to scaffold one, or edit ' +
             '<code>investigations/' + _esc(name) + '/spec.yaml</code> directly and click <em>Run</em>.</p>' +
           '<button class="action-btn" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>') +
+      '</div>' +
+      '<div class="investigation-detail-panel" data-tab="composites">' +
+        '<div style="margin-bottom:8px">' +
+          '<button class="action-btn" onclick="_openAddCompositeModal()">+ Add composite</button>' +
+        '</div>' +
+        '<div id="inv-composites-list" style="display:grid;grid-template-columns:220px 1fr;gap:16px">' +
+          '<div id="inv-composites-sidebar"></div>' +
+          '<div id="inv-composite-detail" style="border-left:1px solid #eee;padding-left:14px"></div>' +
+        '</div>' +
       '</div>';
   }
 
@@ -2342,8 +2353,211 @@
     document.querySelectorAll('.investigation-detail-panel').forEach(function(p) {
       p.classList.toggle('active', p.dataset.tab === tab);
     });
+    if (tab === 'composites' && window._currentInvestigation) {
+      _loadInvComposites(window._currentInvestigation);
+    }
   }
   window._invDetailTab = _invDetailTab;
+
+  // ── Investigation Composites tab handlers ─────────────────────────────────
+
+  function _loadInvComposites(invName) {
+    fetch('/api/investigation-composites?investigation=' + encodeURIComponent(invName))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var sidebar = document.getElementById('inv-composites-sidebar');
+        if (!sidebar) return;
+        var entries = data.composites || [];
+        if (entries.length === 0) {
+          sidebar.innerHTML = '<p class="empty-state">No composites yet — click + Add composite.</p>';
+          document.getElementById('inv-composite-detail').innerHTML = '';
+          return;
+        }
+        sidebar.innerHTML = entries.map(function(c) {
+          var subtitle = c.extends
+            ? '<small>extends <code>' + _esc(c.extends) + '</code></small>'
+            : '<small>' + _esc(c.source || '') + '</small>';
+          return '<div class="inv-composite-row" style="padding:6px;border-bottom:1px solid #eee;cursor:pointer"' +
+                 ' onclick="_loadInvCompositeDetail(\'' + _esc(invName) + '\',\'' + _esc(c.name) + '\')">' +
+                 '<strong>' + _esc(c.name) + '</strong><br>' + subtitle +
+                 '<div style="margin-top:4px">' +
+                 '<button class="btn-mini" onclick="event.stopPropagation();_openPerturbModal(\'' +
+                   _esc(invName) + '\',\'' + _esc(c.name) + '\')">Perturb</button>' +
+                 (c.extends
+                   ? '<button class="btn-mini" onclick="event.stopPropagation();_rebuildComposite(\'' +
+                     _esc(invName) + '\',\'' + _esc(c.name) + '\')">Rebuild</button>'
+                   : '') +
+                 '<button class="btn-mini" style="color:#c00" onclick="event.stopPropagation();_removeComposite(\'' +
+                   _esc(invName) + '\',\'' + _esc(c.name) + '\')">Remove</button>' +
+                 '</div></div>';
+        }).join('');
+        // Auto-load first composite's detail
+        _loadInvCompositeDetail(invName, entries[0].name);
+      });
+  }
+  window._loadInvComposites = _loadInvComposites;
+
+  function _loadInvCompositeDetail(invName, compName) {
+    fetch('/api/investigation-state-tree?investigation=' + encodeURIComponent(invName) +
+          '&composite=' + encodeURIComponent(compName))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var detail = document.getElementById('inv-composite-detail');
+        if (!detail) return;
+        var lines = (data.nodes || []).map(function(n) {
+          var pathStr = (n.path || []).join('.');
+          if (n.kind === 'process') {
+            return '<div><strong>' + _esc(pathStr) + '</strong> ' +
+                   '<small style="color:#666">process — <code>' + _esc(n.address || '') + '</code></small></div>';
+          }
+          var def = n.default;
+          var defStr = '';
+          try { defStr = JSON.stringify(def); } catch(e) { defStr = String(def); }
+          return '<div style="padding-left:16px">' + _esc(pathStr) +
+                 ' <small style="color:#888">' + _esc(n.type || '') +
+                 (def !== undefined ? ' = ' + _esc(defStr) : '') +
+                 '</small></div>';
+        }).join('');
+        detail.innerHTML = '<h4>' + _esc(compName) + '</h4>' +
+                           (lines || '<p>(empty composite)</p>');
+      });
+  }
+  window._loadInvCompositeDetail = _loadInvCompositeDetail;
+
+  function _openAddCompositeModal() {
+    var sel = document.getElementById('inv-add-composite-source');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— pick a workspace composite —</option>';
+    fetch('/api/composites').then(function(r) { return r.json(); })
+      .then(function(data) {
+        (data.composites || []).forEach(function(c) {
+          var opt = document.createElement('option');
+          opt.value = c.id;
+          opt.textContent = c.name + '  —  ' + (c.description || c.id);
+          sel.appendChild(opt);
+        });
+        openModal('modal-inv-add-composite');
+      })
+      .catch(function() {
+        // Fallback: open modal anyway
+        openModal('modal-inv-add-composite');
+      });
+  }
+  window._openAddCompositeModal = _openAddCompositeModal;
+
+  function _submitAddComposite(form) {
+    var data = new FormData(form);
+    var invName = window._currentInvestigation || '';
+    var errEl = form.querySelector('.form-error');
+    if (errEl) errEl.textContent = '';
+    var payload = {
+      investigation: invName,
+      name: data.get('name'),
+      source: data.get('source'),
+    };
+    fetch('/api/investigation-composite-add', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok) {
+          if (errEl) errEl.textContent = j.error || 'add failed';
+          return;
+        }
+        closeModal('modal-inv-add-composite');
+        _loadInvComposites(invName);
+      });
+  }
+  window._submitAddComposite = _submitAddComposite;
+
+  function _openPerturbModal(invName, parentName) {
+    window._currentInvestigation = invName;
+    var form = document.getElementById('form-inv-perturb');
+    if (!form) return;
+    form.elements['extends'].value = parentName;
+    form.elements['name'].value = '';
+    form.elements['parameter_overrides'].value = '';
+    form.elements['process_overrides'].value = '';
+    var errEl = form.querySelector('.form-error');
+    if (errEl) errEl.textContent = '';
+    openModal('modal-inv-perturb');
+  }
+  window._openPerturbModal = _openPerturbModal;
+
+  function _submitPerturb(form) {
+    var data = new FormData(form);
+    var errEl = form.querySelector('.form-error');
+    if (errEl) errEl.textContent = '';
+    var parseOpt = function(raw, fieldName) {
+      raw = (raw || '').trim();
+      if (!raw) return null;
+      try { return JSON.parse(raw); }
+      catch (e) {
+        if (errEl) errEl.textContent = 'Invalid JSON in ' + fieldName + ': ' + String(e);
+        return undefined;
+      }
+    };
+    var po = parseOpt(data.get('parameter_overrides'), 'parameter_overrides');
+    if (po === undefined) return;
+    var procO = parseOpt(data.get('process_overrides'), 'process_overrides');
+    if (procO === undefined) return;
+    var payload = {
+      investigation: window._currentInvestigation || '',
+      name: data.get('name'),
+      extends: data.get('extends'),
+    };
+    if (po) payload.parameter_overrides = po;
+    if (procO) payload.process_overrides = procO;
+    fetch('/api/investigation-composite-perturb', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok) {
+          if (errEl) errEl.textContent = j.error || 'perturb failed';
+          return;
+        }
+        closeModal('modal-inv-perturb');
+        _loadInvComposites(payload.investigation);
+      });
+  }
+  window._submitPerturb = _submitPerturb;
+
+  function _rebuildComposite(invName, compName) {
+    fetch('/api/investigation-composite-rebuild', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({investigation: invName, name: compName}),
+    }).then(function() {
+      _loadInvComposites(invName);
+      _loadInvCompositeDetail(invName, compName);
+    });
+  }
+  window._rebuildComposite = _rebuildComposite;
+
+  function _removeComposite(invName, compName) {
+    if (!confirm('Remove composite ' + compName + '?')) return;
+    fetch('/api/investigation-composite', {
+      method: 'DELETE', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({investigation: invName, name: compName}),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok) {
+          if (j.dependents) {
+            alert('Cannot remove — has dependents:\n - ' + j.dependents.join('\n - '));
+          } else {
+            alert(j.error || 'remove failed');
+          }
+          return;
+        }
+        _loadInvComposites(invName);
+      });
+  }
+  window._removeComposite = _removeComposite;
+
+  // ── End Investigation Composites tab handlers ─────────────────────────────
 
   function _renderInvestigationRunsTable(runs, investigationName) {
     var rows = runs.map(function(r) {
