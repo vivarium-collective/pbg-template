@@ -2412,14 +2412,23 @@ if __name__ == "__main__":
                 continue
             try:
                 spec = load_spec(spec_path)
+                # Multi-composite (new) vs single-`composite:` (legacy) shape.
+                composites = spec.get("composites") or []
+                if composites:
+                    composite_summary = ", ".join(c.get("name", "") for c in composites)
+                    n_runs = len(spec.get("runs") or [])
+                else:
+                    composite_summary = spec.get("composite", "")
+                    n_runs = len(spec.get("simulations") or [])
                 out.append({
                     "name": spec["name"],
-                    "composite": spec["composite"],
+                    "composite": composite_summary,
+                    "composites": composites,
                     "description": spec.get("description", ""),
                     "tags": spec.get("tags") or [],
                     "status": spec.get("status", "planned"),
                     "last_run": spec.get("last_run"),
-                    "n_simulations": len(spec.get("simulations") or []),
+                    "n_simulations": n_runs,
                 })
             except InvestigationSpecError as e:
                 out.append({
