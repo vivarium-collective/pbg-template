@@ -480,6 +480,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_composite_runs()
         if self.path.startswith("/api/composite-resolve"):
             return self._get_composite_resolve()
+        if self.path.startswith("/api/investigations"):
+            return self._get_investigations()
         if self.path.startswith("/api/composites"):
             return self._get_composites()
         if self.path.startswith("/api/catalog"):
@@ -2244,6 +2246,38 @@ if __name__ == "__main__":
             return self._json({"error": "state not found for run+step"}, 404)
         return self._json({"run_id": run_id, "step": step,
                             "state": state}, 200)
+
+    def _get_investigations(self):
+        """GET /api/investigations — return summaries of all investigations."""
+        _ws_add_to_sys_path()
+        from scripts._lib.investigations import load_spec, InvestigationSpecError
+
+        inv_root = WORKSPACE / "investigations"
+        if not inv_root.is_dir():
+            return self._json({"investigations": []}, 200)
+        out = []
+        for d in sorted(inv_root.iterdir()):
+            if not d.is_dir():
+                continue
+            spec_path = d / "spec.yaml"
+            if not spec_path.is_file():
+                continue
+            try:
+                spec = load_spec(spec_path)
+                out.append({
+                    "name": spec["name"],
+                    "composite": spec["composite"],
+                    "description": spec.get("description", ""),
+                    "tags": spec.get("tags") or [],
+                    "status": spec.get("status", "planned"),
+                    "last_run": spec.get("last_run"),
+                    "n_simulations": len(spec.get("simulations") or []),
+                })
+            except InvestigationSpecError as e:
+                out.append({
+                    "name": d.name, "status": "invalid", "error": str(e),
+                })
+        return self._json({"investigations": out}, 200)
 
     def _get_composites(self):
         """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package."""
