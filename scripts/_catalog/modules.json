@@ -7,7 +7,8 @@
     "package": "pbg_bioreactordesign",
     "homepage": "https://github.com/vivarium-collective/pbg-bioreactordesign",
     "tags": [
-      "bioreactor"
+      "bioreactor",
+      "mass-transfer"
     ]
   },
   {
@@ -18,7 +19,9 @@
     "package": "pbg_caspule",
     "homepage": "https://github.com/vivarium-collective/pbg-caspule",
     "tags": [
-      "lammps"
+      "lammps",
+      "molecular-dynamics",
+      "polymers"
     ]
   },
   {
@@ -30,7 +33,9 @@
     "homepage": "https://github.com/vivarium-collective/pbg-cellpack",
     "tags": [
       "mesoscale",
-      "structure"
+      "structure",
+      "packing",
+      "geometry"
     ]
   },
   {
@@ -43,7 +48,9 @@
     "tags": [
       "microbial",
       "spatial",
-      "fba"
+      "fba",
+      "metabolism",
+      "multi-cell"
     ]
   },
   {
@@ -69,7 +76,10 @@
     "package": "pbg_compucell3d",
     "homepage": "https://github.com/vivarium-collective/pbg-compucell3d",
     "tags": [
-      "multicellular"
+      "multicellular",
+      "agent-based",
+      "cells",
+      "cellular-potts"
     ]
   },
   {
@@ -81,7 +91,8 @@
     "homepage": "https://github.com/vivarium-collective/pbg-lammps",
     "tags": [
       "lammps",
-      "md"
+      "md",
+      "molecular-dynamics"
     ]
   },
   {
@@ -93,7 +104,8 @@
     "homepage": "https://github.com/vivarium-collective/pbg-martini",
     "tags": [
       "membrane",
-      "coarse-grained"
+      "coarse-grained",
+      "molecular-dynamics"
     ]
   },
   {
@@ -105,7 +117,9 @@
     "homepage": "https://github.com/vivarium-collective/pbg-medyan",
     "tags": [
       "cytoskeleton",
-      "membrane"
+      "membrane",
+      "polymers",
+      "mechanics"
     ]
   },
   {
@@ -116,7 +130,22 @@
     "package": "pbg_mem3dg",
     "homepage": "https://github.com/vivarium-collective/pbg-mem3dg",
     "tags": [
-      "membrane"
+      "membrane",
+      "membranes",
+      "mechanics",
+      "geometry"
+    ]
+  },
+  {
+    "name": "pbg-minimal-cell-4dwcm",
+    "description": "Process-bigraph wrapper for a minimal-cell whole-cell model (4D-WCM)",
+    "source": "https://github.com/vivarium-collective/pbg-minimal-cell-4dwcm.git",
+    "ref": "main",
+    "package": "pbg_minimal_cell_4dwcm",
+    "homepage": "https://github.com/vivarium-collective/pbg-minimal-cell-4dwcm",
+    "tags": [
+      "whole-cell",
+      "cells"
     ]
   },
   {
@@ -127,7 +156,21 @@
     "package": "pbg_nfsim",
     "homepage": "https://github.com/vivarium-collective/pbg-nfsim",
     "tags": [
-      "rule-based"
+      "rule-based",
+      "kinetics"
+    ]
+  },
+  {
+    "name": "pbg-physicell",
+    "description": "Process-bigraph wrapper for PhysiCell agent-based multicellular simulation",
+    "source": "https://github.com/vivarium-collective/pbg-physicell.git",
+    "ref": "main",
+    "package": "pbg_physicell",
+    "homepage": "https://github.com/vivarium-collective/pbg-physicell",
+    "tags": [
+      "agent-based",
+      "cells",
+      "tissue"
     ]
   },
   {
@@ -139,6 +182,7 @@
     "homepage": "https://github.com/vivarium-collective/pbg-readdy",
     "tags": [
       "particle",
+      "particles",
       "reaction-diffusion"
     ]
   },
@@ -152,7 +196,9 @@
     "tags": [
       "spatial",
       "particle",
-      "stochastic"
+      "particles",
+      "stochastic",
+      "reaction-diffusion"
     ]
   },
   {
@@ -163,7 +209,9 @@
     "package": "pbg_tellurium",
     "homepage": "https://github.com/vivarium-collective/pbg-tellurium",
     "tags": [
-      "sbml"
+      "sbml",
+      "systems-biology",
+      "ode"
     ]
   },
   {
@@ -175,7 +223,8 @@
     "homepage": "https://github.com/vivarium-collective/pbg-vcell-fvsolver",
     "tags": [
       "reaction-diffusion",
-      "pde"
+      "pde",
+      "vcell"
     ]
   },
   {
@@ -187,7 +236,9 @@
     "homepage": "https://github.com/vivarium-collective/pbg-yalla",
     "tags": [
       "agent-based",
-      "morphogenesis"
+      "morphogenesis",
+      "cells",
+      "mechanics"
     ]
   },
   {

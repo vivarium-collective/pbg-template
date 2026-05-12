@@ -229,6 +229,14 @@
   <div class="panel">
     <h3>Available Composites <span id="composite-count" class="count-badge"></span></h3>
     <p class="panel-lead">Discoverable composite documents from <code>pbg_&lt;slug&gt;/composites/*.composite.{yaml,json}</code>. Each one packages a runnable simulation state with parameters you can configure. Click <strong>Use</strong> to create a simulation from it.</p>
+    <div class="card-browse-toolbar" id="composite-toolbar">
+      <input type="search" class="card-browse-search" id="composite-search" placeholder="Filter composites…">
+      <div class="card-browse-chips" id="composite-tag-chips"></div>
+      <span class="card-browse-view-toggle">
+        <button class="view-btn active" data-view="grid" onclick="_setCompositeView('grid')" title="Grid view">&#9638;</button>
+        <button class="view-btn" data-view="list" onclick="_setCompositeView('list')" title="List view">&#8801;</button>
+      </span>
+    </div>
     <div id="composite-cards" class="module-grid">
       <p class="empty-state">Loading composites&hellip;</p>
     </div>
@@ -374,6 +382,19 @@
   <section class="panel">
     <h3>Available modules</h3>
     <p class="panel-lead">Curated catalog of pbg-* packages. Click Install to add one to this workspace.</p>
+    <div class="card-browse-toolbar" id="catalog-toolbar">
+      <input type="search" class="card-browse-search" id="catalog-search" placeholder="Filter modules…">
+      <div class="card-browse-chips" id="catalog-tag-chips"></div>
+      <div class="card-browse-options">
+        <label><input type="radio" name="catalog-installed-filter" value="all" checked> All</label>
+        <label><input type="radio" name="catalog-installed-filter" value="installed"> Installed</label>
+        <label><input type="radio" name="catalog-installed-filter" value="uninstalled"> Available</label>
+        <span class="card-browse-view-toggle">
+          <button class="view-btn active" data-view="grid" onclick="_setCatalogView('grid')" title="Grid view">&#9638;</button>
+          <button class="view-btn" data-view="list" onclick="_setCatalogView('list')" title="List view">&#8801;</button>
+        </span>
+      </div>
+    </div>
     <div id="catalog-modules-grid" class="module-grid">
       <p class="empty-state">Loading catalog&hellip;</p>
     </div>

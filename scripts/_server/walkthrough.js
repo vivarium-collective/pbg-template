@@ -457,8 +457,127 @@
   window._loadRegistry = _loadRegistry;
 
   // -------------------------------------------------------------------------
-  // Composites browser (v0.4.14)
+  // Composites browser (v0.5.6: search + tag chips + list view)
   // -------------------------------------------------------------------------
+
+  window._composites = [];
+  window._compositesFilter = { search: '', tags: new Set() };
+  window._compositesView = 'grid';
+
+  function _buildCompositeChips() {
+    var chipsEl = document.getElementById('composite-tag-chips');
+    if (!chipsEl) return;
+    var allTags = [];
+    window._composites.forEach(function(c) {
+      (c.tags || []).forEach(function(t) {
+        if (allTags.indexOf(t) === -1) allTags.push(t);
+      });
+    });
+    allTags.sort();
+    chipsEl.innerHTML = allTags.map(function(t) {
+      return '<button class="card-browse-chip" onclick="_toggleCompositeChip(this,\'' + _esc(t) + '\')">' + _esc(t) + '</button>';
+    }).join('');
+  }
+
+  function _toggleCompositeChip(btn, tag) {
+    if (window._compositesFilter.tags.has(tag)) {
+      window._compositesFilter.tags.delete(tag);
+      btn.classList.remove('active');
+    } else {
+      window._compositesFilter.tags.add(tag);
+      btn.classList.add('active');
+    }
+    _renderComposites();
+  }
+  window._toggleCompositeChip = _toggleCompositeChip;
+
+  function _setCompositeView(view) {
+    window._compositesView = view;
+    var btns = document.querySelectorAll('#composite-toolbar .view-btn');
+    btns.forEach(function(b) {
+      b.classList.toggle('active', b.getAttribute('data-view') === view);
+    });
+    _renderComposites();
+  }
+  window._setCompositeView = _setCompositeView;
+
+  function _renderComposites() {
+    var container = document.getElementById('composite-cards');
+    if (!container) return;
+    var f = window._compositesFilter;
+    var search = f.search.toLowerCase();
+    var activeTags = f.tags;
+    var composites = window._composites.filter(function(c) {
+      if (search) {
+        var haystack = (c.name + ' ' + (c.description || '') + ' ' + (c.tags || []).join(' ')).toLowerCase();
+        if (haystack.indexOf(search) === -1) return false;
+      }
+      if (activeTags.size > 0) {
+        var cTags = c.tags || [];
+        var match = false;
+        activeTags.forEach(function(t) { if (cTags.indexOf(t) !== -1) match = true; });
+        if (!match) return false;
+      }
+      return true;
+    });
+
+    if (!composites.length) {
+      container.innerHTML = '<p class="empty-state">No composites match the current filter.</p>';
+      container.className = '';
+      return;
+    }
+
+    if (window._compositesView === 'list') {
+      container.className = 'composite-list';
+      var rows = composites.map(function(c) {
+        var tagPills = (c.tags || []).map(function(t) {
+          return '<span class="tag-pill">' + _esc(t) + '</span>';
+        }).join('');
+        return '<div class="composite-list-row">' +
+          '<span class="name">' + _esc(c.name) + '</span>' +
+          '<span class="desc">' + tagPills + ' ' + _esc(c.description || '(no description)') + '</span>' +
+          '<span><button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Use</button></span>' +
+          '</div>';
+      });
+      container.innerHTML = rows.join('');
+    } else {
+      container.className = 'module-grid';
+      var cards = composites.map(function(c) {
+        var paramSummary = '';
+        var paramKeys = Object.keys(c.parameters || {});
+        if (paramKeys.length) {
+          paramSummary = '<div class="module-tags">' +
+            paramKeys.map(function(k) {
+              return '<span class="tag-pill">' + _esc(k) + '</span>';
+            }).join('') + '</div>';
+        }
+        var requires = '';
+        if (c.requires && c.requires.processes && c.requires.processes.length) {
+          requires = '<small class="muted">Requires: ' +
+            c.requires.processes.map(_esc).join(', ') + '</small><br>';
+        }
+        var tagSummary = '';
+        if (c.tags && c.tags.length) {
+          tagSummary = '<div class="module-tags">' +
+            c.tags.map(function(t) {
+              return '<span class="tag-pill" style="background:#e0e7ff;color:#3730a3">' + _esc(t) + '</span>';
+            }).join(' ') + '</div>';
+        }
+        return '<div class="module-card">' +
+          '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong></div>' +
+          '<p class="module-desc">' + _esc(c.description || '(no description)') + '</p>' +
+          requires +
+          tagSummary +
+          paramSummary +
+          '<div class="module-action">' +
+            '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Use</button>' +
+          '</div>' +
+        '</div>';
+      });
+      container.innerHTML = cards.join('');
+    }
+  }
+  window._renderComposites = _renderComposites;
 
   function _loadComposites() {
     fetch('/api/composites')
@@ -482,31 +601,18 @@
             'the composite spec convention</a> for the format.</p>';
           return;
         }
-        var cards = composites.map(function(c) {
-          var paramSummary = '';
-          var paramKeys = Object.keys(c.parameters || {});
-          if (paramKeys.length) {
-            paramSummary = '<div class="module-tags">' +
-              paramKeys.map(function(k) {
-                return '<span class="tag-pill">' + _esc(k) + '</span>';
-              }).join('') + '</div>';
-          }
-          var requires = '';
-          if (c.requires && c.requires.processes && c.requires.processes.length) {
-            requires = '<small class="muted">Requires: ' +
-              c.requires.processes.map(_esc).join(', ') + '</small><br>';
-          }
-          return '<div class="module-card">' +
-            '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong></div>' +
-            '<p class="module-desc">' + _esc(c.description || '(no description)') + '</p>' +
-            requires +
-            paramSummary +
-            '<div class="module-action">' +
-              '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Use</button>' +
-            '</div>' +
-          '</div>';
-        });
-        container.innerHTML = cards.join('');
+        window._composites = composites;
+        // Wire up search input
+        var searchEl = document.getElementById('composite-search');
+        if (searchEl && !searchEl._pbgWired) {
+          searchEl._pbgWired = true;
+          searchEl.oninput = function() {
+            window._compositesFilter.search = this.value.toLowerCase();
+            _renderComposites();
+          };
+        }
+        _buildCompositeChips();
+        _renderComposites();
       });
   }
   window._loadComposites = _loadComposites;
@@ -582,8 +688,122 @@
   window._submitConfigureComposite = _submitConfigureComposite;
 
   // -------------------------------------------------------------------------
-  // Catalog browser (v0.4.1)
+  // Catalog browser (v0.5.6: search + tag chips + list view + installed filter)
   // -------------------------------------------------------------------------
+
+  window._catalogModules = [];
+  window._catalogFilter = { search: '', tags: new Set(), installed: 'all' };
+  window._catalogView = 'grid';
+
+  function _buildCatalogChips() {
+    var chipsEl = document.getElementById('catalog-tag-chips');
+    if (!chipsEl) return;
+    var allTags = [];
+    window._catalogModules.forEach(function(m) {
+      (m.tags || []).forEach(function(t) {
+        if (allTags.indexOf(t) === -1) allTags.push(t);
+      });
+    });
+    allTags.sort();
+    chipsEl.innerHTML = allTags.map(function(t) {
+      return '<button class="card-browse-chip" onclick="_toggleCatalogChip(this,\'' + _esc(t) + '\')">' + _esc(t) + '</button>';
+    }).join('');
+  }
+
+  function _toggleCatalogChip(btn, tag) {
+    if (window._catalogFilter.tags.has(tag)) {
+      window._catalogFilter.tags.delete(tag);
+      btn.classList.remove('active');
+    } else {
+      window._catalogFilter.tags.add(tag);
+      btn.classList.add('active');
+    }
+    _renderCatalog();
+  }
+  window._toggleCatalogChip = _toggleCatalogChip;
+
+  function _setCatalogView(view) {
+    window._catalogView = view;
+    var btns = document.querySelectorAll('#catalog-toolbar .view-btn');
+    btns.forEach(function(b) {
+      b.classList.toggle('active', b.getAttribute('data-view') === view);
+    });
+    _renderCatalog();
+  }
+  window._setCatalogView = _setCatalogView;
+
+  function _renderCatalog() {
+    var grid = document.getElementById('catalog-modules-grid');
+    if (!grid) return;
+    var f = window._catalogFilter;
+    var search = f.search.toLowerCase();
+    var activeTags = f.tags;
+    var modules = window._catalogModules.filter(function(m) {
+      // Search filter
+      if (search) {
+        var haystack = (m.name + ' ' + (m.description || '') + ' ' + (m.tags || []).join(' ')).toLowerCase();
+        if (haystack.indexOf(search) === -1) return false;
+      }
+      // Installed filter
+      if (f.installed === 'installed' && !m.installed) return false;
+      if (f.installed === 'uninstalled' && m.installed) return false;
+      // Tag chip filter (OR within: pass if any selected tag matches)
+      if (activeTags.size > 0) {
+        var mTags = m.tags || [];
+        var match = false;
+        activeTags.forEach(function(t) { if (mTags.indexOf(t) !== -1) match = true; });
+        if (!match) return false;
+      }
+      return true;
+    });
+
+    if (!modules.length) {
+      grid.innerHTML = '<p class="empty-state">No modules match the current filter.</p>';
+      grid.className = '';
+      return;
+    }
+
+    if (window._catalogView === 'list') {
+      grid.className = 'module-list';
+      var rows = modules.map(function(m) {
+        var actionBtn = m.installed
+          ? '<span class="status-pill installed">installed</span>' +
+            ' <button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>'
+          : '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
+        var tagPills = (m.tags || []).map(function(t) {
+          return '<span class="tag-pill">' + _esc(t) + '</span>';
+        }).join('');
+        return '<div class="module-list-row">' +
+          '<span class="name">' + _esc(m.name) + '</span>' +
+          '<span class="desc">' + tagPills + ' ' + _esc(m.description || '') + '</span>' +
+          '<span>' + actionBtn + '</span>' +
+          '</div>';
+      });
+      grid.innerHTML = rows.join('');
+    } else {
+      grid.className = 'module-grid';
+      var cards = modules.map(function(m) {
+        var actionBtn = m.installed
+          ? '<span class="status-pill installed">installed</span>' +
+            ' <button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>'
+          : '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
+        var tags = (m.tags || []).map(function(t) {
+          return '<span class="tag-pill">' + _esc(t) + '</span>';
+        }).join(' ');
+        var homepage = m.homepage
+          ? '<a href="' + _esc(m.homepage) + '" target="_blank" class="module-link">GitHub &#8599;</a>'
+          : '';
+        return '<div class="module-card">' +
+          '<div class="module-card-header"><strong>' + _esc(m.name) + '</strong> ' + homepage + '</div>' +
+          '<p class="module-desc">' + _esc(m.description) + '</p>' +
+          '<div class="module-tags">' + tags + '</div>' +
+          '<div class="module-action">' + actionBtn + '</div>' +
+          '</div>';
+      });
+      grid.innerHTML = cards.join('');
+    }
+  }
+  window._renderCatalog = _renderCatalog;
 
   function _loadCatalog() {
     fetch('/api/catalog')
@@ -595,25 +815,28 @@
           grid.innerHTML = '<p class="empty-state">Catalog empty.</p>';
           return;
         }
-        var cards = data.modules.map(function(m) {
-          var actionBtn = m.installed
-            ? '<span class="status-pill installed">installed</span>' +
-              ' <button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>'
-            : '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
-          var tags = (m.tags || []).map(function(t) {
-            return '<span class="tag-pill">' + _esc(t) + '</span>';
-          }).join(' ');
-          var homepage = m.homepage
-            ? '<a href="' + _esc(m.homepage) + '" target="_blank" class="module-link">GitHub &#8599;</a>'
-            : '';
-          return '<div class="module-card">' +
-            '<div class="module-card-header"><strong>' + _esc(m.name) + '</strong> ' + homepage + '</div>' +
-            '<p class="module-desc">' + _esc(m.description) + '</p>' +
-            '<div class="module-tags">' + tags + '</div>' +
-            '<div class="module-action">' + actionBtn + '</div>' +
-            '</div>';
+        window._catalogModules = data.modules;
+        // Wire up toolbar interactions
+        var searchEl = document.getElementById('catalog-search');
+        if (searchEl && !searchEl._pbgWired) {
+          searchEl._pbgWired = true;
+          searchEl.oninput = function() {
+            window._catalogFilter.search = this.value.toLowerCase();
+            _renderCatalog();
+          };
+        }
+        var radios = document.querySelectorAll('input[name="catalog-installed-filter"]');
+        radios.forEach(function(r) {
+          if (!r._pbgWired) {
+            r._pbgWired = true;
+            r.onchange = function() {
+              window._catalogFilter.installed = this.value;
+              _renderCatalog();
+            };
+          }
         });
-        grid.innerHTML = cards.join('');
+        _buildCatalogChips();
+        _renderCatalog();
       })
       .catch(function(err) {
         var grid = document.getElementById('catalog-modules-grid');
