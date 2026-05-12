@@ -110,7 +110,7 @@
   <a href="#registry" class="menu-link" data-page="registry">Registry</a>
   <a href="#simulation-setup" class="menu-link" data-page="simulation-setup">Simulation Setup</a>
   <a href="#visualizations" class="menu-link" data-page="visualizations">Visualizations</a>
-  <a href="#build-model" class="menu-link" data-page="build-model">Build Model</a>
+  <a class="menu-link" data-page="investigations" onclick="_switchPage('investigations'); return false;">Investigations</a>
   <a href="#branches" class="menu-link" data-page="branches">Branches</a>
 </nav>
 
@@ -449,159 +449,47 @@
   </section>
 </section>
 
-<!-- ===== PAGE: BUILD MODEL ===== -->
-<section id="page-build-model" class="page" data-page="build-model">
-  <h2 class="page-title">Build Model</h2>
-  <p class="page-lead">Iterative phases of model development. Each phase is modular: its own scope, acceptance tests, and visualizations.</p>
+<!-- ===== PAGE: INVESTIGATIONS ===== -->
+<section id="page-investigations" class="page" data-page="investigations">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+    <h2 class="page-title" style="margin:0">Investigations</h2>
+    <button class="action-btn" onclick="_createInvestigation()">+ New investigation</button>
+  </div>
+  <p class="page-lead">Declarative research recipes — pick a composite, declare simulations (single / sweep / seeds), name observables, choose visualizations. Run, save, compare.</p>
 
-  <div class="panel">
-    <h3>Phase tracker</h3>
-    {% if current_phase %}
-    <div class="current-phase-banner">
-      <strong>Currently on Phase {{ current_phase.n }}: {{ current_phase.name }}</strong>
-      <span class="status-pill {{ current_phase.status }}">{{ current_phase.status }}</span>
-    </div>
-    {% endif %}
-    {% if phases %}
-    <div class="phase-tracker">
-    {% for p in phases %}
-    <a class="pill {{ p.status }}{% if current_phase and p.n == current_phase.n %} current{% endif %}"
-       href="#phase-{{ p.n }}">
-      <strong>{{ p.n }} &middot; {{ p.name }}</strong><br>
-      <small>{{ p.status }}</small>
-    </a>
-    {% endfor %}
-    </div>
-    {% else %}
-    <p>No phases planned yet.</p>
-    <button class="action-btn" onclick="openModal('modal-phase-plan')">+ Add phase plan</button>
-    {% endif %}
-    {% if phases %}
-    <button class="action-btn" style="margin-top:10px" onclick="openModal('modal-phase-plan')">+ Add more phases</button>
-    {% endif %}
+  <!-- Browse toolbar matches v0.5.6 catalog/composite browse -->
+  <div class="card-browse-toolbar" id="investigations-toolbar">
+    <input type="search" class="card-browse-search" id="investigations-search" placeholder="Filter investigations…">
+    <div class="card-browse-chips" id="investigations-tag-chips"></div>
+    <span class="card-browse-view-toggle">
+      <button class="view-btn active" data-view="grid" onclick="_setInvestigationsView('grid')">▦</button>
+      <button class="view-btn" data-view="list" onclick="_setInvestigationsView('list')">≡</button>
+    </span>
   </div>
 
-  <!-- Phase details -->
-  {% for pd in phase_details %}
-  <div class="panel phase-detail" id="phase-{{ pd.n }}">
-    <h3>Phase {{ pd.n }}: {{ pd.frontmatter.name }}
-      <span class="status-pill {{ pd.frontmatter.status }}">{{ pd.frontmatter.status }}</span>
-    </h3>
-
-    {% if pd.frontmatter.source_artifact %}
-    <p class="source-artifact">Based on
-      <strong>{{ pd.frontmatter.source_artifact.kind }}</strong>:
-      <code>{{ pd.frontmatter.source_artifact.ref }}</code>
-    </p>
-    {% endif %}
-
-    <details {% if pd.frontmatter.status == 'in_progress' %}open{% endif %}>
-      <summary><strong>Body</strong> &mdash; objective, expected behavior, gate</summary>
-      <div class="phase-body markdown-body">{{ pd.body | safe }}</div>
-    </details>
-
-    <div class="phase-detail-section">
-      <strong>Applicable visualizations</strong>
-      {% set applicable_viz = visualizations | selectattr('phases', 'defined') | list %}
-      {% set global_viz = [] %}
-      {% for v in visualizations %}
-        {% if not v.phases or v.phases | length == 0 %}
-          {% set _ = global_viz.append(v) %}
-        {% endif %}
-      {% endfor %}
-      {% set phase_viz = [] %}
-      {% for v in applicable_viz %}
-        {% if pd.n in v.phases %}
-          {% set _ = phase_viz.append(v) %}
-        {% endif %}
-      {% endfor %}
-      {% set show_viz = phase_viz + global_viz %}
-      {% if show_viz %}
-      <ul>
-        {% for v in show_viz %}
-        <li><code>{{ v.name }}</code> ({{ v.type }}) &mdash; observables: {{ v.observables | join(', ') }}
-          {% if not v.phases or v.phases | length == 0 %}<em>(global)</em>{% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-      {% else %}
-      <p style="color:#888;font-style:italic">No visualizations apply to this phase yet.</p>
-      {% endif %}
-    </div>
-
-    {% if pd.frontmatter.acceptance_tests %}
-    <div class="phase-detail-section">
-      <strong>Acceptance tests</strong>
-      <table>
-        <thead><tr><th>ID</th><th>Description</th><th>Status</th></tr></thead>
-        <tbody>
-        {% for t in pd.frontmatter.acceptance_tests %}
-        <tr>
-          <td><code>{{ t.id }}</code></td>
-          <td>{{ t.desc }}</td>
-          <td><span class="status-pill {{ t.status }}">{{ t.status }}</span></td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-
-    <div class="phase-detail-actions">
-      {% if pd.frontmatter.status == 'planned' %}
-      <button class="action-btn" onclick="_postPhaseAction('phase-start', {n: {{ pd.n }} })">Start phase</button>
-      {% elif pd.frontmatter.status in ['in_progress', 'gate_pending'] %}
-      <button class="action-btn" onclick="_postPhaseAction('phase-gate', {n: {{ pd.n }} })">Evaluate gate</button>
-      {% endif %}
-    </div>
-  </div>
-  {% endfor %}
-
-  <!-- Reference sub-section -->
-  {% if registry_warning %}
-  <div class="panel" style="background:#fff3cd;border-color:#ffc107">
-    <strong>Warning:</strong> {{ registry_warning }}
-  </div>
-  {% endif %}
-
-  <div class="panel"><h3>Process registry</h3>
-  {% if registry and registry.processes %}
-  <table><thead><tr><th>Name</th></tr></thead><tbody>
-  {% for proc in registry.processes %}<tr><td><code>{{ proc }}</code></td></tr>{% endfor %}
-  </tbody></table>
-  {% else %}
-  <p style="color:#888;font-style:italic">No processes registered yet. Install the workspace package or run <code>/pbg-pull-processes</code>.</p>
-  {% endif %}
+  <div id="investigations-grid">
+    <p class="empty-state">Loading investigations…</p>
   </div>
 
-  <div class="panel"><h3>Type registry</h3>
-  {% if registry and registry.types %}
-  <table><thead><tr><th>Type</th></tr></thead><tbody>
-  {% for t in registry.types %}<tr><td><code>{{ t }}</code></td></tr>{% endfor %}
-  </tbody></table>
-  {% else %}
-  <p style="color:#888;font-style:italic">No custom types yet.</p>
-  {% endif %}
-  </div>
-
-  <div class="panel"><h3>Composite document</h3>
-  <p class="stage-explainer">Browsable process-bigraph document for <code>{{ package_path or 'workspace package' }}</code>.</p>
-  <div id="pbg-tree" class="json-tree"></div>
-  <script>
-  const PBG_DOC = {{ pbg_doc_json | safe }};
-  document.getElementById('pbg-tree').innerHTML = window.renderJsonTree ? window.renderJsonTree(PBG_DOC) : '<pre>' + JSON.stringify(PBG_DOC, null, 2) + '</pre>';
-  </script>
-  </div>
-
-  <div class="panel">
-    <h3>Run tests</h3>
-    <p class="stage-explainer">Runs <code>pytest -v tests/</code> at workspace root.</p>
-    <button id="run-tests-btn" class="action-btn" onclick="runTests()">Run pytest</button>
-    <span id="run-tests-spinner">running&hellip;</span>
-    <pre id="run-tests-output"></pre>
-  </div>
-
+  <!-- Detail panel renders inline after a row is clicked -->
+  <div id="investigation-detail" style="display:none; margin-top:16px"></div>
 </section>
+
+<!-- Modal: create investigation -->
+<div id="modal-investigation-create" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-investigation-create')">&times;</button>
+    <h3>Create investigation</h3>
+    <form id="form-investigation-create" onsubmit="event.preventDefault(); _submitInvestigationCreate(this)">
+      <label>Name <input name="name" placeholder="dnaa-binding-baseline" required pattern="[a-zA-Z0-9_-]+"></label>
+      <label>Composite <select name="composite" id="modal-investigation-composite-select" required>
+        <option value="">— pick a composite —</option>
+      </select></label>
+      <div class="form-error"></div>
+      <button type="submit">Create</button>
+    </form>
+  </div>
+</div>
 
 <!-- ===== PAGE: BRANCHES ===== -->
 <section id="page-branches" class="page" data-page="branches">
