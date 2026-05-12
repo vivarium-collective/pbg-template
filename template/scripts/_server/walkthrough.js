@@ -258,6 +258,9 @@
     if (pageId === 'simulation-setup') {
       _loadComposites();
     }
+    if (pageId === 'visualizations') {
+      if (typeof _loadVizMigrationBanner === 'function') _loadVizMigrationBanner();
+    }
     // Lazy-load branches when switching to the Branches tab.
     if (pageId === 'branches') {
       if (!window._branchesLoaded) {
@@ -2597,5 +2600,132 @@
       });
   }
   window._submitAddViz = _submitAddViz;
+
+  // ---------------------------------------------------------------------------
+  // Viz generate / accept / migration (Task 8)
+  // ---------------------------------------------------------------------------
+
+  function _submitVizGenerate(form) {
+    var data = new FormData(form);
+    var errEl = form.querySelector('.form-error');
+    var statusEl = document.getElementById('viz-generate-status');
+    if (errEl) errEl.textContent = '';
+    var payload = {
+      name: data.get('name'),
+      description: data.get('description'),
+    };
+    fetch('/api/visualization-generate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok) {
+          if (errEl) errEl.textContent = j.error || 'generate failed';
+          return;
+        }
+        if (statusEl) statusEl.innerHTML =
+          'Request written to <code>' + j.request_path + '</code>.<br>' +
+          'In your active Claude Code session, run <code>' + j.skill_command + '</code>.<br>' +
+          'Target file: <code>' + j.target_file + '</code>.<br>' +
+          'Polling for completion…';
+        _pollForGeneratedClass(payload.name, j.target_file, 0);
+      });
+  }
+  window._submitVizGenerate = _submitVizGenerate;
+
+  function _pollForGeneratedClass(name, targetFile, attempt) {
+    if (attempt > 600) {  // ~5 min
+      var statusEl = document.getElementById('viz-generate-status');
+      if (statusEl) statusEl.innerHTML += '<br><span style="color:#991b1b">Timed out waiting.</span>';
+      return;
+    }
+    fetch('/' + targetFile + '?_=' + Date.now()).then(function(r) {
+      if (r.ok) {
+        var statusEl = document.getElementById('viz-generate-status');
+        if (statusEl) statusEl.innerHTML +=
+          '<br><span style="color:#1f7a3a">File detected.</span> ' +
+          '<button class="btn-mini" onclick="_vizClassPreview(\'local:' + name + '\',\'' + name + '\')">' +
+          'Preview</button> ' +
+          '<button class="btn-mini" onclick="_acceptGeneratedClass(\'' + name + '\')">Accept &amp; commit</button>';
+      } else {
+        setTimeout(function() { _pollForGeneratedClass(name, targetFile, attempt + 1); }, 500);
+      }
+    }).catch(function() {
+      setTimeout(function() { _pollForGeneratedClass(name, targetFile, attempt + 1); }, 500);
+    });
+  }
+
+  function _acceptGeneratedClass(name) {
+    fetch('/api/visualization-accept', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name}),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        var statusEl = document.getElementById('viz-generate-status');
+        if (!ok) {
+          if (statusEl) statusEl.innerHTML +=
+            '<br><span style="color:#991b1b">Accept failed: ' + (j.error || '') + '</span>';
+          return;
+        }
+        if (statusEl) statusEl.innerHTML +=
+          '<br><span style="color:#1f7a3a">Committed. Reloading catalog…</span>';
+        setTimeout(function() { window.location.reload(); }, 600);
+      });
+  }
+  window._acceptGeneratedClass = _acceptGeneratedClass;
+
+  function _loadVizMigrationBanner() {
+    fetch('/api/visualization-migration-plan').then(function(r) { return r.json(); })
+      .then(function(plan) {
+        var actionable = (plan.entries || []).filter(function(e) {
+          return e.action !== 'no-op';
+        });
+        var banner = document.getElementById('viz-migration-banner');
+        var countEl = document.getElementById('viz-migration-banner-count');
+        if (!banner || !countEl) return;
+        if (actionable.length === 0) { banner.style.display = 'none'; return; }
+        banner.style.display = '';
+        countEl.textContent = actionable.length + ' legacy visualization entries can be migrated';
+        window._vizMigrationPlan = plan;
+      })
+      .catch(function() { /* endpoint may not be available; ignore */ });
+  }
+  window._loadVizMigrationBanner = _loadVizMigrationBanner;
+
+  function _openMigrationModal() {
+    var body = document.getElementById('viz-migration-plan-body');
+    var plan = window._vizMigrationPlan || {entries: []};
+    body.innerHTML = (plan.entries || []).map(function(e) {
+      var label = '<strong>' + _esc(e.name) + '</strong> &mdash; ' + _esc(e.action);
+      if (e.target_class) label += ' &rarr; <code>' + _esc(e.target_class) + '</code>';
+      if (e.reason) label += '<br><small style="color:#888">' + _esc(e.reason) + '</small>';
+      if (e.action === 'no-op') return '';
+      return '<div style="padding:6px 0;border-bottom:1px solid #eee">' + label + '</div>';
+    }).join('') || '<p>Nothing to migrate.</p>';
+    openModal('modal-viz-migration');
+  }
+  window._openMigrationModal = _openMigrationModal;
+
+  function _submitMigration() {
+    var plan = window._vizMigrationPlan || {entries: []};
+    var actions = (plan.entries || [])
+      .filter(function(e) { return e.action === 'auto-convert-to-class-backed'; })
+      .map(function(e) {
+        return {name: e.name, action: e.action, target_class: e.target_class};
+      });
+    fetch('/api/visualization-migrate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({actions: actions}),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok) { alert(j.error || 'migrate failed'); return; }
+        closeModal('modal-viz-migration');
+        window.location.reload();
+      });
+  }
+  window._submitMigration = _submitMigration;
 
 })();
