@@ -543,6 +543,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/composite-test-run": self._post_composite_test_run,
             "/api/investigation-create": self._post_investigation_create,
             "/api/investigation-delete": self._post_investigation_delete,
+            "/api/investigation-run":    self._post_investigation_run,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -2401,6 +2402,106 @@ if __name__ == "__main__":
         if code == 200:
             resp.update({"ok": True, "name": name})
         return self._json(resp, code)
+
+    def _post_investigation_run(self, body: dict):
+        """POST /api/investigation-run {name} — run all simulations + render visualizations."""
+        _ws_add_to_sys_path()
+        from scripts._lib.investigations import (
+            run_investigation, InvestigationSpecError,
+        )
+        from scripts._lib.composite_lookup import substitute_parameters, find_composite_path
+        from scripts._lib import composite_runs as cr
+
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._json({"error": "name is required"}, 400)
+
+        # Resolve workspace package
+        ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+        pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+
+        def run_one_composite(*, spec_id, overrides, steps, sim_name, run_id, db_file):
+            """Run one composite via subprocess. Matches _post_composite_test_run shape."""
+            path = find_composite_path(WORKSPACE, pkg, spec_id)
+            if path is None:
+                return {"status": "failed", "error": f"composite not found: {spec_id}"}
+            text = path.read_text()
+            spec = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
+            state = substitute_parameters(spec.get("state") or {},
+                                          spec.get("parameters") or {},
+                                          overrides)
+            state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+
+            py = sys.executable
+            script = textwrap.dedent(f"""
+                import json, sys, traceback
+                try:
+                    from {pkg}.core import build_core
+                    from process_bigraph import Composite
+                    from process_bigraph.emitter import SQLiteEmitter
+                    core = build_core()
+                    core.register_link('SQLiteEmitter', SQLiteEmitter)
+                    composite = Composite({{'state': {json.dumps(state)}}}, core=core)
+                    composite.run({steps})
+                    print('@@@OK@@@')
+                except Exception as e:
+                    print('@@@ERROR@@@')
+                    print(traceback.format_exc())
+            """)
+            try:
+                result = subprocess.run([py, "-c", script], cwd=WORKSPACE,
+                                         capture_output=True, text=True, timeout=300)
+            except subprocess.TimeoutExpired as exc:
+                try:
+                    if exc.process:
+                        exc.process.kill()
+                        exc.process.communicate(timeout=2)
+                except Exception:
+                    pass
+                return {"status": "failed", "error": "timeout"}
+            if "@@@ERROR@@@" in result.stdout:
+                return {"status": "failed",
+                         "error": result.stdout.split("@@@ERROR@@@", 1)[1].strip()[-500:]}
+            if "@@@OK@@@" not in result.stdout:
+                return {"status": "failed",
+                         "error": "runner returned unexpected output"}
+            return {"status": "completed"}
+
+        # Build the visualization registry. We need the workspace's core for
+        # the Visualization class lookup; import the workspace package and
+        # build a fresh core here (in-process, no subprocess needed).
+        sys.path.insert(0, str(WORKSPACE))
+        try:
+            core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
+            core = core_module.build_core()
+            registry = dict(core.link_registry)
+        except Exception as e:
+            return self._json({"error": f"failed to build core: {e}"}, 500)
+
+        # Also register the default Visualization classes from pbg_superpowers
+        try:
+            from pbg_superpowers.visualizations import (
+                TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+            )
+            registry["TimeSeriesPlot"] = TimeSeriesPlot
+            registry["ParamVsObservable"] = ParamVsObservable
+            registry["Distribution"] = Distribution
+            registry["PhaseSpace"] = PhaseSpace
+            registry["Heatmap"] = Heatmap
+        except ImportError:
+            pass
+
+        try:
+            summary = run_investigation(
+                WORKSPACE, name,
+                run_one_composite=run_one_composite,
+                core_registry=registry,
+            )
+        except InvestigationSpecError as e:
+            return self._json({"error": f"spec error: {e}"}, 400)
+        except FileNotFoundError as e:
+            return self._json({"error": str(e)}, 404)
+        return self._json(summary, 200)
 
     def _get_composites(self):
         """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package."""
