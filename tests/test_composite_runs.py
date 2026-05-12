@@ -1,11 +1,4 @@
 """Unit tests for scripts._lib.composite_runs."""
-import sys
-from pathlib import Path
-
-_SCRIPTS_PARENT = Path(__file__).parent.parent
-if str(_SCRIPTS_PARENT) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_PARENT))
-
 from scripts._lib.composite_runs import (
     connect, save_metadata, complete_metadata, query_runs, query_run,
     inject_sqlite_emitter, auto_label,

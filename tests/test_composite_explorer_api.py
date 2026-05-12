@@ -16,6 +16,7 @@ import subprocess
 import pytest
 
 _REPO_ROOT = Path(__file__).parent.parent
+_TEMPLATE_ROOT = _REPO_ROOT / "template"
 
 FIXTURE_WORKSPACE = _REPO_ROOT / "tests" / "_fixtures" / "ws_increase_demo"
 
@@ -39,9 +40,9 @@ def server(tmp_path):
     shutil.copytree(FIXTURE_WORKSPACE, ws)
     port = _free_port()
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(_REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(_TEMPLATE_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.Popen(
-        [sys.executable, str(_REPO_ROOT / "scripts" / "_server" / "server.py"),
+        [sys.executable, str(_TEMPLATE_ROOT / "scripts" / "_server" / "server.py"),
          "--workspace", str(ws), "--port", str(port)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env,
