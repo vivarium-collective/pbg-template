@@ -498,6 +498,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_visualization_instances()
         if self.path.startswith("/api/visualization-classes"):
             return self._get_visualization_classes()
+        if self.path.startswith("/api/visualization-migration-plan"):
+            return self._get_visualization_migration_plan()
         rel = self.path.lstrip("/")
         # Refuse path traversal and absolute paths.
         if ".." in rel.split("/") or rel.startswith("/"):
@@ -534,6 +536,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/visualization-preview-instance": self._post_visualization_preview_instance,
             "/api/visualization-generate":         self._post_visualization_generate,
             "/api/visualization-accept":           self._post_visualization_accept,
+            "/api/visualization-migrate":          self._post_visualization_migrate,
             "/api/simulation":                   self._post_simulation,
             "/api/run-tests":          self._post_run_tests,
             "/api/render":             self._post_render,
@@ -1495,6 +1498,105 @@ if __name__ == "__main__":
         except Exception as e:
             resp, code = {"error": f"workstream error: {e}"}, 500
         return self._json(resp, code)
+
+    def _get_visualization_migration_plan(self):
+        """GET /api/visualization-migration-plan — classify every entry in
+        workspace.yaml.visualizations against the current registry.
+        Returns: {entries: [{name, action, target_class?, legacy_path?, reason?}, ...]}
+        """
+        from scripts._lib.migrations import classify_viz_entry
+        try:
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+        except Exception:
+            ws_data = {}
+        registered = {c["name"] for c in self._list_visualization_classes()}
+        entries = []
+        for entry in (ws_data.get("visualizations") or []):
+            if not isinstance(entry, dict):
+                continue
+            classification = classify_viz_entry(entry, registered, workspace_root=WORKSPACE)
+            classification = dict(classification)
+            classification["name"] = entry.get("name")
+            classification["description"] = entry.get("description", "")
+            entries.append(classification)
+        return self._json({"entries": entries}, 200)
+
+    def _post_visualization_migrate(self, body: dict):
+        """POST /api/visualization-migrate {actions: [...]} — apply the
+        per-entry actions returned by /api/visualization-migration-plan.
+        Each action is one of:
+            {name, action: 'auto-convert-to-class-backed', target_class}
+            {name, action: 'regenerate-as-class'}  (logs only; user runs /pbg-viz)
+            {name, action: 'skip'}
+        """
+        import datetime
+        actions = body.get("actions") or []
+        if not isinstance(actions, list):
+            return self._json({"error": "actions must be a list"}, 400)
+
+        commit_msg = "chore(viz): migrate legacy workspace.yaml entries"
+
+        def do_action():
+            ws_file = WORKSPACE / "workspace.yaml"
+            ws = yaml.safe_load(ws_file.read_text()) or {}
+            entries = ws.get("visualizations") or []
+            _now = datetime.datetime.now(datetime.timezone.utc)
+            log_lines = [f"# Migration log {_now.isoformat()}"]
+            changed = False
+            for act in actions:
+                name = act.get("name")
+                idx = next((i for i, e in enumerate(entries)
+                            if isinstance(e, dict) and e.get("name") == name), None)
+                if idx is None:
+                    log_lines.append(f"- {name}: skipped (not found)")
+                    continue
+                kind = act.get("action")
+                if kind == "auto-convert-to-class-backed":
+                    target = act.get("target_class")
+                    if not target:
+                        log_lines.append(f"- {name}: skipped (missing target_class)")
+                        continue
+                    before = dict(entries[idx])
+                    entries[idx] = {"name": name, "class": target, "config": {}}
+                    log_lines.append(f"- {name}: auto-convert -> class={target} (was: {before})")
+                    changed = True
+                elif kind == "regenerate-as-class":
+                    log_lines.append(
+                        f"- {name}: regenerate-as-class (no workspace.yaml change; "
+                        f"user must run /pbg-viz {name} via the dashboard)"
+                    )
+                elif kind == "skip":
+                    log_lines.append(f"- {name}: skip")
+                else:
+                    log_lines.append(f"- {name}: unknown action {kind!r}; skipping")
+
+            log_dir = WORKSPACE / ".pbg" / "migrations"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_path = log_dir / f"{_now.strftime('%Y%m%d-%H%M%S')}.log"
+            log_path.write_text("\n".join(log_lines) + "\n")
+
+            if changed:
+                ws["visualizations"] = entries
+                ws_file.write_text(yaml.dump(ws, sort_keys=False))
+
+        # Apply file + log side-effects eagerly, before the git wrapper runs.
+        # This mirrors _post_visualization_accept's pattern: the accept handler
+        # writes the file before calling _active_branch_action with a no-op stub,
+        # so the changes survive even when the git wrapper returns 409/500.
+        # NOTE: do_action() uses yaml directly (not load_workspace/save_workspace)
+        # to avoid the schema-validation path that requires a real workspace root.
+        try:
+            do_action()
+        except Exception as e:
+            return self._json({"error": f"migration failed: {e}"}, 500)
+
+        def _git_stub():
+            pass  # file + log already written above; git add -A picks them up
+
+        try:
+            return self._json(*_active_branch_action(commit_msg, _git_stub))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
 
     def _post_simulation(self, body: dict):
         """Register a simulation in workspace.yaml.
