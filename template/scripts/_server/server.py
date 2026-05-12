@@ -2776,9 +2776,20 @@ if __name__ == "__main__":
     # real run data, or as a fallback when investigation data is incompatible.
     _BUILTIN_VIZ_DEMOS = {
         "TimeSeriesPlot": {
-            "observable": [1.0, 1.4, 2.1, 3.0, 4.2, 5.7, 7.1, 8.0, 8.3, 8.4],
-            "time":       [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5],
-            "_run_labels": ["demo"],
+            # Three runs in a sweep — list-of-lists triggers the multi-run
+            # branch in TimeSeriesPlot.update(), and Plotly auto-shows the
+            # legend once there's more than one named trace.
+            "observable": [
+                [1.0, 1.4, 2.1, 3.0, 4.2, 5.7, 7.1, 8.0, 8.3, 8.4],
+                [2.0, 2.6, 3.5, 4.6, 5.9, 7.3, 8.5, 9.1, 9.3, 9.3],
+                [0.5, 0.7, 1.1, 1.7, 2.5, 3.5, 4.6, 5.5, 6.1, 6.4],
+            ],
+            "time": [
+                [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5],
+                [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5],
+                [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5],
+            ],
+            "_run_labels": ["rate=1.0", "rate=2.0", "rate=0.5"],
         },
         "ParamVsObservable": {
             "sweep_param_values": [0.1, 0.5, 1.0, 2.0, 5.0],
