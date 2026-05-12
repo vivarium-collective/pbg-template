@@ -246,3 +246,36 @@ def test_load_overlays_cross_investigation_missing(tmp_path):
     payload = load_overlays(spec, viz, tmp_path, "demo")
     assert len(payload) == 1
     assert payload[0]["kind"] == "warning"
+
+
+from scripts._lib.investigations import (
+    update_spec_status, acquire_run_lock, release_run_lock,
+)
+
+
+def test_update_spec_status_writes_status_and_last_run(tmp_path):
+    inv_dir = tmp_path / "investigations" / "demo"
+    inv_dir.mkdir(parents=True)
+    (inv_dir / "spec.yaml").write_text("""
+name: demo
+composite: pkg.x
+simulations: []
+observables: []
+status: planned
+""")
+    update_spec_status(tmp_path, "demo", status="complete", last_run="2026-05-12T10:00:00")
+    new_text = (inv_dir / "spec.yaml").read_text()
+    assert "status: complete" in new_text
+    assert "2026-05-12T10:00:00" in new_text
+
+
+def test_acquire_and_release_run_lock(tmp_path):
+    inv_dir = tmp_path / "investigations" / "x"
+    inv_dir.mkdir(parents=True)
+    assert acquire_run_lock(tmp_path, "x") is True
+    # Second acquire on same investigation must fail
+    assert acquire_run_lock(tmp_path, "x") is False
+    release_run_lock(tmp_path, "x")
+    # After release, acquire succeeds again
+    assert acquire_run_lock(tmp_path, "x") is True
+    release_run_lock(tmp_path, "x")
