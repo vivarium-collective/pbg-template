@@ -109,14 +109,15 @@ def test_inject_sqlite_emitter_adds_step():
     state = _example_state_with_emitter()
     out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
     # Original state unchanged
-    assert "_sqlite_emitter" not in state
+    assert "sqlite_emitter" not in state
     # New emitter present in returned state
-    assert "_sqlite_emitter" in out
-    sql_em = out["_sqlite_emitter"]
+    assert "sqlite_emitter" in out
+    sql_em = out["sqlite_emitter"]
     assert sql_em["_type"] == "step"
     assert sql_em["address"] == "local:SQLiteEmitter"
     assert sql_em["config"]["simulation_id"] == "r1"
-    assert sql_em["config"]["db_file"] == "/tmp/x.db"
+    assert sql_em["config"]["file_path"] == "/tmp"
+    assert sql_em["config"]["db_file"] == "x.db"
 
 
 def test_inject_sqlite_emitter_copies_existing_emitter_inputs():
@@ -124,8 +125,8 @@ def test_inject_sqlite_emitter_copies_existing_emitter_inputs():
     consume the same input ports so persistence captures the same observables."""
     state = _example_state_with_emitter()
     out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
-    assert out["_sqlite_emitter"]["inputs"] == {"level": ["stores", "level"]}
-    assert out["_sqlite_emitter"]["config"]["emit"] == {"level": "float"}
+    assert out["sqlite_emitter"]["inputs"] == {"level": ["stores", "level"]}
+    assert out["sqlite_emitter"]["config"]["emit"] == {"level": "float"}
 
 
 def test_inject_sqlite_emitter_no_emitter_in_spec():
@@ -137,9 +138,9 @@ def test_inject_sqlite_emitter_no_emitter_in_spec():
         "stores": {},
     }
     out = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
-    assert "_sqlite_emitter" in out
-    assert out["_sqlite_emitter"]["config"]["emit"] == {}
-    assert out["_sqlite_emitter"]["inputs"] == {}
+    assert "sqlite_emitter" in out
+    assert out["sqlite_emitter"]["config"]["emit"] == {}
+    assert out["sqlite_emitter"]["inputs"] == {}
 
 
 def test_inject_sqlite_emitter_idempotent():
@@ -152,7 +153,7 @@ def test_inject_sqlite_emitter_idempotent():
 def test_inject_sqlite_emitter_accepts_path(tmp_path):
     state = _example_state_with_emitter()
     out = inject_sqlite_emitter(state, run_id="r1", db_file=tmp_path / "x.db")
-    assert isinstance(out["_sqlite_emitter"]["config"]["db_file"], str)
+    assert isinstance(out["sqlite_emitter"]["config"]["db_file"], str)
 
 
 def test_auto_label_empty():
