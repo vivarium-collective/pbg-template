@@ -1322,6 +1322,77 @@
   }
   window._ceOpenPopout = _ceOpenPopout;
 
+  // ─── History tab ──────────────────────────────────────────────────────
+  window._ceRuns = {};            // run_id → run dict (cache)
+  window._ceCompareSet = new Set();// selected run_ids for Compare
+
+  function _ceLoadHistory() {
+    var id = window._ceCurrent.id;
+    fetch('/api/composite-runs?spec_id=' + encodeURIComponent(id))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var runs = data.runs || [];
+        var body = document.getElementById('ce-history-body');
+        var countBadge = document.getElementById('ce-history-count');
+        if (countBadge) countBadge.textContent = '(' + runs.length + ')';
+        if (!runs.length) {
+          body.innerHTML = '<p class="empty-state">No runs yet — click <em>Test run</em> on the Wiring tab.</p>';
+          return;
+        }
+        runs.forEach(function(r) { window._ceRuns[r.run_id] = r; });
+        var rows = runs.map(_ceRenderHistoryRow).join('');
+        body.innerHTML =
+          '<table><thead><tr>' +
+            '<th style="width:30px"></th><th>Label</th><th>Params</th>' +
+            '<th>Started</th><th>Steps</th><th>Status</th><th></th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>';
+      });
+  }
+  window._ceLoadHistory = _ceLoadHistory;
+
+  function _ceRenderHistoryRow(run) {
+    var checked = window._ceCompareSet.has(run.run_id) ? 'checked' : '';
+    var paramStr = Object.keys(run.params || {})
+      .map(function(k) { return k + '=' + run.params[k]; }).join(', ') || '—';
+    var startedStr = new Date(run.started_at * 1000).toLocaleString();
+    return '<tr>' +
+      '<td><input type="checkbox" ' + checked +
+        ' onchange="_ceToggleCompareSelection(\'' + _esc(run.run_id) + '\', this.checked)"></td>' +
+      '<td>' + _esc(run.label || '') + '</td>' +
+      '<td><code>' + _esc(paramStr) + '</code></td>' +
+      '<td>' + _esc(startedStr) + '</td>' +
+      '<td>' + (run.n_steps || 0) + '</td>' +
+      '<td><span class="ce-history-status ' + _esc(run.status) + '">' + _esc(run.status) + '</span></td>' +
+      '<td><button class="btn-mini" onclick="_ceViewRun(\'' + _esc(run.run_id) + '\')">View</button></td>' +
+    '</tr>';
+  }
+
+  function _ceViewRun(run_id) {
+    window._ceSelectedRunId = run_id;
+    _ceSwitchTab('state');
+    if (typeof _ceLoadState === 'function') _ceLoadState(run_id, 0);
+  }
+  window._ceViewRun = _ceViewRun;
+
+  function _ceToggleCompareSelection(run_id, checked) {
+    if (checked) window._ceCompareSet.add(run_id);
+    else window._ceCompareSet.delete(run_id);
+    var badge = document.getElementById('ce-compare-count');
+    var tabBtn = document.querySelector('.ce-tab[data-tab="compare"]');
+    var count = window._ceCompareSet.size;
+    if (badge) badge.textContent = count > 0 ? '(' + count + ')' : '';
+    if (tabBtn) tabBtn.style.display = count >= 2 ? '' : 'none';
+  }
+  window._ceToggleCompareSelection = _ceToggleCompareSelection;
+
+  function _ceClearCompareSelection() {
+    window._ceCompareSet.clear();
+    document.querySelectorAll('input[type="checkbox"][onchange*="_ceToggleCompareSelection"]')
+      .forEach(function(cb) { cb.checked = false; });
+    _ceToggleCompareSelection('', false);  // refresh badge + tab visibility
+  }
+  window._ceClearCompareSelection = _ceClearCompareSelection;
+
   function _ceFetch() {
     var url = '/api/composite-resolve?id=' + encodeURIComponent(window._ceCurrent.id) +
       '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
@@ -1447,6 +1518,12 @@
           }).join('');
         }
         resultsEl.innerHTML = resultsHtml;
+        // Persist + refresh history
+        window._ceHistoryLoaded = false;  // force re-fetch on next visit
+        if (document.querySelector('.ce-tab-panel[data-tab="history"]') &&
+            document.querySelector('.ce-tab-panel[data-tab="history"]').classList.contains('active')) {
+          _ceLoadHistory();
+        }
       })
       .catch(function(err) {
         resultsEl.innerHTML = '<span style="color:#c00">Network error: ' + _esc(String(err)) + '</span>';
