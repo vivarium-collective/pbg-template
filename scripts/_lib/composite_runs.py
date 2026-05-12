@@ -147,7 +147,7 @@ def query_run_state(conn: sqlite3.Connection, *, run_id: str,
 
 
 def inject_sqlite_emitter(state: dict, *, run_id: str,
-                          db_file: str) -> dict:
+                          db_file: str | Path) -> dict:
     """Return a copy of `state` with a SQLiteEmitter step appended.
 
     The injected step consumes the same input ports declared by the first
@@ -158,11 +158,12 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
 
     Idempotent: a second call with the same run_id is a no-op.
     """
+    db_file = str(db_file)
     if "_sqlite_emitter" in state:
         existing = state["_sqlite_emitter"]
         if (existing.get("config", {}).get("simulation_id") == run_id
                 and existing.get("config", {}).get("db_file") == db_file):
-            return state
+            return dict(state)
 
     emit_schema: dict = {}
     inputs: dict = {}
@@ -172,7 +173,7 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
         if node.get("_type") != "step":
             continue
         addr = node.get("address", "")
-        if not addr.endswith("Emitter") and "emitter" not in addr.lower():
+        if not addr.endswith("Emitter"):
             continue
         emit_schema = dict((node.get("config") or {}).get("emit") or {})
         inputs = dict(node.get("inputs") or {})

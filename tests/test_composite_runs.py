@@ -8,6 +8,7 @@ if str(_SCRIPTS_PARENT) not in sys.path:
 
 from scripts._lib.composite_runs import (
     connect, save_metadata, complete_metadata, query_runs, query_run,
+    inject_sqlite_emitter,
 )
 
 
@@ -84,9 +85,6 @@ def test_query_run_returns_empty_when_no_history(tmp_path):
     assert trajectory == []
 
 
-from scripts._lib.composite_runs import inject_sqlite_emitter
-
-
 def _example_state_with_emitter():
     return {
         "increase": {
@@ -149,3 +147,9 @@ def test_inject_sqlite_emitter_idempotent():
     once = inject_sqlite_emitter(state, run_id="r1", db_file="/tmp/x.db")
     twice = inject_sqlite_emitter(once, run_id="r1", db_file="/tmp/x.db")
     assert once == twice
+
+
+def test_inject_sqlite_emitter_accepts_path(tmp_path):
+    state = _example_state_with_emitter()
+    out = inject_sqlite_emitter(state, run_id="r1", db_file=tmp_path / "x.db")
+    assert isinstance(out["_sqlite_emitter"]["config"]["db_file"], str)
