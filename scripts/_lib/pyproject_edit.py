@@ -100,6 +100,73 @@ def add_dependency(pyproject_path: Path, package: str, *, version_spec: str | No
     return True
 
 
+def remove_dependency(pyproject_path: Path, package: str) -> bool:
+    """Remove `package` (any version spec) from [project.dependencies].
+
+    Idempotent — returns True if the entry was removed, False if it was absent.
+    Handles extras notation (e.g. ``package[extra]>=1.0``) and trailing commas.
+    """
+    if not pyproject_path.exists():
+        raise FileNotFoundError(pyproject_path)
+
+    text = pyproject_path.read_text()
+    data = tomllib.loads(text)
+    deps = data.get("project", {}).get("dependencies", []) or []
+
+    # Check whether the dep is actually present.
+    pkg_re = re.compile(r"^\s*" + re.escape(package) + r"(\s*[\[<>=!~]|\s*$)")
+    if not any(pkg_re.match(d) for d in deps):
+        return False  # already absent
+
+    bounds = _find_deps_array_bounds(text)
+    if bounds is None:
+        return False
+
+    body_start, body_end = bounds
+    body = text[body_start:body_end]
+
+    # Remove the line(s) matching `package` (with optional extras/version).
+    # We match a quoted entry that starts with the package name.
+    line_re = re.compile(
+        r'\n?\s*"' + re.escape(package) + r'(\[.*?\])?[^"]*",?\s*'
+    )
+    new_body, n_subs = line_re.subn("", body)
+    if n_subs == 0:
+        return False
+
+    text = text[:body_start] + new_body + text[body_end:]
+    pyproject_path.write_text(text)
+    return True
+
+
+def remove_uv_source(pyproject_path: Path, package: str) -> bool:
+    """Remove the `package = { ... }` entry from [tool.uv.sources].
+
+    Idempotent — returns True if removed, False if absent.
+    """
+    if not pyproject_path.exists():
+        raise FileNotFoundError(pyproject_path)
+
+    text = pyproject_path.read_text()
+    data = tomllib.loads(text)
+    existing_sources = data.get("tool", {}).get("uv", {}).get("sources", {}) or {}
+    if package not in existing_sources:
+        return False  # already absent
+
+    # Remove the key=value line inside [tool.uv.sources].
+    # The entry looks like: `package = { path = "...", editable = true }` or similar.
+    line_re = re.compile(
+        r"^\s*" + re.escape(package) + r"\s*=\s*\{[^\n]*\}\s*\n?",
+        re.MULTILINE,
+    )
+    new_text, n_subs = line_re.subn("", text)
+    if n_subs == 0:
+        return False
+
+    pyproject_path.write_text(new_text)
+    return True
+
+
 def add_uv_source(
     pyproject_path: Path,
     package: str,

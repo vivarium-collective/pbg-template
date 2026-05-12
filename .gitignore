@@ -1,6 +1,7 @@
 .venv/
 .pbg/server/
 .pbg/state.json
+.pbg/composite-runs.db
 .pbg/viz-requests/
 .pbg/viz-responses/
 .pbg/agent-requests/

@@ -597,7 +597,8 @@
         }
         var cards = data.modules.map(function(m) {
           var actionBtn = m.installed
-            ? '<span class="status-pill installed">installed</span>'
+            ? '<span class="status-pill installed">installed</span>' +
+              ' <button class="action-btn action-btn--secondary" onclick="_uninstallFromCatalog(\'' + _esc(m.name) + '\')">Uninstall</button>'
             : '<button class="action-btn" onclick="_installFromCatalog(\'' + _esc(m.name) + '\')">Install</button>';
           var tags = (m.tags || []).map(function(t) {
             return '<span class="tag-pill">' + _esc(t) + '</span>';
@@ -664,6 +665,30 @@
       });
   }
   window._installFromCatalog = _installFromCatalog;
+
+  // -------------------------------------------------------------------------
+  // Catalog uninstall (v0.5.5)
+  // -------------------------------------------------------------------------
+
+  function _uninstallFromCatalog(name) {
+    if (!confirm('Uninstall "' + name + '"? This removes the package from the workspace venv, pyproject.toml, and workspace.yaml imports.')) return;
+    fetch('/api/catalog-uninstall', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, json: j}; }); })
+      .then(function(p) {
+        if (!p.ok) { alert('Uninstall failed: ' + (p.json.error || 'unknown')); return; }
+        var msg = p.json.already_uninstalled ? 'Already uninstalled.' : 'Uninstalled ' + name + '.';
+        if (p.json.branch) msg += '\n\nBranch: ' + p.json.branch + (p.json.commit ? ' (' + p.json.commit + ')' : '');
+        alert(msg);
+        if (typeof _loadCatalog === 'function') _loadCatalog();
+        if (typeof _loadRegistry === 'function') _loadRegistry(true);
+      })
+      .catch(function(e) { alert('Network error: ' + e); });
+  }
+  window._uninstallFromCatalog = _uninstallFromCatalog;
 
   // -------------------------------------------------------------------------
   // Simulation CRUD (v0.3.5)

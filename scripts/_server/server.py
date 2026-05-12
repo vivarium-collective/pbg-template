@@ -534,6 +534,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/work-create-pr":     self._post_work_create_pr,
             "/api/work-end":           self._post_work_end,
             "/api/catalog-install":    self._post_catalog_install,
+            "/api/catalog-uninstall":  self._post_catalog_uninstall,
             "/api/suggest":            self._post_suggest,
             "/api/composite-test-run": self._post_composite_test_run,
         }
@@ -2300,7 +2301,7 @@ if __name__ == "__main__":
 
         return self._json({
             "id": spec_id,
-            "name": spec.get("name", stem),
+            "name": spec.get("name", spec_id.rsplit(".composites.", 1)[-1]),
             "description": spec.get("description", ""),
             "parameters": spec.get("parameters") or {},
             "state": state,
@@ -2637,6 +2638,152 @@ if __name__ == "__main__":
             resp["install_mode"] = install_mode
             if diag:
                 resp["diagnosis"] = diag.as_dict()
+
+        return self._json(resp, code)
+
+    def _post_catalog_uninstall(self, body: dict):
+        """POST /api/catalog-uninstall — remove a catalog module from this workspace.
+
+        Reverses _post_catalog_install:
+        - PyPI mode: uv pip uninstall <pypi_name>, remove from [project.dependencies].
+        - Git mode: git submodule deinit + git rm external/<name>, remove dep +
+          [tool.uv.sources] entry from pyproject.toml.
+        - Both: remove workspace.yaml imports.<name>.
+
+        Wrapped in _active_branch_action so the change is committed on the active
+        stage/* branch.
+        """
+        name = (body.get("name") or "").strip()
+        if not name:
+            return self._json({"error": "missing name"}, 400)
+
+        # Read workspace.yaml to check if it's installed.
+        ws_file = WORKSPACE / "workspace.yaml"
+        _ws_add_to_sys_path()
+        from scripts._lib.workspace_yaml import load_workspace, save_workspace
+
+        ws = load_workspace(ws_file)
+        imports = ws.get("imports") or {}
+        if name not in imports:
+            return self._json({"ok": True, "already_uninstalled": True}, 200)
+
+        entry = imports[name]
+        mode = entry.get("mode", "reference")  # "pypi" or "reference"
+        pypi_name = entry.get("pypi_name")
+        package_name = entry.get("package", name)
+
+        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
+        uv_path = shutil.which("uv")
+
+        # Build uninstall command (best-effort; don't fail if pip uninstall errors).
+        if uv_path and venv_py.exists():
+            uninstall_cmd_base = [uv_path, "pip", "uninstall", "--python", str(venv_py)]
+        else:
+            venv_pip = WORKSPACE / ".venv" / "bin" / "pip"
+            if venv_pip.exists():
+                uninstall_cmd_base = [str(venv_pip), "uninstall", "-y"]
+            else:
+                uninstall_cmd_base = None
+
+        log_holder: list[str] = []
+        uninstall_mode_holder: list[str] = []
+
+        def action():
+            from scripts._lib.pyproject_edit import remove_dependency, remove_uv_source
+
+            if mode == "pypi":
+                uninstall_mode_holder.append("pypi")
+                pkg_to_uninstall = pypi_name or package_name
+
+                # Remove from pyproject.toml [project.dependencies].
+                try:
+                    remove_dependency(WORKSPACE / "pyproject.toml", pkg_to_uninstall)
+                except Exception as e:
+                    log_holder.append(f"pyproject dep remove failed: {e}")
+
+                # Pip uninstall — best effort.
+                if uninstall_cmd_base:
+                    try:
+                        result = subprocess.run(
+                            uninstall_cmd_base + [pkg_to_uninstall],
+                            cwd=WORKSPACE, capture_output=True, text=True, timeout=60,
+                        )
+                        excerpt = (result.stdout + "\n" + result.stderr).strip()[-2000:]
+                        log_holder.append(excerpt)
+                    except Exception as e:
+                        log_holder.append(f"pip uninstall failed (best-effort): {e}")
+
+            else:
+                # Reference / git-submodule mode.
+                uninstall_mode_holder.append("reference")
+
+                # Remove dep + uv source from pyproject.toml.
+                try:
+                    remove_dependency(WORKSPACE / "pyproject.toml", package_name)
+                    remove_uv_source(WORKSPACE / "pyproject.toml", package_name)
+                except Exception as e:
+                    log_holder.append(f"pyproject edit failed: {e}")
+
+                # Remove git submodule.
+                target_path = f"external/{name}"
+                abs_target = (WORKSPACE / target_path).resolve()
+                if abs_target.exists() or (WORKSPACE / ".gitmodules").exists():
+                    try:
+                        subprocess.run(
+                            ["git", "submodule", "deinit", "-f", target_path],
+                            cwd=WORKSPACE, capture_output=True, text=True, timeout=30,
+                        )
+                    except Exception as e:
+                        log_holder.append(f"submodule deinit failed (best-effort): {e}")
+
+                    try:
+                        r = subprocess.run(
+                            ["git", "rm", "-f", target_path],
+                            cwd=WORKSPACE, capture_output=True, text=True, timeout=30,
+                        )
+                        log_holder.append((r.stdout + "\n" + r.stderr).strip()[-500:])
+                    except Exception as e:
+                        log_holder.append(f"git rm failed (best-effort): {e}")
+
+                # Pip uninstall — best effort.
+                if uninstall_cmd_base:
+                    try:
+                        result = subprocess.run(
+                            uninstall_cmd_base + [package_name],
+                            cwd=WORKSPACE, capture_output=True, text=True, timeout=60,
+                        )
+                        excerpt = (result.stdout + "\n" + result.stderr).strip()[-2000:]
+                        log_holder.append(excerpt)
+                    except Exception as e:
+                        log_holder.append(f"pip uninstall failed (best-effort): {e}")
+
+            # Remove workspace.yaml imports entry.
+            ws2 = load_workspace(ws_file)
+            ws2.get("imports", {}).pop(name, None)
+            save_workspace(ws_file, ws2)
+
+        commit_msg = f"feat(catalog): uninstall {name}"
+        resp, code = _active_branch_action(commit_msg, action)
+        log_excerpt = "\n".join(log_holder)[-500:]
+        uninstall_mode = uninstall_mode_holder[0] if uninstall_mode_holder else mode
+
+        # Invalidate registry cache.
+        global _REGISTRY_CACHE
+        _REGISTRY_CACHE["data"] = None
+
+        if code == 200:
+            resp["ok"] = True
+            resp["module"] = name
+            resp["install_mode"] = uninstall_mode
+            resp["log"] = log_excerpt
+        elif code == 409 and "no changes" in (resp.get("error") or ""):
+            return self._json({
+                "ok": True,
+                "already_uninstalled": True,
+                "module": name,
+                "install_mode": uninstall_mode,
+                "log": log_excerpt,
+            }, 200)
 
         return self._json(resp, code)
 

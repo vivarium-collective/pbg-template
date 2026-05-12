@@ -11,7 +11,7 @@ _SCRIPTS_PARENT = Path(__file__).parent.parent
 if str(_SCRIPTS_PARENT) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_PARENT))
 
-from scripts._lib.pyproject_edit import add_dependency
+from scripts._lib.pyproject_edit import add_dependency, remove_dependency, remove_uv_source
 
 
 MINIMAL_PYPROJECT = textwrap.dedent("""\
@@ -94,3 +94,63 @@ def test_bracket_in_existing_dep_not_confused(tmp_path):
     deps = parsed["project"]["dependencies"]
     assert "v2ecoli" in deps
     assert "jsonschema[format-nongpl]>=4.21" in deps
+
+
+# ---------------------------------------------------------------------------
+# Tests for remove_dependency
+# ---------------------------------------------------------------------------
+
+def test_remove_existing_dependency(tmp_path):
+    """Removing a dep that exists returns True and the dep is gone."""
+    pf = _write_pyproject(tmp_path, MINIMAL_PYPROJECT)
+    changed = remove_dependency(pf, "process-bigraph")
+    assert changed is True
+    text = pf.read_text()
+    assert "process-bigraph" not in text
+
+
+def test_remove_dependency_absent_is_noop(tmp_path):
+    """Removing a dep that doesn't exist returns False without modifying the file."""
+    pf = _write_pyproject(tmp_path, MINIMAL_PYPROJECT)
+    original = pf.read_text()
+    changed = remove_dependency(pf, "nonexistent-package")
+    assert changed is False
+    assert pf.read_text() == original
+
+
+# ---------------------------------------------------------------------------
+# Tests for remove_uv_source
+# ---------------------------------------------------------------------------
+
+PYPROJECT_WITH_UV_SOURCES = textwrap.dedent("""\
+    [project]
+    name = "my-workspace"
+    version = "0.1.0"
+    dependencies = [
+        "process-bigraph",
+        "pbg-tellurium",
+    ]
+
+    [tool.uv.sources]
+    pbg-tellurium = { path = "external/pbg-tellurium", editable = true }
+""")
+
+
+def test_remove_existing_uv_source(tmp_path):
+    """Removing a uv source that exists returns True and the uv.sources entry is gone."""
+    pf = _write_pyproject(tmp_path, PYPROJECT_WITH_UV_SOURCES)
+    changed = remove_uv_source(pf, "pbg-tellurium")
+    assert changed is True
+    text = pf.read_text()
+    # The uv.sources entry must be gone but the dep in [project.dependencies] is untouched.
+    assert "pbg-tellurium = {" not in text and "pbg-tellurium = { path" not in text
+    assert '"pbg-tellurium"' in text  # dep still present (remove_uv_source only touches sources)
+
+
+def test_remove_uv_source_absent_is_noop(tmp_path):
+    """Removing a uv source that doesn't exist returns False without modifying the file."""
+    pf = _write_pyproject(tmp_path, PYPROJECT_WITH_UV_SOURCES)
+    original = pf.read_text()
+    changed = remove_uv_source(pf, "nonexistent-package")
+    assert changed is False
+    assert pf.read_text() == original
