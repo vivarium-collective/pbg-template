@@ -472,7 +472,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_pending()
         if self.path.startswith("/api/registry"):
             return self._get_registry()
-        if self.path.startswith("/api/composite-run/") and "/state" in self.path:
+        if self.path.startswith("/api/composite-run/") and self.path.split("?", 1)[0].endswith("/state"):
             return self._get_composite_run_state()
         if self.path.startswith("/api/composite-run/"):
             return self._get_composite_run()
@@ -2209,6 +2209,40 @@ if __name__ == "__main__":
         if not trajectory:
             return self._json({"error": "run not found"}, 404)
         return self._json({"run_id": run_id, "trajectory": trajectory}, 200)
+
+    def _get_composite_run_state(self):
+        """GET /api/composite-run/<run_id>/state?step=N — single state snapshot."""
+        from urllib.parse import urlparse, parse_qs
+        _ws_add_to_sys_path()
+        from scripts._lib import composite_runs as cr
+
+        u = urlparse(self.path)
+        # path: /api/composite-run/<run_id>/state
+        path_only = u.path
+        prefix = "/api/composite-run/"
+        rest = path_only[len(prefix):]
+        if not rest.endswith("/state"):
+            return self._json({"error": "bad route"}, 400)
+        run_id = rest[: -len("/state")]
+        qs = parse_qs(u.query)
+        step_raw = (qs.get("step") or ["0"])[0]
+        try:
+            step = int(step_raw)
+        except ValueError:
+            return self._json({"error": "step must be int"}, 400)
+
+        db_file = WORKSPACE / ".pbg" / "composite-runs.db"
+        if not db_file.is_file():
+            return self._json({"error": "no run database"}, 404)
+        conn = cr.connect(db_file)
+        try:
+            state = cr.query_run_state(conn, run_id=run_id, step=step)
+        finally:
+            conn.close()
+        if state is None:
+            return self._json({"error": "state not found for run+step"}, 404)
+        return self._json({"run_id": run_id, "step": step,
+                            "state": state}, 200)
 
     def _get_composites(self):
         """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package."""
