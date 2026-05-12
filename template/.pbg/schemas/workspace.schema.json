@@ -128,6 +128,10 @@
       "properties": {
         "name": {"type": "string", "minLength": 1, "pattern": "^[a-zA-Z0-9_-]+$"},
         "description": {"type": "string"},
+        "class": {
+          "type": "string",
+          "description": "Registered Visualization class name (e.g. 'TimeSeriesPlot'). When set, the entry is a configured instance of that class and is renderable immediately without /pbg-viz code generation."
+        },
         "type": {"enum": ["time-series", "phase-space", "heatmap", "histogram"]},
         "observables": {"type": "array", "items": {"type": "string"}},
         "phases": {"type": "array", "items": {"type": "integer", "minimum": 1}},
