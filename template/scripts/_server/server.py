@@ -524,6 +524,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_investigation_composites()
         if self.path.startswith("/api/investigation-state-tree"):
             return self._get_investigation_state_tree()
+        if self.path.startswith("/api/investigation-composite-doc"):
+            return self._get_investigation_composite_doc()
         if self.path.startswith("/api/investigation/"):
             return self._get_investigation_detail()
         if self.path.startswith("/api/investigations"):
@@ -2442,6 +2444,28 @@ if __name__ == "__main__":
         except Exception as e:
             return self._json({"error": f"failed to parse composite: {e}"}, 500)
         return self._json({"nodes": walk_state_tree(doc)}, 200)
+
+    def _get_investigation_composite_doc(self):
+        """GET /api/investigation-composite-doc?investigation=<n>&composite=<c>
+        Returns: {state: <parsed composite YAML>}
+        Used by the Composites tab's loom-explore iframe to fetch the
+        composite document as JSON (the iframe can't parse YAML in-browser
+        without bundling a parser).
+        """
+        import urllib.parse
+        qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
+        inv = qs.get('investigation', '').strip()
+        comp = qs.get('composite', '').strip()
+        if not (inv and comp):
+            return self._json({"error": "investigation + composite required"}, 400)
+        path = WORKSPACE / "investigations" / inv / "composites" / f"{comp}.yaml"
+        if not path.is_file():
+            return self._json({"error": "composite document not found"}, 404)
+        try:
+            doc = yaml.safe_load(path.read_text()) or {}
+        except Exception as e:
+            return self._json({"error": f"parse failed: {e}"}, 500)
+        return self._json({"state": doc}, 200)
 
     def _get_investigations(self):
         """GET /api/investigations — return summaries of all investigations."""

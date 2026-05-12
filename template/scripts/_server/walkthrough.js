@@ -28,15 +28,18 @@
     }
   });
 
-  // Global listener for postMessage events from the loom-explore iframe.
+  // Global listener for postMessage events from loom-explore iframes.
   window.addEventListener('message', function(ev) {
     if (ev.data && ev.data.type === 'explore:ready') {
-      // Mark the source iframe as ready so _loadCompositeExplorer can post immediately.
-      var iframe = document.getElementById('composite-explore-frame');
-      if (iframe && ev.source === iframe.contentWindow) {
-        window._loomExploreReady = window._loomExploreReady || {};
-        window._loomExploreReady['composite-explore-frame'] = true;
-      }
+      // Mark the source iframe as ready so callers can post immediately.
+      var ids = ['composite-explore-frame', 'inv-composite-explore-frame'];
+      ids.forEach(function(id) {
+        var iframe = document.getElementById(id);
+        if (iframe && ev.source === iframe.contentWindow) {
+          window._loomExploreReady = window._loomExploreReady || {};
+          window._loomExploreReady[id] = true;
+        }
+      });
     }
     if (ev.data && ev.data.type === 'explore:inspect') {
       console.log('[loom-explore inspect]', ev.data);
@@ -2411,7 +2414,13 @@
         '</div>' +
         '<div id="inv-composites-list" style="display:grid;grid-template-columns:220px 1fr;gap:16px">' +
           '<div id="inv-composites-sidebar"></div>' +
-          '<div id="inv-composite-detail" style="border-left:1px solid #eee;padding-left:14px"></div>' +
+          '<div id="inv-composite-detail" style="border-left:1px solid #eee;padding-left:14px">' +
+            '<iframe id="inv-composite-explore-frame"' +
+                    ' src="/loom-explore/index.html"' +
+                    ' title="Composite wiring"' +
+                    ' style="width:100%;height:520px;border:1px solid #ddd;background:#fff;display:none">' +
+            '</iframe>' +
+          '</div>' +
         '</div>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="observables">' +
@@ -2454,7 +2463,8 @@
         var entries = data.composites || [];
         if (entries.length === 0) {
           sidebar.innerHTML = '<p class="empty-state">No composites yet — click + Add composite.</p>';
-          document.getElementById('inv-composite-detail').innerHTML = '';
+          var frame = document.getElementById('inv-composite-explore-frame');
+          if (frame) frame.style.display = 'none';
           return;
         }
         sidebar.innerHTML = entries.map(function(c) {
@@ -2482,29 +2492,40 @@
   window._loadInvComposites = _loadInvComposites;
 
   function _loadInvCompositeDetail(invName, compName) {
-    fetch('/api/investigation-state-tree?investigation=' + encodeURIComponent(invName) +
+    fetch('/api/investigation-composite-doc?investigation=' + encodeURIComponent(invName) +
           '&composite=' + encodeURIComponent(compName))
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        var detail = document.getElementById('inv-composite-detail');
-        if (!detail) return;
-        var lines = (data.nodes || []).map(function(n) {
-          var pathStr = (n.path || []).join('.');
-          if (n.kind === 'process') {
-            return '<div><strong>' + _esc(pathStr) + '</strong> ' +
-                   '<small style="color:#666">process — <code>' + _esc(n.address || '') + '</code></small></div>';
-          }
-          var def = n.default;
-          var defStr = '';
-          try { defStr = JSON.stringify(def); } catch(e) { defStr = String(def); }
-          return '<div style="padding-left:16px">' + _esc(pathStr) +
-                 ' <small style="color:#888">' + _esc(n.type || '') +
-                 (def !== undefined ? ' = ' + _esc(defStr) : '') +
-                 '</small></div>';
-        }).join('');
-        detail.innerHTML = '<h4>' + _esc(compName) + '</h4>' +
-                           (lines || '<p>(empty composite)</p>');
-      });
+        var iframe = document.getElementById('inv-composite-explore-frame');
+        if (!iframe) return;
+        if (data.error) {
+          console.error('investigation-composite-doc error:', data.error);
+          return;
+        }
+        // Show the iframe before posting so it has a layout.
+        iframe.style.display = '';
+        var post = function() {
+          iframe.contentWindow.postMessage({
+            type: 'composite:load',
+            state: data.state,
+            metadata: { name: compName, context: 'investigation:' + invName },
+          }, '*');
+        };
+        if (window._loomExploreReady && window._loomExploreReady[iframe.id]) {
+          post();
+        } else {
+          var listener = function(ev) {
+            if (ev.source === iframe.contentWindow && ev.data && ev.data.type === 'explore:ready') {
+              window._loomExploreReady = window._loomExploreReady || {};
+              window._loomExploreReady[iframe.id] = true;
+              window.removeEventListener('message', listener);
+              post();
+            }
+          };
+          window.addEventListener('message', listener);
+        }
+      })
+      .catch(function(err) { console.error('inv composite load failed:', err); });
   }
   window._loadInvCompositeDetail = _loadInvCompositeDetail;
 
