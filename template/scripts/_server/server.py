@@ -558,6 +558,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-run-delete":  self._post_investigation_run_delete,
             "/api/investigation-runs-clear":  self._post_investigation_runs_clear,
             "/api/investigation-run-one":     self._post_investigation_run_one,
+            "/api/investigation-composite-add":      self._post_investigation_composite_add,
+            "/api/investigation-composite-perturb":  self._post_investigation_composite_perturb,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -3319,6 +3321,122 @@ if __name__ == "__main__":
                 return self._json({"ok": False, "run_id": run_id, "error": err}, 200)
         finally:
             conn.close()
+
+    def _post_investigation_composite_add(self, body: dict):
+        """POST /api/investigation-composite-add {investigation, name, source}
+        Clone a registered workspace composite into the study.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        comp_name = (body.get("name") or "").strip()
+        source = (body.get("source") or "").strip()
+        if not (inv_name and comp_name and source):
+            return self._json({"error": "investigation, name, source required"}, 400)
+
+        _ws_add_to_sys_path()
+        from scripts._lib.investigation_migrate import _resolve_composite_source
+        try:
+            source_path, _stem = _resolve_composite_source(source, WORKSPACE)
+        except (FileNotFoundError, ValueError) as e:
+            return self._json({"error": str(e)}, 404)
+
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+        composites_dir = inv_dir / "composites"
+        composites_dir.mkdir(parents=True, exist_ok=True)
+        sidecar = composites_dir / f"{comp_name}.yaml"
+        if sidecar.is_file():
+            return self._json({"error": f"composite {comp_name!r} already exists"}, 409)
+
+        commit_msg = f"feat(investigations/{inv_name}): add composite '{comp_name}'"
+
+        def do_action():
+            import shutil
+            shutil.copy2(source_path, sidecar)
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+            composites = spec.setdefault('composites', [])
+            composites.append({
+                'name': comp_name,
+                'source': source,
+                'document': f'./composites/{comp_name}.yaml',
+            })
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            do_action()
+        except Exception as e:
+            return self._json({"error": f"add failed: {e}"}, 500)
+        try:
+            return self._json(*_active_branch_action(commit_msg, lambda: None))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_investigation_composite_perturb(self, body: dict):
+        """POST /api/investigation-composite-perturb {investigation, name, extends,
+        parameter_overrides?, process_overrides?}
+        Derive a new composite from an existing one by applying overrides.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        comp_name = (body.get("name") or "").strip()
+        extends = (body.get("extends") or "").strip()
+        if not (inv_name and comp_name and extends):
+            return self._json({"error": "investigation, name, extends required"}, 400)
+
+        _ws_add_to_sys_path()
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        parent = inv_dir / "composites" / f"{extends}.yaml"
+        if not parent.is_file():
+            return self._json({"error": f"parent composite {extends!r} not found"}, 404)
+
+        composites_dir = inv_dir / "composites"
+        derived = composites_dir / f"{comp_name}.yaml"
+        if derived.is_file():
+            return self._json({"error": f"composite {comp_name!r} already exists"}, 409)
+
+        from scripts._lib.composite_recipes import (
+            apply_parameter_overrides, apply_process_overrides,
+        )
+        import copy
+        parent_doc = yaml.safe_load(parent.read_text()) or {}
+        derived_doc = copy.deepcopy(parent_doc)
+        try:
+            if body.get('parameter_overrides'):
+                apply_parameter_overrides(derived_doc, body['parameter_overrides'])
+            if body.get('process_overrides'):
+                apply_process_overrides(derived_doc, body['process_overrides'])
+        except KeyError as e:
+            return self._json({"error": f"override failed: {e}"}, 400)
+        except Exception as e:
+            return self._json({"error": f"override failed: {type(e).__name__}: {e}"}, 500)
+
+        commit_msg = f"feat(investigations/{inv_name}): derive composite '{comp_name}' from '{extends}'"
+
+        def do_action():
+            derived.write_text(yaml.safe_dump(derived_doc, sort_keys=False))
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+            composites = spec.setdefault('composites', [])
+            entry = {'name': comp_name, 'extends': extends,
+                     'document': f'./composites/{comp_name}.yaml'}
+            if body.get('parameter_overrides'):
+                entry['parameter_overrides'] = body['parameter_overrides']
+            if body.get('process_overrides'):
+                entry['process_overrides'] = body['process_overrides']
+            composites.append(entry)
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            do_action()
+        except Exception as e:
+            return self._json({"error": f"perturb failed: {e}"}, 500)
+        try:
+            return self._json(*_active_branch_action(commit_msg, lambda: None))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
 
     def _get_composites(self):
         """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package."""

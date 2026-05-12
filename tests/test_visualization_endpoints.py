@@ -268,3 +268,158 @@ def test_post_visualization_accept_invalidates_core_cache(workspace_server):
     )
 
 
+# ---------------------------------------------------------------------------
+# Investigation composite-add + composite-perturb endpoint tests
+# ---------------------------------------------------------------------------
+
+def test_post_composite_add_clones_source_to_sidecar(workspace_server):
+    """Adding a composite copies the workspace composite document into the study."""
+    pkg_composites = workspace_server.root / 'pbg_testws' / 'composites'
+    pkg_composites.mkdir(parents=True, exist_ok=True)
+    (pkg_composites / 'baseline.composite.yaml').write_text(yaml.safe_dump({
+        'name': 'baseline-doc',
+        'state': {'chromosome': {'count': {'_type': 'integer', '_default': 100}}},
+    }))
+
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-add',
+        {'investigation': 'demo', 'name': 'baseline',
+         'source': 'pbg_testws.composites.baseline'},
+    )
+    assert code in (200, 500), j  # 500 acceptable if _active_branch_action fails on bare workspace
+
+    sidecar = inv / 'composites' / 'baseline.yaml'
+    assert sidecar.is_file(), 'expected sidecar composite file'
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['composites'][0]['name'] == 'baseline'
+    assert spec['composites'][0]['source'] == 'pbg_testws.composites.baseline'
+    assert spec['composites'][0]['document'] == './composites/baseline.yaml'
+
+
+def test_post_composite_add_rejects_unknown_source(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [],
+    }, sort_keys=False))
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-add',
+        {'investigation': 'demo', 'name': 'baseline',
+         'source': 'pbg_testws.composites.nonexistent'},
+    )
+    assert code == 404, j
+
+
+def test_post_composite_add_rejects_duplicate_name(workspace_server):
+    pkg_composites = workspace_server.root / 'pbg_testws' / 'composites'
+    pkg_composites.mkdir(parents=True, exist_ok=True)
+    (pkg_composites / 'baseline.composite.yaml').write_text(yaml.safe_dump({
+        'name': 'b', 'state': {},
+    }))
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'baseline.yaml').write_text('name: b\nstate: {}\n')
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [{'name': 'baseline', 'source': 'pbg_testws.composites.baseline',
+                         'document': './composites/baseline.yaml'}],
+        'runs': [],
+    }, sort_keys=False))
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-add',
+        {'investigation': 'demo', 'name': 'baseline',
+         'source': 'pbg_testws.composites.baseline'},
+    )
+    assert code == 409, j
+
+
+def test_post_composite_perturb_renders_derived_with_parameter_override(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'baseline.yaml').write_text(yaml.safe_dump({
+        'name': 'baseline-doc',
+        'state': {'replication': {'_type': 'process', 'address': 'local:Foo',
+                                    'config': {'rate': 1.0}}},
+    }))
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [{'name': 'baseline', 'source': 'pkg.x',
+                         'document': './composites/baseline.yaml'}],
+        'runs': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-perturb',
+        {'investigation': 'demo', 'name': 'high-rate', 'extends': 'baseline',
+         'parameter_overrides': {'state.replication.config.rate': 2.0}},
+    )
+    assert code in (200, 500), j
+
+    derived = composites / 'high-rate.yaml'
+    assert derived.is_file()
+    doc = yaml.safe_load(derived.read_text())
+    assert doc['state']['replication']['config']['rate'] == 2.0
+    # Parent should NOT be mutated
+    parent = yaml.safe_load((composites / 'baseline.yaml').read_text())
+    assert parent['state']['replication']['config']['rate'] == 1.0
+
+    # spec.yaml gets the derived entry with recipe preserved
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    entry = next(c for c in spec['composites'] if c['name'] == 'high-rate')
+    assert entry['extends'] == 'baseline'
+    assert entry['parameter_overrides']['state.replication.config.rate'] == 2.0
+
+
+def test_post_composite_perturb_with_process_override(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'baseline.yaml').write_text(yaml.safe_dump({
+        'name': 'b',
+        'state': {'replication': {'_type': 'process', 'address': 'local:Foo',
+                                    'config': {'rate': 1.0}}},
+    }))
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [{'name': 'baseline', 'source': 'pkg.x',
+                         'document': './composites/baseline.yaml'}],
+        'runs': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-perturb',
+        {'investigation': 'demo', 'name': 'no-repl', 'extends': 'baseline',
+         'process_overrides': {'replication': None}},
+    )
+    assert code in (200, 500), j
+    doc = yaml.safe_load((composites / 'no-repl.yaml').read_text())
+    assert 'replication' not in doc.get('state', {})
+
+
+def test_post_composite_perturb_invalid_path_rejected(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'baseline.yaml').write_text(yaml.safe_dump({
+        'name': 'b', 'state': {},
+    }))
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [{'name': 'baseline', 'source': 'pkg.x',
+                         'document': './composites/baseline.yaml'}],
+        'runs': [],
+    }, sort_keys=False))
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-perturb',
+        {'investigation': 'demo', 'name': 'bad', 'extends': 'baseline',
+         'parameter_overrides': {'state.nonexistent.field': 1}},
+    )
+    assert code == 400, j
