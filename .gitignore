@@ -2,6 +2,11 @@
 .pbg/server/
 .pbg/state.json
 .pbg/composite-runs.db
+# Investigation runtime artifacts (results DB + rendered HTML + lock file).
+# spec.yaml + data/ are tracked; everything else is regenerated on each run.
+investigations/*/runs.db
+investigations/*/viz/
+investigations/*/.run.lock
 .pbg/viz-requests/
 .pbg/viz-responses/
 .pbg/agent-requests/

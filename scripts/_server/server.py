@@ -2286,17 +2286,33 @@ if __name__ == "__main__":
         except ImportError:
             pass
 
-        try:
-            summary = run_investigation(
-                WORKSPACE, name,
-                run_one_composite=run_one_composite,
-                core_registry=registry,
-            )
-        except InvestigationSpecError as e:
-            return self._json({"error": f"spec error: {e}"}, 400)
-        except FileNotFoundError as e:
-            return self._json({"error": str(e)}, 404)
-        return self._json(summary, 200)
+        summary_holder: list = []
+
+        def action():
+            try:
+                summary = run_investigation(
+                    WORKSPACE, name,
+                    run_one_composite=run_one_composite,
+                    core_registry=registry,
+                )
+                summary_holder.append(summary)
+            except InvestigationSpecError as e:
+                summary_holder.append({"error": f"spec error: {e}"})
+            except FileNotFoundError as e:
+                summary_holder.append({"error": str(e)})
+
+        commit_msg = f"run(investigations): {name}"
+        resp, code = _active_branch_action(commit_msg, action)
+        if summary_holder and "error" in summary_holder[0]:
+            err = summary_holder[0]["error"]
+            return self._json({"error": err}, 400 if "spec error" in err else 404)
+        if code == 200 and summary_holder:
+            return self._json(summary_holder[0], 200)
+        if code == 409 and summary_holder and "error" not in summary_holder[0]:
+            # No changes to commit (e.g., re-run with identical spec where viz
+            # files happen to be byte-identical) — still return success.
+            return self._json(summary_holder[0], 200)
+        return self._json(resp, code)
 
     def _get_composites(self):
         """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package."""
