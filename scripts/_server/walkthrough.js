@@ -2432,7 +2432,12 @@
           return;
         }
         closeModal('modal-investigation-add-viz');
-        _openInvestigation(payload.investigation);  // refresh detail panel
+        fetch('/api/investigation-render-viz', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({name: payload.investigation}),
+        }).then(function() {
+          _openInvestigation(payload.investigation);  // refresh detail panel
+        });
       });
   }
   window._submitAddViz = _submitAddViz;
