@@ -405,6 +405,63 @@ def gather_emitter_outputs(db_path: Path) -> dict:
         conn.close()
 
 
+def inject_emitter_step(doc: dict, observables: list) -> dict:
+    """Return ``doc`` with its emitter step rewritten/added to record the observable paths.
+
+    ``observables`` is the spec.yaml.observables list of ``{path: [...]}`` dicts.
+    Paths not present in ``doc['state']`` are silently skipped (the orchestrator
+    can log a warning at run time).
+
+    Special case: a single observable with ``path: []`` is the "emit entire state"
+    sentinel — wires the emitter at the document root via ``inputs: {state: []}``.
+    """
+    import copy
+    out = copy.deepcopy(doc)
+    state = out.setdefault('state', {})
+
+    obs_list = observables or []
+    emit_all = (len(obs_list) == 1 and obs_list[0].get('path') == [])
+
+    if emit_all:
+        state['emitter'] = {
+            '_type': 'step',
+            'address': 'local:SQLiteEmitter',
+            'config': {'emit': {}, 'emit_all': True},
+            'inputs': {'state': []},
+        }
+        return out
+
+    inputs: dict = {}
+    emit_schema: dict = {}
+    for obs in obs_list:
+        path = obs.get('path') or []
+        if not path:
+            continue
+        # Walk to verify the path exists in state; capture leaf type if recorded
+        node = state
+        for seg in path:
+            if not isinstance(node, dict) or seg not in node:
+                node = None
+                break
+            node = node[seg]
+        if node is None:
+            continue
+        port_name = path[-1]
+        inputs[port_name] = list(path)
+        if isinstance(node, dict) and node.get('_type'):
+            emit_schema[port_name] = node['_type']
+        else:
+            emit_schema[port_name] = 'any'
+
+    state['emitter'] = {
+        '_type': 'step',
+        'address': 'local:SQLiteEmitter',
+        'config': {'emit': emit_schema},
+        'inputs': inputs,
+    }
+    return out
+
+
 def build_viz_composite(viz_spec: dict, gathered: dict, core_registry: dict) -> dict:
     """Build the small composite that dispatches one visualization."""
     address = viz_spec["address"]
@@ -624,20 +681,77 @@ def release_run_lock(ws_root: Path, name: str) -> None:
         pass
 
 
+def _load_composite_doc(inv_dir: Path, composite_name: str) -> dict:
+    """Load a composite document from ``<inv_dir>/composites/<name>.yaml``.
+
+    Raises FileNotFoundError if the document does not exist.
+    """
+    doc_path = inv_dir / "composites" / f"{composite_name}.yaml"
+    if not doc_path.is_file():
+        raise FileNotFoundError(
+            f"composite document not found: {doc_path}"
+        )
+    return yaml.safe_load(doc_path.read_text()) or {}
+
+
+def _apply_parameter_overrides(doc: dict, params: dict) -> dict:
+    """Best-effort overlay of ``params`` onto ``doc['state']``.
+
+    Each key in ``params`` is treated as a dot-separated path into the state
+    tree (e.g. ``chromosome.DnaA_count``).  Unknown paths are silently ignored
+    so that the orchestrator can warn rather than crash.
+    """
+    if not params:
+        return doc
+    import copy
+    out = copy.deepcopy(doc)
+    state = out.get("state") or {}
+    for key, value in params.items():
+        segments = key.split(".")
+        node = state
+        for seg in segments[:-1]:
+            if isinstance(node, dict) and seg in node:
+                node = node[seg]
+            else:
+                node = None
+                break
+        if isinstance(node, dict) and segments[-1] in node:
+            leaf = node[segments[-1]]
+            if isinstance(leaf, dict):
+                leaf["_default"] = value
+            else:
+                node[segments[-1]] = value
+        # Unknown paths are silently skipped (orchestrator may log separately)
+    return out
+
+
 def run_investigation(ws_root: Path, name: str, *,
                       run_one_composite: callable,
                       core_registry: dict,
                       build_and_run=None) -> dict:
     """Top-level orchestrator. Returns a summary dict.
 
+    Supports two spec shapes:
+
+    *Multi-composite* (``composites:`` + ``runs:`` keys):
+        For each run entry in ``spec.runs``:
+          1. Load the composite document from ``composites/<run.composite>.yaml``.
+          2. Inject the emitter step via ``inject_emitter_step(doc, spec.observables)``.
+          3. Apply per-run ``params`` via ``_apply_parameter_overrides``.
+          4. Dispatch via ``run_one_composite(..., state_doc=doc)``.
+
+    *Legacy single-composite* (``composite:`` + ``simulations:`` keys):
+        Expand simulations via ``expand_simulations`` and dispatch each run
+        without a ``state_doc`` (the factory resolves the composite by ID).
+
     Args:
         ws_root: workspace root path
         name: investigation directory name
-        run_one_composite: callable(spec_id, overrides, steps, sim_name,
-            run_id, db_file) -> {"status": "completed"|"failed", "error"?: str}
+        run_one_composite: callable(*, spec_id, overrides, steps, sim_name,
+            run_id, db_file[, state_doc]) -> {"status": "completed"|"failed", "error"?: str}
             (injected so the orchestrator can be unit-tested with a mock;
             in production the server passes a function that resolves the
-            composite + subprocess-runs it the same way _post_composite_test_run does)
+            composite + subprocess-runs it)
         core_registry: process_bigraph core.link_registry — used to look up
             Visualization classes by address (e.g. "local:TimeSeriesPlot")
         build_and_run: optional callable(doc, core_registry) -> str passed through
@@ -662,6 +776,9 @@ def run_investigation(ws_root: Path, name: str, *,
         return {"name": name, "error": "investigation is already running",
                 "status": "running"}
 
+    # Determine which orchestration path to use.
+    is_multi_composite = "composites" in spec and "runs" in spec
+
     try:
         update_spec_status(ws_root, name, status="running")
         db_file = str(inv_dir / "runs.db")
@@ -672,36 +789,93 @@ def run_investigation(ws_root: Path, name: str, *,
             conn.commit()
         except sqlite3.OperationalError:
             pass  # column already exists
-        # Expand + run each simulation
-        expanded = expand_simulations(spec)
+
         errors: list[dict] = []
         any_failed = False
+        n_runs = 0
         import time as _time
-        for run in expanded:
-            run_id = cr.generate_run_id(spec["composite"], run["overrides"])
-            cr.save_metadata(conn, spec_id=spec["composite"], run_id=run_id,
-                              params=run["overrides"],
-                              label=run["run_label"],
-                              started_at=_time.time())
-            # Stamp sim_name on the row
-            conn.execute("UPDATE runs_meta SET sim_name=? WHERE run_id=?",
-                          (run["sim_name"], run_id))
-            conn.commit()
-            res = run_one_composite(
-                spec_id=spec["composite"],
-                overrides=run["overrides"],
-                steps=run["steps"],
-                sim_name=run["sim_name"],
-                run_id=run_id,
-                db_file=db_file,
-            )
-            if res.get("status") == "completed":
-                cr.complete_metadata(conn, run_id=run_id, n_steps=run["steps"],
-                                      status="completed")
-            else:
-                any_failed = True
-                cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
-                errors.append({"run_id": run_id, "error": res.get("error", "")})
+
+        if is_multi_composite:
+            # ----------------------------------------------------------------
+            # New multi-composite path: iterate spec.runs, load composite
+            # documents from disk, inject emitter, dispatch with state_doc=.
+            # ----------------------------------------------------------------
+            observables = spec.get("observables") or []
+            for run_entry in spec.get("runs") or []:
+                composite_name = run_entry["composite"]
+                overrides = dict(run_entry.get("params") or {})
+                steps = int(run_entry.get("steps", 1))
+
+                try:
+                    raw_doc = _load_composite_doc(inv_dir, composite_name)
+                except FileNotFoundError as e:
+                    errors.append({"composite": composite_name, "error": str(e)})
+                    any_failed = True
+                    continue
+
+                doc = inject_emitter_step(raw_doc, observables)
+                doc = _apply_parameter_overrides(doc, overrides)
+
+                run_id = cr.generate_run_id(composite_name, overrides)
+                cr.save_metadata(conn, spec_id=composite_name, run_id=run_id,
+                                  params=overrides,
+                                  label=composite_name,
+                                  started_at=_time.time())
+                conn.execute("UPDATE runs_meta SET sim_name=? WHERE run_id=?",
+                              (composite_name, run_id))
+                conn.commit()
+
+                res = run_one_composite(
+                    spec_id=composite_name,
+                    overrides=overrides,
+                    steps=steps,
+                    sim_name=composite_name,
+                    run_id=run_id,
+                    db_file=db_file,
+                    state_doc=doc,
+                )
+                n_runs += 1
+                if res.get("status") == "completed" or res.get("ok"):
+                    cr.complete_metadata(conn, run_id=run_id, n_steps=steps,
+                                          status="completed")
+                else:
+                    any_failed = True
+                    cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+                    errors.append({"run_id": run_id, "composite": composite_name,
+                                   "error": res.get("error", "")})
+
+        else:
+            # ----------------------------------------------------------------
+            # Legacy single-composite path: expand simulations, dispatch by
+            # spec_id without a pre-built state_doc.
+            # ----------------------------------------------------------------
+            expanded = expand_simulations(spec)
+            n_runs = len(expanded)
+            for run in expanded:
+                run_id = cr.generate_run_id(spec["composite"], run["overrides"])
+                cr.save_metadata(conn, spec_id=spec["composite"], run_id=run_id,
+                                  params=run["overrides"],
+                                  label=run["run_label"],
+                                  started_at=_time.time())
+                conn.execute("UPDATE runs_meta SET sim_name=? WHERE run_id=?",
+                              (run["sim_name"], run_id))
+                conn.commit()
+                res = run_one_composite(
+                    spec_id=spec["composite"],
+                    overrides=run["overrides"],
+                    steps=run["steps"],
+                    sim_name=run["sim_name"],
+                    run_id=run_id,
+                    db_file=db_file,
+                )
+                if res.get("status") == "completed":
+                    cr.complete_metadata(conn, run_id=run_id, n_steps=run["steps"],
+                                          status="completed")
+                else:
+                    any_failed = True
+                    cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
+                    errors.append({"run_id": run_id, "error": res.get("error", "")})
+
         conn.close()
 
         # Visualization pass — skipped cleanly when build_and_run is None and
@@ -719,7 +893,7 @@ def run_investigation(ws_root: Path, name: str, *,
 
         return {
             "name": name,
-            "n_runs": len(expanded),
+            "n_runs": n_runs,
             "n_visualizations": len(viz_paths),
             "status": final_status,
             "viz_paths": [str(p) for p in viz_paths],

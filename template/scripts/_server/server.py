@@ -2506,19 +2506,49 @@ if __name__ == "__main__":
         ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
 
-        def run_one_composite(*, spec_id, overrides, steps, sim_name, run_id, db_file):
-            """Run one composite via subprocess. Matches _post_composite_test_run shape."""
-            path = find_composite_path(WORKSPACE, pkg, spec_id)
-            if path is None:
-                return {"status": "failed", "error": f"composite not found: {spec_id}"}
-            text = path.read_text()
-            spec = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
-            state = substitute_parameters(spec.get("state") or {},
-                                          spec.get("parameters") or {},
-                                          overrides)
-            state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+        def run_one_composite(*, spec_id, overrides, steps, sim_name, run_id, db_file,
+                              state_doc=None):
+            """Run one composite via subprocess. Matches _post_composite_test_run shape.
+
+            When ``state_doc`` is provided (multi-composite path), the pre-built
+            composite document is used directly; the emitter step has already been
+            injected by ``inject_emitter_step``.  The SQLiteEmitter is then wired
+            in by replacing the emitter address/config so the SQLite run_id/db_file
+            are set correctly.
+
+            When ``state_doc`` is None (legacy single-composite path), the composite
+            is resolved from the registry by spec_id as before.
+            """
+            if state_doc is not None:
+                # Multi-composite: state_doc already has the emitter step injected.
+                # Wire the SQLiteEmitter run_id + db_file into the emitter config.
+                import copy
+                state_doc = copy.deepcopy(state_doc)
+                state = state_doc.get("state") or {}
+                emitter = state.get("emitter") or {}
+                if emitter.get("_type") == "step":
+                    cfg = dict(emitter.get("config") or {})
+                    cfg["run_id"] = run_id
+                    cfg["db_file"] = db_file
+                    emitter["config"] = cfg
+                    emitter["address"] = "local:SQLiteEmitter"
+                    state["emitter"] = emitter
+                state_doc["state"] = state
+            else:
+                # Legacy path: resolve composite from registry by spec_id.
+                path = find_composite_path(WORKSPACE, pkg, spec_id)
+                if path is None:
+                    return {"status": "failed", "error": f"composite not found: {spec_id}"}
+                text = path.read_text()
+                spec = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
+                state = substitute_parameters(spec.get("state") or {},
+                                              spec.get("parameters") or {},
+                                              overrides)
+                state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
+                state_doc = {"state": state}
 
             py = sys.executable
+            _state_to_run = state_doc.get("state") or {}
             script = textwrap.dedent(f"""
                 import json, sys, traceback
                 try:
@@ -2527,7 +2557,7 @@ if __name__ == "__main__":
                     from process_bigraph.emitter import SQLiteEmitter
                     core = build_core()
                     core.register_link('SQLiteEmitter', SQLiteEmitter)
-                    composite = Composite({{'state': {json.dumps(state)}}}, core=core)
+                    composite = Composite({{'state': {json.dumps(_state_to_run)}}}, core=core)
                     composite.run({steps})
                     print('@@@OK@@@')
                 except Exception as e:

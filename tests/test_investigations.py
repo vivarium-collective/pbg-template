@@ -500,3 +500,127 @@ def test_load_spec_legacy_single_composite_still_accepted(tmp_path):
     assert 'name' in spec
     # The legacy field must remain so migration can detect it
     assert spec.get('composite') == 'pkg.composites.foo' or spec.get('composites')
+
+
+# ---------------------------------------------------------------------------
+# inject_emitter_step tests
+# ---------------------------------------------------------------------------
+
+def test_inject_emitter_from_observables_paths():
+    """Orchestrator helper: given a composite doc + spec.yaml.observables,
+    rewrite (or add) the emitter step to record those paths."""
+    from scripts._lib.investigations import inject_emitter_step
+
+    doc = {
+        'state': {
+            'chromosome': {
+                'DnaA_count': {'_type': 'integer', '_default': 100},
+                'free_DnaA': {'_type': 'float', '_default': 50.0},
+            },
+        },
+    }
+    observables = [
+        {'path': ['chromosome', 'DnaA_count']},
+        {'path': ['chromosome', 'free_DnaA']},
+    ]
+    out = inject_emitter_step(doc, observables)
+
+    em = out['state']['emitter']
+    assert em['_type'] == 'step'
+    assert em['inputs']['DnaA_count'] == ['chromosome', 'DnaA_count']
+    assert em['inputs']['free_DnaA'] == ['chromosome', 'free_DnaA']
+    assert em['config']['emit'] == {'DnaA_count': 'integer', 'free_DnaA': 'float'}
+
+
+def test_inject_emitter_skips_missing_paths():
+    from scripts._lib.investigations import inject_emitter_step
+
+    doc = {'state': {'chromosome': {'DnaA_count': {'_type': 'integer', '_default': 100}}}}
+    observables = [
+        {'path': ['chromosome', 'DnaA_count']},
+        {'path': ['chromosome', 'missing']},
+    ]
+    out = inject_emitter_step(doc, observables)
+    em = out['state']['emitter']
+    assert 'DnaA_count' in em['inputs']
+    assert 'missing' not in em['inputs']
+
+
+def test_inject_emitter_empty_observables_returns_empty_emit():
+    from scripts._lib.investigations import inject_emitter_step
+    doc = {'state': {'chromosome': {'DnaA_count': {'_type': 'integer', '_default': 100}}}}
+    out = inject_emitter_step(doc, [])
+    em = out['state']['emitter']
+    # No observables = empty inputs + empty emit schema; runtime decides what to do.
+    assert em['inputs'] == {}
+    assert em['config']['emit'] == {}
+
+
+def test_inject_emitter_handles_emit_all_sentinel():
+    """The set-observables endpoint represents 'emit entire state' as [{path: []}].
+    The injector should treat this as wiring an emitter at the root."""
+    from scripts._lib.investigations import inject_emitter_step
+    doc = {'state': {'chromosome': {'DnaA_count': {'_type': 'integer', '_default': 100}}}}
+    out = inject_emitter_step(doc, [{'path': []}])
+    em = out['state']['emitter']
+    # 'state' port wires at root; emit schema is left empty (runtime serializes everything)
+    assert em.get('inputs', {}).get('state') == [] or em.get('config', {}).get('emit_all') is True
+
+
+# ---------------------------------------------------------------------------
+# run_investigation multi-composite end-to-end stub test
+# ---------------------------------------------------------------------------
+
+def test_run_investigation_iterates_runs_and_passes_state_doc(tmp_path):
+    """Stub run_one_composite to verify the orchestrator loads each composite
+    document and passes it forward as state_doc."""
+    from scripts._lib.investigations import run_investigation
+    import yaml as _yaml
+
+    inv = tmp_path / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'baseline.yaml').write_text(_yaml.safe_dump({
+        'name': 'b',
+        'state': {'chromosome': {'DnaA_count': {'_type': 'integer', '_default': 100}}},
+    }))
+    (composites / 'high.yaml').write_text(_yaml.safe_dump({
+        'name': 'h',
+        'state': {'chromosome': {'DnaA_count': {'_type': 'integer', '_default': 200}}},
+    }))
+    (inv / 'spec.yaml').write_text(_yaml.safe_dump({
+        'name': 'demo',
+        'composites': [
+            {'name': 'baseline', 'source': 'pkg.x',
+             'document': './composites/baseline.yaml'},
+            {'name': 'high', 'source': 'pkg.y',
+             'document': './composites/high.yaml'},
+        ],
+        'observables': [{'path': ['chromosome', 'DnaA_count']}],
+        'runs': [
+            {'composite': 'baseline', 'params': {}, 'steps': 5},
+            {'composite': 'high', 'params': {}, 'steps': 5},
+        ],
+        'visualizations': [],
+    }, sort_keys=False))
+
+    captured = []
+    def fake_run(spec_id, overrides, steps, sim_name, run_id, state_doc=None, **kwargs):
+        captured.append({'sim_name': sim_name, 'has_doc': state_doc is not None,
+                         'emitter_inputs': (state_doc or {}).get('state', {}).get('emitter', {}).get('inputs', {})})
+        return {'ok': True, 'run_id': run_id}
+
+    # Minimal core_registry stub
+    summary = run_investigation(
+        tmp_path, 'demo',
+        run_one_composite=fake_run,
+        core_registry={},
+        build_and_run=lambda doc, reg: '',
+    )
+
+    sim_names = [c['sim_name'] for c in captured]
+    assert sim_names == ['baseline', 'high']
+    assert all(c['has_doc'] for c in captured), 'state_doc must be passed'
+    # Both injected emitters wired to chromosome.DnaA_count
+    for c in captured:
+        assert 'DnaA_count' in c['emitter_inputs']
