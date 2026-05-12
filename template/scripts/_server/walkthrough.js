@@ -258,9 +258,6 @@
     if (pageId === 'simulation-setup') {
       _loadComposites();
     }
-    if (pageId === 'visualizations') {
-      if (typeof _loadVizMigrationBanner === 'function') _loadVizMigrationBanner();
-    }
     // Lazy-load branches when switching to the Branches tab.
     if (pageId === 'branches') {
       if (!window._branchesLoaded) {
@@ -2675,57 +2672,5 @@
       });
   }
   window._acceptGeneratedClass = _acceptGeneratedClass;
-
-  function _loadVizMigrationBanner() {
-    fetch('/api/visualization-migration-plan').then(function(r) { return r.json(); })
-      .then(function(plan) {
-        var actionable = (plan.entries || []).filter(function(e) {
-          return e.action !== 'no-op';
-        });
-        var banner = document.getElementById('viz-migration-banner');
-        var countEl = document.getElementById('viz-migration-banner-count');
-        if (!banner || !countEl) return;
-        if (actionable.length === 0) { banner.style.display = 'none'; return; }
-        banner.style.display = '';
-        countEl.textContent = actionable.length + ' legacy visualization entries can be migrated';
-        window._vizMigrationPlan = plan;
-      })
-      .catch(function() { /* endpoint may not be available; ignore */ });
-  }
-  window._loadVizMigrationBanner = _loadVizMigrationBanner;
-
-  function _openMigrationModal() {
-    var body = document.getElementById('viz-migration-plan-body');
-    var plan = window._vizMigrationPlan || {entries: []};
-    body.innerHTML = (plan.entries || []).map(function(e) {
-      var label = '<strong>' + _esc(e.name) + '</strong> &mdash; ' + _esc(e.action);
-      if (e.target_class) label += ' &rarr; <code>' + _esc(e.target_class) + '</code>';
-      if (e.reason) label += '<br><small style="color:#888">' + _esc(e.reason) + '</small>';
-      if (e.action === 'no-op') return '';
-      return '<div style="padding:6px 0;border-bottom:1px solid #eee">' + label + '</div>';
-    }).join('') || '<p>Nothing to migrate.</p>';
-    openModal('modal-viz-migration');
-  }
-  window._openMigrationModal = _openMigrationModal;
-
-  function _submitMigration() {
-    var plan = window._vizMigrationPlan || {entries: []};
-    var actions = (plan.entries || [])
-      .filter(function(e) { return e.action === 'auto-convert-to-class-backed'; })
-      .map(function(e) {
-        return {name: e.name, action: e.action, target_class: e.target_class};
-      });
-    fetch('/api/visualization-migrate', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({actions: actions}),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
-      .then(function(parts) {
-        var ok = parts[0], j = parts[1];
-        if (!ok) { alert(j.error || 'migrate failed'); return; }
-        closeModal('modal-viz-migration');
-        window.location.reload();
-      });
-  }
-  window._submitMigration = _submitMigration;
 
 })();

@@ -498,8 +498,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_visualization_instances()
         if self.path.startswith("/api/visualization-classes"):
             return self._get_visualization_classes()
-        if self.path.startswith("/api/visualization-migration-plan"):
-            return self._get_visualization_migration_plan()
         rel = self.path.lstrip("/")
         # Refuse path traversal and absolute paths.
         if ".." in rel.split("/") or rel.startswith("/"):
@@ -536,7 +534,6 @@ class Handler(BaseHTTPRequestHandler):
             "/api/visualization-preview-instance": self._post_visualization_preview_instance,
             "/api/visualization-generate":         self._post_visualization_generate,
             "/api/visualization-accept":           self._post_visualization_accept,
-            "/api/visualization-migrate":          self._post_visualization_migrate,
             "/api/simulation":                   self._post_simulation,
             "/api/run-tests":          self._post_run_tests,
             "/api/render":             self._post_render,
@@ -1498,105 +1495,6 @@ if __name__ == "__main__":
         except Exception as e:
             resp, code = {"error": f"workstream error: {e}"}, 500
         return self._json(resp, code)
-
-    def _get_visualization_migration_plan(self):
-        """GET /api/visualization-migration-plan — classify every entry in
-        workspace.yaml.visualizations against the current registry.
-        Returns: {entries: [{name, action, target_class?, legacy_path?, reason?}, ...]}
-        """
-        from scripts._lib.migrations import classify_viz_entry
-        try:
-            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
-        except Exception:
-            ws_data = {}
-        registered = {c["name"] for c in self._list_visualization_classes()}
-        entries = []
-        for entry in (ws_data.get("visualizations") or []):
-            if not isinstance(entry, dict):
-                continue
-            classification = classify_viz_entry(entry, registered, workspace_root=WORKSPACE)
-            classification = dict(classification)
-            classification["name"] = entry.get("name")
-            classification["description"] = entry.get("description", "")
-            entries.append(classification)
-        return self._json({"entries": entries}, 200)
-
-    def _post_visualization_migrate(self, body: dict):
-        """POST /api/visualization-migrate {actions: [...]} — apply the
-        per-entry actions returned by /api/visualization-migration-plan.
-        Each action is one of:
-            {name, action: 'auto-convert-to-class-backed', target_class}
-            {name, action: 'regenerate-as-class'}  (logs only; user runs /pbg-viz)
-            {name, action: 'skip'}
-        """
-        import datetime
-        actions = body.get("actions") or []
-        if not isinstance(actions, list):
-            return self._json({"error": "actions must be a list"}, 400)
-
-        commit_msg = "chore(viz): migrate legacy workspace.yaml entries"
-
-        def do_action():
-            ws_file = WORKSPACE / "workspace.yaml"
-            ws = yaml.safe_load(ws_file.read_text()) or {}
-            entries = ws.get("visualizations") or []
-            _now = datetime.datetime.now(datetime.timezone.utc)
-            log_lines = [f"# Migration log {_now.isoformat()}"]
-            changed = False
-            for act in actions:
-                name = act.get("name")
-                idx = next((i for i, e in enumerate(entries)
-                            if isinstance(e, dict) and e.get("name") == name), None)
-                if idx is None:
-                    log_lines.append(f"- {name}: skipped (not found)")
-                    continue
-                kind = act.get("action")
-                if kind == "auto-convert-to-class-backed":
-                    target = act.get("target_class")
-                    if not target:
-                        log_lines.append(f"- {name}: skipped (missing target_class)")
-                        continue
-                    before = dict(entries[idx])
-                    entries[idx] = {"name": name, "class": target, "config": {}}
-                    log_lines.append(f"- {name}: auto-convert -> class={target} (was: {before})")
-                    changed = True
-                elif kind == "regenerate-as-class":
-                    log_lines.append(
-                        f"- {name}: regenerate-as-class (no workspace.yaml change; "
-                        f"user must run /pbg-viz {name} via the dashboard)"
-                    )
-                elif kind == "skip":
-                    log_lines.append(f"- {name}: skip")
-                else:
-                    log_lines.append(f"- {name}: unknown action {kind!r}; skipping")
-
-            log_dir = WORKSPACE / ".pbg" / "migrations"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            log_path = log_dir / f"{_now.strftime('%Y%m%d-%H%M%S')}.log"
-            log_path.write_text("\n".join(log_lines) + "\n")
-
-            if changed:
-                ws["visualizations"] = entries
-                ws_file.write_text(yaml.dump(ws, sort_keys=False))
-
-        # Apply file + log side-effects eagerly, before the git wrapper runs.
-        # This mirrors _post_visualization_accept's pattern: the accept handler
-        # writes the file before calling _active_branch_action with a no-op stub,
-        # so the changes survive even when the git wrapper returns 409/500.
-        # NOTE: do_action() uses yaml directly (not load_workspace/save_workspace)
-        # to avoid the schema-validation path that requires a real workspace root.
-        try:
-            do_action()
-        except Exception as e:
-            return self._json({"error": f"migration failed: {e}"}, 500)
-
-        def _git_stub():
-            pass  # file + log already written above; git add -A picks them up
-
-        try:
-            return self._json(*_active_branch_action(commit_msg, _git_stub))
-        except Exception as e:
-            return self._json({"error": f"workstream error: {e}"}, 500)
 
     def _post_simulation(self, body: dict):
         """Register a simulation in workspace.yaml.
@@ -2794,6 +2692,10 @@ if __name__ == "__main__":
                     pass
             return False
 
+        # Inject workspace-local viz classes (non-pip-installed) so the
+        # catalog shows them alongside discovered pbg-* package classes.
+        self._add_workspace_viz_classes(registry)
+
         per_cls: dict = {}
         for name, cls in registry.items():
             if not _is_viz(cls) or name == "Visualization":
@@ -2882,35 +2784,72 @@ if __name__ == "__main__":
         },
     }
 
+    def _build_workspace_core(self):
+        """Build the workspace's process-bigraph core and return (core, registry_dict).
+        On failure, returns (None, {})."""
+        _ws_add_to_sys_path()
+        try:
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
+            pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+            sys.path.insert(0, str(WORKSPACE))
+            core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
+            core = core_module.build_core()
+            return core, dict(core.link_registry)
+        except Exception:
+            return None, {}
+
+    def _add_workspace_viz_classes(self, registry: dict) -> dict:
+        """Walk <workspace_pkg>.visualizations.* and inject local Visualization
+        subclasses into ``registry`` (so non-pip-installed workspace classes
+        are reachable). Returns the mutated registry."""
+        try:
+            from pbg_superpowers.visualization import Visualization as _VizBase
+        except ImportError:
+            return registry
+        try:
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+            pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+            import pkgutil, importlib
+            viz_pkg = importlib.import_module(f"{pkg}.visualizations")
+            for _, modname, _ in pkgutil.iter_modules(viz_pkg.__path__):
+                try:
+                    mod = importlib.import_module(f"{pkg}.visualizations.{modname}")
+                    for attr_val in vars(mod).values():
+                        if not isinstance(attr_val, type):
+                            continue
+                        if attr_val is _VizBase:
+                            continue
+                        if issubclass(attr_val, _VizBase):
+                            registry[attr_val.__name__] = attr_val
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return registry
+
     def _resolve_viz_class(self, address: str):
-        """Resolve an 'local:<Name>' address (or bare class name) to the class
-        object. Returns (class_obj, short_name) or (None, None) if not found.
+        """Resolve a 'local:<Name>' address (or bare class name) to the class
+        object. Accepts both short names (e.g. ``TimeSeriesPlot``) and the
+        fully-qualified module path that ``bigraph_schema.discover_packages``
+        emits. Returns (class_obj, short_name) or (None, None) if not found.
         """
         class_key = address.split(":", 1)[1] if ":" in address else address
-        for entry in self._list_visualization_classes():
-            if entry["name"] == class_key or entry["address"] == address:
-                # Re-import to get the actual class (the list endpoint discards it)
-                _ws_add_to_sys_path()
-                try:
-                    ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
-                    pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-                    sys.path.insert(0, str(WORKSPACE))
-                    core_module = __import__(f"{pkg}.core", fromlist=["build_core"])
-                    core = core_module.build_core()
-                    registry = dict(core.link_registry)
-                except Exception:
-                    registry = {}
-                try:
-                    from pbg_superpowers.visualizations import (
-                        TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
-                    )
-                    for cls in [TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap]:
-                        registry[cls.__name__] = cls
-                except ImportError:
-                    pass
-                cls = registry.get(class_key)
-                if cls is not None:
-                    return cls, class_key
+        core, registry = self._build_workspace_core()
+        try:
+            from pbg_superpowers.visualizations import (
+                TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap,
+            )
+            for cls in [TimeSeriesPlot, ParamVsObservable, Distribution, PhaseSpace, Heatmap]:
+                registry[cls.__name__] = cls
+        except ImportError:
+            pass
+        self._add_workspace_viz_classes(registry)
+
+        short = class_key.rsplit(".", 1)[-1]
+        for key in (class_key, short):
+            cls = registry.get(key)
+            if cls is not None:
+                return cls, short
         return None, None
 
     def _demo_state_for(self, cls, class_key: str) -> dict:
@@ -2986,11 +2925,94 @@ if __name__ == "__main__":
         # Demo path (default or fallback).
         try:
             state = self._demo_state_for(cls, class_key)
-            inst = cls.__new__(cls)
-            inst.config = config or {}
-            html = inst.update(state).get("html", "")
+
+            # Detect streaming-style viz (all inputs are scalar types). For
+            # these, feed N synthetic timesteps so the accumulator builds up a
+            # meaningful trajectory. The 5 default v2 classes use list[float]
+            # inputs and render in a single call; wrapper classes like
+            # ReaDDyPlots/BioreactorPlots use scalar inputs and accumulate.
+            scalar_types = {"float", "integer", "string", "boolean"}
+            # Probe inputs without full init (bare instance is enough for inputs()).
+            probe = cls.__new__(cls)
+            try:
+                probe.config = config or {}
+            except Exception:
+                pass
+            declared = {}
+            try:
+                declared = probe.inputs() or {}
+            except Exception:
+                pass
+            is_streaming = (
+                bool(declared)
+                and all(t in scalar_types for t in declared.values())
+                and not state
+            )
+
+            # Construct the real instance. Streaming viz typically need their
+            # __init__ to run (to set up accumulator buffers), so try a proper
+            # constructor with a fresh core; fall back to object.__new__ if
+            # the class's signature doesn't accept (config, core).
+            inst = None
+            if is_streaming:
+                core, _ = self._build_workspace_core()
+                if core is None:
+                    try:
+                        from bigraph_schema import allocate_core
+                        core = allocate_core()
+                    except Exception:
+                        core = None
+                for ctor_args in (
+                    {"config": config or {}, "core": core},
+                    {"config": config or {}},
+                ):
+                    try:
+                        inst = cls(**ctor_args)
+                        break
+                    except Exception:
+                        continue
+            if inst is None:
+                inst = cls.__new__(cls)
+                try:
+                    inst.config = config or {}
+                except Exception:
+                    pass
+
+            if is_streaming:
+                # Synthesize 12 timesteps with smoothly-varying scalar values
+                # so the accumulator has enough data to render a trajectory.
+                import math
+                html = ""
+                for step in range(12):
+                    synth = {}
+                    for port, port_type in declared.items():
+                        if port_type == "float":
+                            if port in ("time", "t"):
+                                synth[port] = float(step) * 0.5
+                            else:
+                                # Smooth wave; offset per-port via hash to avoid collinear demos.
+                                phase = (hash(port) & 0xff) / 40.0
+                                synth[port] = 1.0 + 0.5 * math.sin(step * 0.6 + phase) + step * 0.1
+                        elif port_type == "integer":
+                            synth[port] = int(50 + step * 7)
+                        elif port_type == "boolean":
+                            synth[port] = step % 2 == 0
+                        else:
+                            synth[port] = f"step-{step}"
+                    result = inst.update(synth) or {}
+                    html = result.get("html", "") or html
+            else:
+                html = inst.update(state).get("html", "")
+
             if not html:
-                html = f'<p style="color:#991b1b">{class_key}: empty render (no demo data?)</p>'
+                html = (
+                    f'<div style="padding:20px;font-family:system-ui">'
+                    f'<p><strong>{class_key}</strong>: no demo state available.</p>'
+                    f'<p style="color:#666">Add a <code>demo()</code> classmethod to '
+                    f'the viz class, or register an instance in workspace.yaml and '
+                    f'use the Preview button on the instance row to render against '
+                    f'real emitter data.</p></div>'
+                )
             return self._json({
                 "ok": True, "html": html, "source_used": "demo",
                 "notes": "; ".join(notes),

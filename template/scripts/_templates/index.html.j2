@@ -332,14 +332,6 @@
   <h2 class="page-title">Visualizations</h2>
   <p class="page-lead">Charts rendered from observable trajectories. Either configure a registered class with specific settings, or describe what to plot in natural language and let <code>/pbg-viz</code> generate the function.</p>
 
-  <!-- Migration banner (shown only if any legacy entries detected) -->
-  <div id="viz-migration-banner" style="display:none;background:#fef3c7;border:1px solid #fde047;
-        padding:10px;border-radius:6px;margin-bottom:12px">
-    <strong id="viz-migration-banner-count"></strong>
-    <button class="btn-mini" onclick="_openMigrationModal()" style="margin-left:8px">
-      Review migration
-    </button>
-  </div>
 
   <!-- Workspace visualizations (workspace.yaml-driven, primary panel) -->
   <div class="panel">
@@ -410,20 +402,6 @@
   </div>
 
 </section>
-
-<!-- Migration review modal -->
-<div id="modal-viz-migration" class="modal-overlay">
-  <div class="modal-box" style="max-width:760px">
-    <button class="modal-close" onclick="closeModal('modal-viz-migration')">&times;</button>
-    <h3>Migrate legacy visualizations</h3>
-    <p style="font-size:0.9em;color:#555">Review each entry's planned migration. Class-backed
-      entries are skipped; description-only entries are either auto-converted or flagged
-      for re-generation. Auto-conversions write to <code>workspace.yaml</code> and create
-      a commit on the active branch.</p>
-    <div id="viz-migration-plan-body" style="margin:8px 0"></div>
-    <button class="action-btn" onclick="_submitMigration()">Apply migration</button>
-  </div>
-</div>
 
 <!-- Preview modal (iframe-based) -->
 <div id="modal-viz-preview" class="modal-overlay">
