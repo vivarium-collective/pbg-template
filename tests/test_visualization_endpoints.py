@@ -1,4 +1,5 @@
-"""Tests for /api/visualization-generate and /api/visualization-accept endpoints."""
+"""Tests for /api/visualization-generate, /api/visualization-accept,
+/api/investigation-composites, and /api/investigation-state-tree endpoints."""
 import json
 import sys
 import threading
@@ -134,6 +135,87 @@ def test_post_visualization_generate_rejects_bad_name(workspace_server):
         f"Expected 'name' in error message, got: {j}"
     )
 
+
+# ---------------------------------------------------------------------------
+# Investigation Composites + State Tree endpoint tests
+# ---------------------------------------------------------------------------
+
+def test_get_investigation_composites_lists_entries(workspace_server):
+    inv_dir = workspace_server.root / 'investigations' / 'demo'
+    inv_dir.mkdir(parents=True)
+    composites_dir = inv_dir / 'composites'
+    composites_dir.mkdir()
+    (composites_dir / 'baseline.yaml').write_text(yaml.safe_dump({
+        'name': 'baseline-doc',
+        'state': {'foo': {'_type': 'integer', '_default': 1}},
+    }))
+    (inv_dir / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [{'name': 'baseline', 'source': 'pkg.x',
+                         'document': './composites/baseline.yaml'}],
+        'runs': [],
+    }, sort_keys=False))
+
+    req = urllib.request.Request(
+        workspace_server.url + '/api/investigation-composites?investigation=demo'
+    )
+    with urllib.request.urlopen(req) as resp:
+        data = json.loads(resp.read())
+    assert len(data['composites']) == 1
+    assert data['composites'][0]['name'] == 'baseline'
+    assert data['composites'][0]['document'] == './composites/baseline.yaml'
+
+
+def test_get_investigation_state_tree(workspace_server):
+    inv_dir = workspace_server.root / 'investigations' / 'demo'
+    inv_dir.mkdir(parents=True)
+    composites_dir = inv_dir / 'composites'
+    composites_dir.mkdir()
+    (composites_dir / 'baseline.yaml').write_text(yaml.safe_dump({
+        'name': 'baseline-doc',
+        'state': {
+            'chromosome': {'count': {'_type': 'integer', '_default': 100}},
+            'replication': {'_type': 'process', 'address': 'local:Foo',
+                              'config': {'rate': 1.0}},
+        },
+    }))
+    (inv_dir / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [{'name': 'baseline', 'source': 'pkg.x',
+                         'document': './composites/baseline.yaml'}],
+        'runs': [],
+    }, sort_keys=False))
+
+    req = urllib.request.Request(
+        workspace_server.url + '/api/investigation-state-tree'
+        '?investigation=demo&composite=baseline'
+    )
+    with urllib.request.urlopen(req) as resp:
+        data = json.loads(resp.read())
+    nodes = data['nodes']
+    paths = {tuple(n['path']) for n in nodes}
+    assert ('chromosome', 'count') in paths
+    assert ('replication',) in paths
+
+
+def test_get_investigation_state_tree_404_for_missing_composite(workspace_server):
+    inv_dir = workspace_server.root / 'investigations' / 'demo'
+    inv_dir.mkdir(parents=True)
+    (inv_dir / 'spec.yaml').write_text('name: demo\ncomposites:\n- name: x\n  source: pkg.x\nruns: []\n')
+    req = urllib.request.Request(
+        workspace_server.url + '/api/investigation-state-tree'
+        '?investigation=demo&composite=nonexistent'
+    )
+    try:
+        urllib.request.urlopen(req)
+        raise AssertionError('expected 404')
+    except urllib.error.HTTPError as e:
+        assert e.code == 404
+
+
+# ---------------------------------------------------------------------------
+# Visualization accept test (skipped if pbg-superpowers not installed)
+# ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(
     not _HAS_AS_VIZ,

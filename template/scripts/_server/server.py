@@ -480,6 +480,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_composite_runs()
         if self.path.startswith("/api/composite-resolve"):
             return self._get_composite_resolve()
+        if self.path.startswith("/api/investigation-composites"):
+            return self._get_investigation_composites()
+        if self.path.startswith("/api/investigation-state-tree"):
+            return self._get_investigation_state_tree()
         if self.path.startswith("/api/investigation/"):
             return self._get_investigation_detail()
         if self.path.startswith("/api/investigations"):
@@ -2344,6 +2348,47 @@ if __name__ == "__main__":
             "viz_files": viz_files,
             "runs_summary": runs_summary,
         }, 200)
+
+    def _get_investigation_composites(self):
+        """GET /api/investigation-composites?investigation=<n>
+        Returns: {composites: [{name, source?, extends?, document, ...}]}
+        """
+        import urllib.parse
+        _ws_add_to_sys_path()
+        from scripts._lib.investigations import load_spec, InvestigationSpecError
+        qs = urllib.parse.urlparse(self.path).query
+        name = urllib.parse.parse_qs(qs).get('investigation', [''])[0].strip()
+        if not name:
+            return self._json({"error": "investigation is required"}, 400)
+        spec_path = WORKSPACE / "investigations" / name / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": f"investigation '{name}' not found"}, 404)
+        try:
+            spec = load_spec(spec_path)
+        except InvestigationSpecError as e:
+            return self._json({"error": f"spec error: {e}"}, 400)
+        return self._json({"composites": spec.get("composites") or []}, 200)
+
+    def _get_investigation_state_tree(self):
+        """GET /api/investigation-state-tree?investigation=<n>&composite=<c>
+        Returns: {nodes: [{path, kind, type?, default?, address?, config?}]}
+        """
+        import urllib.parse
+        _ws_add_to_sys_path()
+        from scripts._lib.composite_recipes import walk_state_tree
+        qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
+        inv = qs.get('investigation', '').strip()
+        comp = qs.get('composite', '').strip()
+        if not inv or not comp:
+            return self._json({"error": "investigation + composite required"}, 400)
+        composite_path = WORKSPACE / "investigations" / inv / "composites" / f"{comp}.yaml"
+        if not composite_path.is_file():
+            return self._json({"error": f"composite document not found: {composite_path}"}, 404)
+        try:
+            doc = yaml.safe_load(composite_path.read_text()) or {}
+        except Exception as e:
+            return self._json({"error": f"failed to parse composite: {e}"}, 500)
+        return self._json({"nodes": walk_state_tree(doc)}, 200)
 
     def _get_investigations(self):
         """GET /api/investigations — return summaries of all investigations."""
