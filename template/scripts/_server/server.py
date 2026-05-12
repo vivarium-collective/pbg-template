@@ -3987,6 +3987,15 @@ if __name__ == "__main__":
 
                 # Step 1: submodule add if directory not already present.
                 if not abs_target.exists():
+                    # Clean up any stale `.git/modules/<path>` left behind by a
+                    # previous uninstall — git refuses `submodule add` when one
+                    # exists. The matching working-tree dir was already
+                    # verified absent above, and the module is not in
+                    # .gitmodules, so the leftover is safe to remove.
+                    stale = WORKSPACE / ".git" / "modules" / target_path
+                    if stale.is_dir():
+                        shutil.rmtree(stale, ignore_errors=True)
+
                     r = subprocess.run(
                         ["git", "submodule", "add", "-b", catalog_entry["ref"],
                          catalog_entry["source"], target_path],
