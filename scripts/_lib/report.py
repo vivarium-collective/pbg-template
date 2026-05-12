@@ -124,74 +124,6 @@ def _load_document(ws_root: Path, package_path: str | None) -> dict:
             sys.path.remove(ws_root_str)
 
 
-def _read_phases(ws_root: Path) -> list[dict]:
-    """Read all phases/phase-*.md files at workspace root; parse frontmatter; sort by n."""
-    phases_dir = ws_root / "phases"
-    if not phases_dir.exists():
-        return []
-    phase_files = sorted(phases_dir.glob("phase-*.md"))
-    phases = []
-    for pf in phase_files:
-        try:
-            from .phase_md import parse_phase_md
-            fm, _ = parse_phase_md(pf.read_text())
-            phases.append(fm)
-        except Exception:
-            try:
-                import re
-                text = pf.read_text().replace("\r\n", "\n")
-                m = re.match(r"\A---\n(.*?)\n---", text, re.DOTALL)
-                if m:
-                    fm = yaml.safe_load(m.group(1)) or {}
-                    phases.append(fm)
-            except Exception:
-                pass
-
-    def _phase_num(p):
-        return int(p.get("phase", p.get("n", 0)))
-
-    phases.sort(key=_phase_num)
-    for p in phases:
-        if "phase" in p and "n" not in p:
-            p["n"] = p["phase"]
-        elif "n" in p and "phase" not in p:
-            p["phase"] = p["n"]
-    return phases
-
-
-def _current_phase(phases: list[dict]) -> dict | None:
-    """Pick the 'current' phase: first in_progress, else first non-complete, else last."""
-    if not phases:
-        return None
-    for p in phases:
-        if p.get("status") == "in_progress":
-            return p
-    for p in phases:
-        if p.get("status") != "complete":
-            return p
-    return phases[-1]  # all complete
-
-
-def _phase_details(ws_root: Path) -> list[dict]:
-    """For each phase entry, parse phases/phase-<n>.md to extract body sections."""
-    from .phase_md import parse_phase_md
-    out = []
-    phases_dir = ws_root / "phases"
-    if not phases_dir.is_dir():
-        return out
-    for f in sorted(phases_dir.glob("phase-*.md")):
-        try:
-            fm, body = parse_phase_md(f.read_text())
-        except Exception:
-            continue
-        out.append({
-            "frontmatter": fm,
-            "body": body,
-            "n": fm.get("phase", fm.get("n")),
-        })
-    return out
-
-
 def _count_bib_entries(ws_root: Path) -> int:
     """Count @-entries in references/papers.bib."""
     bib_file = ws_root / "references" / "papers.bib"
@@ -316,17 +248,9 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
     simulations = ws.get("simulations") or []
     package_path = ws.get("package_path")
 
-    # Read phases from phase-*.md files; fall back to workspace.yaml phases list.
-    phases = _read_phases(ws_root)
-    if not phases:
-        phases = ws.get("phases") or []
-
     # Load registry from workspace package.
     registry, registry_warning = _load_registry(ws_root, package_path)
     pbg_doc = _load_document(ws_root, package_path)
-
-    current_phase = _current_phase(phases)
-    phase_details = _phase_details(ws_root)
 
     out.write_text(tpl.render(
         workspace_name=ws["name"],
@@ -341,9 +265,6 @@ def render_workspace_report(ws_root: Path | None = None, *, today: str | None = 
         observables=observables,
         visualizations=visualizations,
         simulations=simulations,
-        phases=phases,
-        current_phase=current_phase,
-        phase_details=phase_details,
         package_path=package_path,
         registry=registry,
         registry_warning=registry_warning,

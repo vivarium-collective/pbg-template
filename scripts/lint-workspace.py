@@ -179,31 +179,6 @@ def main() -> None:
                 if actual != sha:
                     _fail(f"references_pdfs '{bib_key}' sha256 mismatch (recorded={sha[:16]}…, actual={actual[:16]}…)")
 
-    # Phase frontmatter integrity: scan phases/ at workspace root (v2: no per-model nesting).
-    phase_validator = Draft7Validator(_schema("phase.schema.json"))
-    fm_re = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
-    phases_dir = WS_ROOT / "phases"
-    registered_phase_ns: set = set()
-    if phases_dir.is_dir():
-        for f in sorted(phases_dir.glob("phase-*.md")):
-            text = f.read_text().replace("\r\n", "\n")
-            mo = fm_re.match(text)
-            if not mo:
-                _fail(f"{f} has no YAML frontmatter")
-            try:
-                fm = yaml.safe_load(mo.group(1)) or {}
-                phase_validator.validate(fm)
-                n = fm.get("phase", fm.get("n"))
-                if n is not None:
-                    registered_phase_ns.add(int(n))
-            except (ValidationError, yaml.YAMLError) as e:
-                _fail(f"{f} invalid frontmatter: {e}")
-
-    # Also collect phase numbers from workspace.yaml phases list (in case no phase-*.md files).
-    for phase_entry in ws.get("phases", []) or []:
-        if isinstance(phase_entry, dict) and phase_entry.get("n") is not None:
-            registered_phase_ns.add(int(phase_entry["n"]))
-
     # Collect registered simulation names.
     registered_sim_names: set = set()
     for sim in ws.get("simulations", []) or []:
@@ -217,20 +192,12 @@ def main() -> None:
         if t_start is not None and t_end is not None:
             if float(t_end) <= float(t_start):
                 _fail(f"simulation '{sim_name}' has t_end ({t_end}) <= t_start ({t_start})")
-        # phases references
-        for n in sim.get("phases") or []:
-            if int(n) not in registered_phase_ns:
-                _fail(f"simulation '{sim_name}' references missing phase {n}")
 
-    # Visualization phase references: each phases[*] must reference a registered phase.
+    # Visualization simulation references.
     for viz in ws.get("visualizations", []) or []:
         if not isinstance(viz, dict):
             continue
-        viz_phases = viz.get("phases") or []
         viz_name = viz.get("name", "?")
-        for n in viz_phases:
-            if int(n) not in registered_phase_ns:
-                _fail(f"visualization '{viz_name}' references missing phase {n}")
         # simulation reference
         viz_sim = viz.get("simulation")
         if viz_sim and registered_sim_names and viz_sim not in registered_sim_names:

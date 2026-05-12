@@ -10,8 +10,7 @@ v0.1.12: /api/reference-pdf is now drop-and-go; pypdf extracts metadata from the
 typed fields are required. Auto-generates bib_key. Sets _metadata_pending flag when extraction
 is incomplete.
 v0.3.0: schema v2 — workspace IS the model. All endpoints drop model scoping.
-  /api/observable, /api/visualization, /api/phase-plan, /api/phase-start, /api/phase-gate,
-  /api/run-tests now operate on top-level workspace state directly. Pending-visibility helper
+  /api/observable, /api/visualization, /api/run-tests now operate on top-level workspace state directly. Pending-visibility helper
   added: unmerged stage/* branches surface entries with a "(pending review)" badge.
 v0.3.7-A: /api/import-install — pip-install an import into the workspace venv; marks
   installed=True + install_path in workspace.yaml; invalidates registry cache.
@@ -521,9 +520,6 @@ class Handler(BaseHTTPRequestHandler):
             # Legacy alias kept for backward compat (v0.1.9 and earlier).
             "/api/reference":          self._post_reference,
             "/api/expert-doc":         self._post_expert_doc,
-            "/api/phase-plan":         self._post_phase_plan,
-            "/api/phase-start":        self._post_phase_start,
-            "/api/phase-gate":         self._post_phase_gate,
             "/api/observable":         self._post_observable,
             "/api/visualization":                self._post_visualization,
             "/api/visualization-create":         self._post_visualization_create,
@@ -957,162 +953,6 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._json(*_active_branch_action(commit_msg, action))
 
-    def _post_phase_plan(self, body: dict):
-        """Plan phases for the workspace (v0.3.0: no model param).
-
-        Body: {phases: [{n, name, objective?, prereq_phases?, acceptance_tests?}, ...]}
-        """
-        phases_input = body.get("phases", [])
-
-        if not isinstance(phases_input, list) or not phases_input:
-            return self._json({"error": "phases must be a non-empty list"}, 400)
-
-        phases: list[dict] = []
-        for p in phases_input:
-            if not isinstance(p, dict):
-                return self._json({"error": "each phase must be a JSON object"}, 400)
-            n = p.get("n")
-            name = str(p.get("name", "")).strip()
-            objective = str(p.get("objective", "")).strip()
-            if n is None or not name:
-                return self._json({"error": "each phase must have n and name"}, 400)
-            phases.append({
-                "n": int(n),
-                "name": name,
-                "objective": objective,
-                "prereq_phases": p.get("prereq_phases", []),
-                "acceptance_tests": p.get("acceptance_tests", []),
-                "status": "planned",
-            })
-
-        commit_msg = f"feat(8): plan phases (N={len(phases)})"
-
-        def action():
-            _ws_add_to_sys_path()
-            from scripts._lib.phase_files import create_initial_plan
-            from scripts._lib.workspace_yaml import load_workspace, save_workspace
-
-            # Write phase-*.md files at workspace root phases/.
-            phases_dir = WORKSPACE / "phases"
-            create_initial_plan(phases_dir, "workspace", phases)
-
-            # Update top-level phases[] in workspace.yaml.
-            ws_file = WORKSPACE / "workspace.yaml"
-            ws = load_workspace(ws_file)
-            ws["phases"] = [
-                {"n": p["n"], "name": p["name"], "status": "planned"}
-                for p in phases
-            ]
-            save_workspace(ws_file, ws)
-
-        return self._json(*_active_branch_action(commit_msg, action))
-
-    def _post_phase_start(self, body: dict):
-        """Start a phase for the workspace (v0.3.0: no model param).
-
-        Body: {n: <int>}
-        """
-        n = body.get("n")
-        if n is None:
-            return self._json({"error": "n is required"}, 400)
-        n = int(n)
-
-        commit_msg = f"feat(9): start phase {n}"
-
-        def action():
-            _ws_add_to_sys_path()
-            from scripts._lib.phase_md import parse_phase_md, render_phase_md
-            from scripts._lib.phase_gate import generate_test_module
-            from scripts._lib.workspace_yaml import load_workspace, save_workspace
-
-            phases_dir = WORKSPACE / "phases"
-            phase_file = phases_dir / f"phase-{n}.md"
-            if not phase_file.exists():
-                raise FileNotFoundError(f"phase-{n}.md not found at {phase_file}")
-
-            fm, body_text = parse_phase_md(phase_file.read_text())
-
-            # Gate: refuse if phase n-1 hasn't passed (for n > 1).
-            if n > 1:
-                prev_file = phases_dir / f"phase-{n-1}.md"
-                if prev_file.exists():
-                    prev_fm, _ = parse_phase_md(prev_file.read_text())
-                    if not prev_fm.get("gate_passed", False):
-                        raise ValueError(
-                            f"phase {n-1} has not passed its gate. "
-                            "Evaluate the gate for the previous phase first."
-                        )
-
-            fm["status"] = "in_progress"
-            phase_file.write_text(render_phase_md(fm, body_text))
-
-            # Generate test stubs at workspace root tests/.
-            test_out = WORKSPACE / "tests" / "test_phases.py"
-            generate_test_module(fm, test_out)
-
-            # Update workspace.yaml top-level phases[].
-            ws_file = WORKSPACE / "workspace.yaml"
-            ws = load_workspace(ws_file)
-            for phase_entry in (ws.get("phases") or []):
-                if phase_entry.get("n") == n:
-                    phase_entry["status"] = "in_progress"
-                    break
-            save_workspace(ws_file, ws)
-
-        return self._json(*_active_branch_action(commit_msg, action))
-
-    def _post_phase_gate(self, body: dict):
-        """Evaluate a phase gate for the workspace (v0.3.0: no model param).
-
-        Body: {n: <int>}
-        """
-        n = body.get("n")
-        if n is None:
-            return self._json({"error": "n is required"}, 400)
-        n = int(n)
-
-        commit_msg = f"feat(9): evaluate gate for phase {n}"
-
-        gate_status = {"status": "gate_pending"}
-
-        def action():
-            _ws_add_to_sys_path()
-            from scripts._lib.phase_md import parse_phase_md, render_phase_md
-            from scripts._lib.phase_gate import evaluate_gate
-            from scripts._lib.workspace_yaml import load_workspace, save_workspace
-
-            phases_dir = WORKSPACE / "phases"
-            phase_file = phases_dir / f"phase-{n}.md"
-            if not phase_file.exists():
-                raise FileNotFoundError(f"phase-{n}.md not found at {phase_file}")
-
-            fm, body_text = parse_phase_md(phase_file.read_text())
-            result = evaluate_gate(fm)
-
-            if result.passed:
-                fm["status"] = "complete"
-                fm["gate_passed"] = True
-            else:
-                fm["status"] = "gate_pending"
-                fm["gate_passed"] = False
-
-            gate_status["status"] = fm["status"]
-            phase_file.write_text(render_phase_md(fm, body_text))
-
-            # Update workspace.yaml.
-            ws_file = WORKSPACE / "workspace.yaml"
-            ws = load_workspace(ws_file)
-            for phase_entry in (ws.get("phases") or []):
-                if phase_entry.get("n") == n:
-                    phase_entry["status"] = gate_status["status"]
-                    break
-            save_workspace(ws_file, ws)
-
-        resp, code = _active_branch_action(commit_msg, action)
-        if code == 200:
-            resp["gate_status"] = gate_status["status"]
-        return self._json(resp, code)
-
     def _post_observable(self, body: dict):
         """Register an observable in workspace.yaml (v0.3.0: top-level, no model).
 
@@ -1171,7 +1011,6 @@ class Handler(BaseHTTPRequestHandler):
         viz_type = (body.get("type") or "").strip() or None
         obs_list = body.get("observables") or []
         config = body.get("config") or {}
-        phases_raw = body.get("phases") or []
         simulation_name = (body.get("simulation") or "").strip() or None
 
         # Structured path: if type or observables are provided, validate them fully.
@@ -1182,13 +1021,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "type must be one of: time-series, phase-space, heatmap, histogram"}, 400)
             if not isinstance(obs_list, list) or not obs_list:
                 return self._json({"error": "observables must be a non-empty list"}, 400)
-
-        if not isinstance(phases_raw, list):
-            return self._json({"error": "phases must be a list of integers"}, 400)
-        try:
-            phases_list = [int(p) for p in phases_raw]
-        except (TypeError, ValueError):
-            return self._json({"error": "phases must be a list of integers"}, 400)
 
         commit_msg = f"feat(setup): add visualization '{name}'"
 
@@ -1209,19 +1041,6 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError(
                         f"observables not registered: {missing}. "
                         "Register them first via /api/observable."
-                    )
-
-            # Validate phase references if phases provided.
-            if phases_list:
-                registered_phases = {
-                    p.get("n") for p in (ws.get("phases") or [])
-                    if isinstance(p, dict)
-                }
-                missing_phases = [n for n in phases_list if n not in registered_phases]
-                if missing_phases:
-                    raise ValueError(
-                        f"phases not registered: {missing_phases}. "
-                        "Register them first via /api/phase-plan."
                     )
 
             # Validate simulation reference if provided.
@@ -1252,8 +1071,6 @@ class Handler(BaseHTTPRequestHandler):
                 entry["observables"] = list(obs_list)
             if config:
                 entry["config"] = config
-            if phases_list:
-                entry["phases"] = phases_list
             if simulation_name:
                 entry["simulation"] = simulation_name
             visualizations.append(entry)
@@ -1474,7 +1291,7 @@ if __name__ == "__main__":
         """Register a simulation in workspace.yaml.
 
         Body: {name, description?, t_start, t_end, initial_state?, parameter_overrides?,
-               emitter_config?, phases?, processes?}
+               emitter_config?, processes?}
         """
         import re as _re
         name = (body.get("name") or "").strip()
@@ -1485,7 +1302,6 @@ if __name__ == "__main__":
         parameter_overrides = body.get("parameter_overrides") or None
         emitter_config = body.get("emitter_config") or None
         composite = (body.get("composite") or "").strip() or None
-        phases_raw = body.get("phases", [])
         processes_raw = body.get("processes", [])
 
         if not name:
@@ -1503,12 +1319,6 @@ if __name__ == "__main__":
             return self._json({"error": "t_start must be >= 0"}, 400)
         if t_end <= t_start:
             return self._json({"error": "t_end must be > t_start"}, 400)
-        if not isinstance(phases_raw, list):
-            return self._json({"error": "phases must be a list of integers"}, 400)
-        try:
-            phases_list = [int(p) for p in phases_raw]
-        except (TypeError, ValueError):
-            return self._json({"error": "phases must be a list of integers"}, 400)
 
         # Validate processes list.
         if not isinstance(processes_raw, list):
@@ -1539,19 +1349,6 @@ if __name__ == "__main__":
             ws_file = WORKSPACE / "workspace.yaml"
             ws = load_workspace(ws_file)
 
-            # Validate phase references if provided.
-            if phases_list:
-                registered_phases = {
-                    p.get("n") for p in (ws.get("phases") or [])
-                    if isinstance(p, dict)
-                }
-                missing_phases = [n for n in phases_list if n not in registered_phases]
-                if missing_phases:
-                    raise ValueError(
-                        f"phases not registered: {missing_phases}. "
-                        "Register them first via /api/phase-plan."
-                    )
-
             simulations = ws.setdefault("simulations", [])
             if simulations is None:
                 simulations = []
@@ -1570,8 +1367,6 @@ if __name__ == "__main__":
                 entry["parameter_overrides"] = parameter_overrides
             if emitter_config is not None:
                 entry["emitter_config"] = emitter_config
-            if phases_list:
-                entry["phases"] = phases_list
             if processes_list:
                 entry["processes"] = processes_list
             simulations.append(entry)
