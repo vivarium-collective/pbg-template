@@ -6,11 +6,6 @@ from pathlib import Path
 
 import pytest
 
-# Make scripts/ importable (project root is two levels up from tests/).
-_SCRIPTS_PARENT = Path(__file__).parent.parent
-if str(_SCRIPTS_PARENT) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_PARENT))
-
 from scripts._lib.pyproject_edit import add_dependency, remove_dependency, remove_uv_source
 
 

@@ -1,0 +1,21 @@
+.venv/
+.pbg/server/
+.pbg/state.json
+.pbg/composite-runs.db
+# Investigation runtime artifacts (results DB + rendered HTML + lock file).
+# spec.yaml + data/ are tracked; everything else is regenerated on each run.
+investigations/*/runs.db
+investigations/*/viz/
+investigations/*/.run.lock
+.pbg/viz-requests/
+.pbg/viz-responses/
+.pbg/agent-requests/
+.pbg/agent-responses/
+.pbg/visualizations-staged/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+reports/assets/cache/
+# Transient brainstorm session artifacts (server PIDs, logs, rendered HTML).
+.superpowers/brainstorm/

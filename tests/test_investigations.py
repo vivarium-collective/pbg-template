@@ -1,12 +1,7 @@
 """Unit tests for scripts._lib.investigations."""
-import sys
 from pathlib import Path
 
 import pytest
-
-_SCRIPTS_PARENT = Path(__file__).parent.parent
-if str(_SCRIPTS_PARENT) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_PARENT))
 
 from scripts._lib.investigations import (
     load_spec, expand_simulations, InvestigationSpecError,
