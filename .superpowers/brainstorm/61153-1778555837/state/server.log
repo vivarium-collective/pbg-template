@@ -1,0 +1,4 @@
+{"type":"server-started","port":54977,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:54977","screen_dir":"/Users/eranagmon/code/pbg-template/.superpowers/brainstorm/61153-1778555837/content","state_dir":"/Users/eranagmon/code/pbg-template/.superpowers/brainstorm/61153-1778555837/state"}
+{"type":"screen-added","file":"/Users/eranagmon/code/pbg-template/.superpowers/brainstorm/61153-1778555837/content/welcome.html"}
+{"type":"screen-added","file":"/Users/eranagmon/code/pbg-template/.superpowers/brainstorm/61153-1778555837/content/waiting.html"}
+{"type":"server-stopped","reason":"idle timeout"}

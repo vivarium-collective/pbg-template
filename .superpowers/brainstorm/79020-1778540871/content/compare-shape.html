@@ -1,0 +1,60 @@
+<h2>Compare view — pick one shape</h2>
+<p class="subtitle">How many runs does the user compare at once, and how are they laid out?</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="two-side-by-side" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Compare — fixed pair</div>
+        <div class="mockup-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div>
+              <div class="label">Run A · binding_rate=0.10</div>
+              <div class="placeholder" style="height:120px">trajectory chart</div>
+              <div class="label" style="margin-top:6px">params</div>
+              <div style="font-size:0.75em;background:#f1f5f9;padding:4px;border-radius:3px;font-family:monospace">binding_rate: 0.10<br>initial_free_DnaA: 100</div>
+            </div>
+            <div>
+              <div class="label">Run B · binding_rate=0.20 (selected)</div>
+              <div class="placeholder" style="height:120px">trajectory chart</div>
+              <div class="label" style="margin-top:6px">params · <span style="color:#dc2626">diff</span></div>
+              <div style="font-size:0.75em;background:#fef2f2;padding:4px;border-radius:3px;font-family:monospace">binding_rate: <b>0.20</b><br>initial_free_DnaA: 100</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Fixed pair (A vs B)</h3>
+      <p>Pick two runs. Side-by-side charts + param diff highlighted.<br>
+      <span class="label">Simpler · obvious which one is "new"</span></p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="n-overlay" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">Compare — N runs overlaid</div>
+        <div class="mockup-body">
+          <div class="placeholder" style="height:120px">5 trajectories overlaid (different colors)</div>
+          <div class="label" style="margin-top:8px">selected runs</div>
+          <div style="font-size:0.75em;font-family:monospace">
+            <div style="display:flex;align-items:center;gap:6px"><span style="background:#6366f1;width:10px;height:10px;border-radius:2px"></span>run_001 binding_rate=0.10</div>
+            <div style="display:flex;align-items:center;gap:6px"><span style="background:#10b981;width:10px;height:10px;border-radius:2px"></span>run_002 binding_rate=0.20</div>
+            <div style="display:flex;align-items:center;gap:6px"><span style="background:#f43f5e;width:10px;height:10px;border-radius:2px"></span>run_003 binding_rate=0.50</div>
+            <div style="display:flex;align-items:center;gap:6px"><span style="background:#f59e0b;width:10px;height:10px;border-radius:2px"></span>run_004 binding_rate=1.0</div>
+          </div>
+          <div class="label" style="margin-top:6px">param table</div>
+          <div class="placeholder" style="height:32px">parameter × run table (cells highlight on hover)</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. N runs overlaid</h3>
+      <p>Multi-select runs from history. One chart per observable, all selected runs overlaid.<br>
+      <span class="label">Better for parameter sweeps · more UI complexity</span></p>
+    </div>
+  </div>
+
+</div>

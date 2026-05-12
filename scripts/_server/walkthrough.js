@@ -282,7 +282,7 @@
     var params = new URLSearchParams(window.location.search);
     var focus = params.get('focus');
     if (focus) {
-      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'build-model', 'branches', 'composite-explore'];
+      var validPages = ['workspace-inputs', 'simulation-setup', 'visualizations', 'registry', 'investigations', 'branches', 'composite-explore'];
       if (validPages.indexOf(focus) >= 0) {
         document.body.classList.add('focus-mode', 'focus-' + focus);
         _switchPage(focus);
@@ -292,13 +292,7 @@
 
     function fromHash() {
       var h = (window.location.hash || '').replace(/^#/, '');
-      // phase anchors (#phase-N) auto-route to build-model page
-      if (/^phase-\d+$/.test(h)) {
-        _switchPage('build-model');
-        // let the browser scroll to the anchor naturally
-        return;
-      }
-      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'build-model', 'branches', 'composite-explore'];
+      var validPages = ['workspace-inputs', 'registry', 'simulation-setup', 'visualizations', 'investigations', 'branches', 'composite-explore'];
       _switchPage(validPages.indexOf(h) >= 0 ? h : 'workspace-inputs');
     }
     window.addEventListener('hashchange', fromHash);
@@ -2144,8 +2138,9 @@
 
   function _renderInvestigationCard(inv) {
     var status = inv.status || 'planned';
-    var statusClass = ({planned:'planned', running:'in_progress', complete:'complete',
-                        failed:'gate_pending', invalid:'gate_pending'})[status] || 'planned';
+    var statusClass = ({planned:'planned', running:'in_progress', ran:'complete',
+                        complete:'complete', failed:'gate_pending',
+                        invalid:'gate_pending'})[status] || 'planned';
     var lastRun = inv.last_run ? new Date(inv.last_run + 'Z').toLocaleString() : '—';
     return '<div class="investigation-card" onclick="_openInvestigation(\'' + _esc(inv.name) + '\')">' +
       '<div class="name">' + _esc(inv.name) + '</div>' +

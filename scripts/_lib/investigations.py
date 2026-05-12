@@ -25,7 +25,14 @@ class InvestigationSpecError(ValueError):
 
 _VALID_KINDS = {"single", "sweep", "seeds"}
 _REQUIRED_TOP_LEVEL = ("name", "composite")
-_VALID_STATUSES = {"planned", "running", "complete", "failed", "invalid"}
+_VALID_STATUSES = {"planned", "running", "ran", "complete", "failed", "invalid"}
+# Status semantics:
+#   planned  — user created the investigation but hasn't run it yet
+#   running  — orchestrator is mid-execution
+#   ran      — runs completed without error; user hasn't drawn conclusions
+#   complete — user-set; signals "I've analyzed the results and we're done"
+#   failed   — at least one run failed
+#   invalid  — spec.yaml didn't validate
 
 
 def load_spec(path: Path) -> dict:
@@ -177,6 +184,13 @@ def gather_results(spec: dict, db_path: Path) -> dict:
     conn.row_factory = sqlite3.Row
     try:
         out: dict[str, dict] = {}
+        # Check whether the SQLiteEmitter ever wrote a history row. If every
+        # run failed before the first emit, the history table won't exist
+        # — return empty-trajectory results so visualizations can show a
+        # warning rather than crashing.
+        has_history = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='history'"
+        ).fetchone() is not None
         # All metadata rows for this investigation
         meta_rows = conn.execute(
             "SELECT run_id, sim_name, params_json FROM runs_meta"
@@ -191,13 +205,17 @@ def gather_results(spec: dict, db_path: Path) -> dict:
                 "sim_name": row["sim_name"] or "default",
                 "params": params,
             }
-        # Trajectories per run
+        # Trajectories per run — skip the history query entirely if the
+        # SQLiteEmitter never wrote a row (table absent).
         for run_id, meta in run_meta.items():
-            traj_rows = conn.execute(
-                "SELECT step, global_time AS time, state FROM history "
-                "WHERE simulation_id=? ORDER BY step ASC",
-                (run_id,),
-            ).fetchall()
+            if has_history:
+                traj_rows = conn.execute(
+                    "SELECT step, global_time AS time, state FROM history "
+                    "WHERE simulation_id=? ORDER BY step ASC",
+                    (run_id,),
+                ).fetchall()
+            else:
+                traj_rows = []
             traj = []
             for tr in traj_rows:
                 try:
@@ -447,7 +465,10 @@ def run_investigation(ws_root: Path, name: str, *,
         viz_paths = render_visualizations(spec, results, ws_root, name,
                                            core_registry=core_registry)
 
-        final_status = "complete" if not any_failed else "failed"
+        # 'ran' = runs finished without error; user explicitly sets 'complete'
+        # after analyzing results (avoids over-claiming "complete" before the
+        # researcher has drawn conclusions).
+        final_status = "ran" if not any_failed else "failed"
         update_spec_status(ws_root, name, status=final_status,
                            last_run=datetime.datetime.utcnow().isoformat())
 
