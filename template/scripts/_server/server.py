@@ -560,6 +560,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-run-one":     self._post_investigation_run_one,
             "/api/investigation-composite-add":      self._post_investigation_composite_add,
             "/api/investigation-composite-perturb":  self._post_investigation_composite_perturb,
+            "/api/investigation-composite-rebuild":  self._post_investigation_composite_rebuild,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -576,6 +577,7 @@ class Handler(BaseHTTPRequestHandler):
         route_map = {
             "/api/simulation":    self._delete_simulation,
             "/api/visualization": self._delete_visualization,
+            "/api/investigation-composite": self._delete_investigation_composite,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -3433,6 +3435,114 @@ if __name__ == "__main__":
             do_action()
         except Exception as e:
             return self._json({"error": f"perturb failed: {e}"}, 500)
+        try:
+            return self._json(*_active_branch_action(commit_msg, lambda: None))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_investigation_composite_rebuild(self, body: dict):
+        """POST /api/investigation-composite-rebuild {investigation, name}
+        Re-render a derived composite from its recipe (re-applies overrides on
+        the current parent document).
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        comp_name = (body.get("name") or "").strip()
+        if not (inv_name and comp_name):
+            return self._json({"error": "investigation, name required"}, 400)
+
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+        spec = yaml.safe_load(spec_path.read_text()) or {}
+        entry = next((c for c in (spec.get('composites') or [])
+                      if c.get('name') == comp_name), None)
+        if entry is None:
+            return self._json({"error": f"composite {comp_name!r} not found"}, 404)
+        extends = entry.get('extends')
+        if not extends:
+            return self._json({"error": f"composite {comp_name!r} is not derived (no extends)"}, 400)
+        parent_path = inv_dir / "composites" / f"{extends}.yaml"
+        if not parent_path.is_file():
+            return self._json({"error": f"parent {extends!r} document missing"}, 404)
+
+        from scripts._lib.composite_recipes import (
+            apply_parameter_overrides, apply_process_overrides,
+        )
+        import copy
+        parent_doc = yaml.safe_load(parent_path.read_text()) or {}
+        derived_doc = copy.deepcopy(parent_doc)
+        try:
+            if entry.get('parameter_overrides'):
+                apply_parameter_overrides(derived_doc, entry['parameter_overrides'])
+            if entry.get('process_overrides'):
+                apply_process_overrides(derived_doc, entry['process_overrides'])
+        except KeyError as e:
+            return self._json({"error": f"rebuild failed: {e}"}, 400)
+        except Exception as e:
+            return self._json({"error": f"rebuild failed: {type(e).__name__}: {e}"}, 500)
+
+        commit_msg = f"chore(investigations/{inv_name}): rebuild composite '{comp_name}'"
+
+        def do_action():
+            derived_path = inv_dir / "composites" / f"{comp_name}.yaml"
+            derived_path.write_text(yaml.safe_dump(derived_doc, sort_keys=False))
+
+        try:
+            do_action()
+        except Exception as e:
+            return self._json({"error": f"rebuild failed: {e}"}, 500)
+        try:
+            return self._json(*_active_branch_action(commit_msg, lambda: None))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _delete_investigation_composite(self, body: dict):
+        """DELETE /api/investigation-composite {investigation, name}
+        Refuse if any runs, visualizations, or other composites reference this composite.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        comp_name = (body.get("name") or "").strip()
+        if not (inv_name and comp_name):
+            return self._json({"error": "investigation, name required"}, 400)
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+        spec = yaml.safe_load(spec_path.read_text()) or {}
+
+        # Dependents: runs[].composite, visualizations[].config.sources, composites[].extends
+        dependents = []
+        for r in (spec.get('runs') or []):
+            if r.get('composite') == comp_name:
+                dependents.append(f"run({r})")
+        for v in (spec.get('visualizations') or []):
+            sources = (v.get('config') or {}).get('sources') or []
+            if comp_name in sources:
+                dependents.append(f"visualization({v.get('name')})")
+        for c in (spec.get('composites') or []):
+            if c.get('extends') == comp_name:
+                dependents.append(f"composite({c.get('name')})")
+        if dependents:
+            return self._json({
+                "error": f"composite {comp_name!r} has dependents",
+                "dependents": dependents,
+            }, 409)
+
+        commit_msg = f"chore(investigations/{inv_name}): remove composite '{comp_name}'"
+
+        def do_action():
+            doc_path = inv_dir / "composites" / f"{comp_name}.yaml"
+            if doc_path.is_file():
+                doc_path.unlink()
+            spec['composites'] = [c for c in (spec.get('composites') or [])
+                                   if c.get('name') != comp_name]
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            do_action()
+        except Exception as e:
+            return self._json({"error": f"remove failed: {e}"}, 500)
         try:
             return self._json(*_active_branch_action(commit_msg, lambda: None))
         except Exception as e:

@@ -423,3 +423,130 @@ def test_post_composite_perturb_invalid_path_rejected(workspace_server):
          'parameter_overrides': {'state.nonexistent.field': 1}},
     )
     assert code == 400, j
+
+
+# ---------------------------------------------------------------------------
+# Investigation composite-rebuild + composite-delete endpoint tests
+# ---------------------------------------------------------------------------
+
+def test_post_composite_rebuild_reapplies_recipe(workspace_server):
+    """If the parent composite changes, rebuilding the derived re-renders it."""
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'baseline.yaml').write_text(yaml.safe_dump({
+        'name': 'b',
+        'state': {'replication': {'_type': 'process', 'address': 'local:Foo',
+                                    'config': {'rate': 1.0, 'newkey': 'x'}}},
+    }))
+    (composites / 'derived.yaml').write_text(yaml.safe_dump({
+        'name': 'd',
+        'state': {'replication': {'_type': 'process', 'address': 'local:Foo',
+                                    'config': {'rate': 99.0}}},  # stale
+    }))
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [
+            {'name': 'baseline', 'source': 'pkg.x', 'document': './composites/baseline.yaml'},
+            {'name': 'derived', 'extends': 'baseline',
+             'parameter_overrides': {'state.replication.config.rate': 2.0},
+             'document': './composites/derived.yaml'},
+        ],
+        'runs': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-rebuild',
+        {'investigation': 'demo', 'name': 'derived'},
+    )
+    assert code in (200, 500), j
+    derived_doc = yaml.safe_load((composites / 'derived.yaml').read_text())
+    # After rebuild: derived has baseline's structure with rate overridden to 2.0
+    assert derived_doc['state']['replication']['config']['rate'] == 2.0
+    # newkey from parent propagates
+    assert derived_doc['state']['replication']['config'].get('newkey') == 'x'
+
+
+def test_post_composite_rebuild_rejects_non_derived(workspace_server):
+    """Rebuilding a registered (not derived) composite is a 400."""
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'baseline.yaml').write_text('name: b\nstate: {}\n')
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [{'name': 'baseline', 'source': 'pkg.x',
+                         'document': './composites/baseline.yaml'}],
+        'runs': [],
+    }, sort_keys=False))
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-rebuild',
+        {'investigation': 'demo', 'name': 'baseline'},
+    )
+    assert code == 400, j
+    assert 'not derived' in j.get('error', '').lower() or 'extends' in j.get('error', '').lower()
+
+
+def test_delete_composite_with_dependents_refuses(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'baseline.yaml').write_text('name: b\nstate: {}\n')
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [{'name': 'baseline', 'source': 'pkg.x',
+                         'document': './composites/baseline.yaml'}],
+        'runs': [{'composite': 'baseline', 'steps': 10}],
+    }, sort_keys=False))
+
+    req = urllib.request.Request(
+        workspace_server.url + '/api/investigation-composite',
+        data=json.dumps({'investigation': 'demo', 'name': 'baseline'}).encode(),
+        method='DELETE', headers={'Content-Type': 'application/json'},
+    )
+    try:
+        urllib.request.urlopen(req)
+        raise AssertionError('expected refusal')
+    except urllib.error.HTTPError as e:
+        assert e.code == 409, f"expected 409, got {e.code}"
+        body = json.loads(e.read())
+        assert 'baseline' in str(body).lower()
+        assert body.get('dependents'), 'expected dependents list in error body'
+
+
+def test_delete_composite_removes_when_no_dependents(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'baseline.yaml').write_text('name: b\nstate: {}\n')
+    (composites / 'orphan.yaml').write_text('name: o\nstate: {}\n')
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [
+            {'name': 'baseline', 'source': 'pkg.x',
+             'document': './composites/baseline.yaml'},
+            {'name': 'orphan', 'source': 'pkg.y',
+             'document': './composites/orphan.yaml'},
+        ],
+        'runs': [{'composite': 'baseline', 'steps': 10}],
+    }, sort_keys=False))
+
+    req = urllib.request.Request(
+        workspace_server.url + '/api/investigation-composite',
+        data=json.dumps({'investigation': 'demo', 'name': 'orphan'}).encode(),
+        method='DELETE', headers={'Content-Type': 'application/json'},
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            assert resp.status in (200,)
+    except urllib.error.HTTPError as e:
+        # 500 acceptable for bare-workspace git failures, but the file changes
+        # should have happened eagerly.
+        assert e.code == 500, f"expected 200 or 500, got {e.code}"
+
+    # File removed from disk and spec.yaml regardless of git outcome
+    assert not (composites / 'orphan.yaml').is_file()
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    names = [c['name'] for c in spec['composites']]
+    assert 'orphan' not in names
+    assert 'baseline' in names
