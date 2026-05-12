@@ -1327,6 +1327,8 @@
   window._ceCompareSet = new Set();// selected run_ids for Compare
 
   function _ceLoadHistory() {
+    if (window._ceHistoryFetching) return;
+    window._ceHistoryFetching = true;
     var id = window._ceCurrent.id;
     fetch('/api/composite-runs?spec_id=' + encodeURIComponent(id))
       .then(function(r) { return r.json(); })
@@ -1337,6 +1339,7 @@
         if (countBadge) countBadge.textContent = '(' + runs.length + ')';
         if (!runs.length) {
           body.innerHTML = '<p class="empty-state">No runs yet — click <em>Test run</em> on the Wiring tab.</p>';
+          window._ceHistoryFetching = false;
           return;
         }
         runs.forEach(function(r) { window._ceRuns[r.run_id] = r; });
@@ -1346,12 +1349,20 @@
             '<th style="width:30px"></th><th>Label</th><th>Params</th>' +
             '<th>Started</th><th>Steps</th><th>Status</th><th></th>' +
           '</tr></thead><tbody>' + rows + '</tbody></table>';
+        window._ceHistoryFetching = false;
+      })
+      .catch(function(err) {
+        var body = document.getElementById('ce-history-body');
+        if (body) body.innerHTML = '<p style="color:#c00">Failed to load history: ' + _esc(String(err)) + '</p>';
+        window._ceHistoryLoaded = false;
+        window._ceHistoryFetching = false;
       });
   }
   window._ceLoadHistory = _ceLoadHistory;
 
   function _ceRenderHistoryRow(run) {
     var checked = window._ceCompareSet.has(run.run_id) ? 'checked' : '';
+    var statusClass = ({completed: 'completed', running: 'running', failed: 'failed'})[run.status] || 'unknown';
     var paramStr = Object.keys(run.params || {})
       .map(function(k) { return k + '=' + run.params[k]; }).join(', ') || '—';
     var startedStr = new Date(run.started_at * 1000).toLocaleString();
@@ -1362,7 +1373,7 @@
       '<td><code>' + _esc(paramStr) + '</code></td>' +
       '<td>' + _esc(startedStr) + '</td>' +
       '<td>' + (run.n_steps || 0) + '</td>' +
-      '<td><span class="ce-history-status ' + _esc(run.status) + '">' + _esc(run.status) + '</span></td>' +
+      '<td><span class="ce-history-status ' + statusClass + '">' + _esc(run.status) + '</span></td>' +
       '<td><button class="btn-mini" onclick="_ceViewRun(\'' + _esc(run.run_id) + '\')">View</button></td>' +
     '</tr>';
   }
