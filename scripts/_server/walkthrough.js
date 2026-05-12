@@ -336,6 +336,17 @@
     });
   }
 
+  function _filterVizCatalog(query) {
+    var rows = document.querySelectorAll('#viz-picker-container .picker-row');
+    var q = (query || '').toLowerCase().trim();
+    rows.forEach(function(row) {
+      if (!q) { row.style.display = ''; return; }
+      var hay = (row.textContent || '').toLowerCase();
+      row.style.display = hay.indexOf(q) === -1 ? 'none' : '';
+    });
+  }
+  window._filterVizCatalog = _filterVizCatalog;
+
   function _renderKindPicker(items, container, kind) {
     if (!items || items.length === 0) {
       container.innerHTML = '<p class="empty-state">No ' + kind + 's registered. Install a pbg-* package that provides one (Registry tab &rarr; Available modules).</p>';
@@ -346,6 +357,9 @@
       if (it.schema_preview) {
         schemaSnippet = '<details><summary class="muted" style="cursor:pointer;font-size:0.85em">config_schema</summary><code class="registry-schema">' + _esc(it.schema_preview) + '</code></details>';
       }
+      var previewBtn = (kind === 'visualization')
+        ? '<button class="btn-mini" onclick="_vizClassPreview(\'' + _esc(it.address) + '\',\'' + _esc(it.name) + '\')">Preview</button>'
+        : '';
       return '<div class="picker-row">' +
         '<div class="picker-row-main">' +
           '<strong>' + _esc(it.name) + '</strong>' +
@@ -353,6 +367,7 @@
           schemaSnippet +
         '</div>' +
         '<div class="picker-row-actions">' +
+          previewBtn +
           '<button class="btn-mini" onclick="_useRegistryClass(\'' + kind + '\', \'' + _esc(it.name) + '\')">Use</button>' +
         '</div>' +
       '</div>';
@@ -384,16 +399,28 @@
       form.parentNode.insertBefore(banner, form);
       setTimeout(function() { banner.remove(); }, 4000);
     } else if (kind === 'visualization') {
-      // Open Add visualization modal with a class-reference description.
-      openModal('modal-visualization');
-      var modal = document.getElementById('modal-visualization');
-      if (modal) {
-        var nameInput = modal.querySelector('input[name=viz_name]');
-        var descTa = modal.querySelector('textarea[name=description]');
-        if (nameInput) nameInput.value = name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
-        if (descTa) descTa.value = 'Use the registered ' + name + ' class from the Registry. ' +
-          'Run-time instantiation of ' + name + ' against the gathered emitter results.';
-      }
+      // Open the workspace Add-Visualization modal pre-configured as a
+      // class-backed instance of this Visualization class.
+      _openWorkspaceVizModal();
+      // Defer until the modal's promise has populated the class dropdown.
+      var attempts = 0;
+      var tryFill = function() {
+        var sel = document.getElementById('viz-class-picker');
+        if (!sel || sel.options.length <= 1) {
+          if (attempts++ < 20) return setTimeout(tryFill, 60);
+          return;
+        }
+        var modal = document.getElementById('modal-visualization');
+        var nameInput = modal && modal.querySelector('input[name=viz_name]');
+        if (nameInput && !nameInput.value) {
+          nameInput.value = name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+        }
+        // Select the matching class option
+        for (var i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value === name) { sel.selectedIndex = i; break; }
+        }
+      };
+      setTimeout(tryFill, 60);
     }
   }
   window._useRegistryClass = _useRegistryClass;
@@ -1472,14 +1499,53 @@
   }
   window._vizCommitAll = _vizCommitAll;
 
+  function _renderVizPreviewInModal(title, html, sourceUsed, notes) {
+    var titleEl = document.getElementById('viz-preview-title');
+    var srcEl = document.getElementById('viz-preview-source-row');
+    var notesEl = document.getElementById('viz-preview-notes');
+    var iframe = document.getElementById('viz-preview-iframe');
+    if (titleEl) titleEl.textContent = 'Preview: ' + title;
+    if (srcEl) srcEl.textContent = 'Source: ' + (sourceUsed || 'demo');
+    if (notesEl) notesEl.textContent = notes || '';
+    if (iframe) iframe.srcdoc = '<!DOCTYPE html><html><body style="margin:0;padding:8px">' + (html || '<p>(empty)</p>') + '</body></html>';
+    openModal('modal-viz-preview');
+  }
+
   function _vizPreview(name) {
-    alert(
-      'Preview not yet implemented (planned v0.4.3). For now, open\n' +
-      '.pbg/viz-responses/' + name + '.py\n' +
-      'and run: python3 .pbg/viz-responses/' + name + '.py | head'
-    );
+    // Preview a registered workspace.yaml instance by name. The server
+    // looks up its class+config and renders against demo data (or a real
+    // investigation if source is set later via the modal).
+    fetch('/api/visualization-preview-instance', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, source: 'demo'}),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok) {
+          alert(j.error || 'Preview failed');
+          return;
+        }
+        _renderVizPreviewInModal(name, j.html, j.source_used, j.notes);
+      });
   }
   window._vizPreview = _vizPreview;
+
+  function _vizClassPreview(address, className) {
+    // Preview a raw Visualization class (no config) against demo data.
+    fetch('/api/visualization-preview', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({address: address, source: 'demo'}),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok) {
+          alert(j.error || 'Preview failed');
+          return;
+        }
+        _renderVizPreviewInModal(className + ' (demo)', j.html, j.source_used, j.notes);
+      });
+  }
+  window._vizClassPreview = _vizClassPreview;
 
   function _vizRemove(name) {
     if (!confirm("Remove visualization '" + name + "'?")) return;
@@ -2386,17 +2452,107 @@
   }
   window._dupRun = _dupRun;
 
+  function _openWorkspaceVizModal() {
+    var classSel = document.getElementById('viz-class-picker');
+    var alreadyEl = document.getElementById('viz-already-registered');
+    if (classSel) classSel.innerHTML = '<option value="">— none (description-only) —</option>';
+    if (alreadyEl) alreadyEl.textContent = '';
+    Promise.all([
+      fetch('/api/visualization-classes').then(function(r) { return r.json(); }),
+      fetch('/api/visualization-instances').then(function(r) { return r.json(); }),
+      fetch('/workspace.yaml').then(function(r) { return r.ok ? r.text() : ''; }),
+    ]).then(function(parts) {
+      var classes = (parts[0] && parts[0].classes) || [];
+      var instances = (parts[1] && parts[1].instances) || [];
+      if (classSel) {
+        classes.forEach(function(c) {
+          var opt = document.createElement('option');
+          opt.value = c.name;
+          opt.textContent = c.name + (c.doc ? '  —  ' + c.doc : '');
+          classSel.appendChild(opt);
+        });
+      }
+      // Surface the existing workspace.yaml viz entries by name so the user
+      // doesn't collide with one they already added.
+      var ws = parts[2] || '';
+      var existing = [];
+      var inViz = false;
+      ws.split(/\r?\n/).forEach(function(line) {
+        if (/^visualizations:/.test(line)) { inViz = true; return; }
+        if (inViz && /^[A-Za-z_]/.test(line)) { inViz = false; return; }
+        if (inViz) {
+          var m = line.match(/^\s*-\s*name:\s*(\S+)/);
+          if (m) existing.push(m[1]);
+        }
+      });
+      if (alreadyEl) {
+        if (existing.length) {
+          var instMap = {};
+          instances.forEach(function(i) { instMap[i.name] = i['class']; });
+          alreadyEl.innerHTML = 'Already registered: ' + existing.map(function(n) {
+            return instMap[n]
+              ? '<code>' + n + '</code> (' + instMap[n] + ')'
+              : '<code>' + n + '</code>';
+          }).join(', ');
+        } else {
+          alreadyEl.textContent = 'No visualizations registered yet.';
+        }
+      }
+      openModal('modal-visualization');
+    });
+  }
+  window._openWorkspaceVizModal = _openWorkspaceVizModal;
+
   function _openAddVizModal(investigationName) {
     document.getElementById('add-viz-investigation').value = investigationName;
     var sel = document.getElementById('add-viz-class');
-    sel.innerHTML = '<option value="">— pick a class —</option>';
-    fetch('/api/visualization-classes').then(function(r) { return r.json(); }).then(function(data) {
-      (data.classes || []).forEach(function(c) {
-        var opt = document.createElement('option');
-        opt.value = c.address;
-        opt.textContent = c.name + (c.doc ? '  —  ' + c.doc : '');
-        sel.appendChild(opt);
-      });
+    var cfgField = document.querySelector('#form-investigation-add-viz textarea[name="config"]');
+    sel.innerHTML = '<option value="">— pick a registered instance or raw class —</option>';
+    // Stash instance configs on the select so onchange can auto-fill.
+    sel._vizInstanceConfigs = {};
+    Promise.all([
+      fetch('/api/visualization-instances').then(function(r) { return r.json(); }),
+      fetch('/api/visualization-classes').then(function(r) { return r.json(); }),
+    ]).then(function(parts) {
+      var instances = (parts[0] && parts[0].instances) || [];
+      var classes = (parts[1] && parts[1].classes) || [];
+      if (instances.length) {
+        var gi = document.createElement('optgroup');
+        gi.label = 'Registered instances (config pre-filled)';
+        instances.forEach(function(inst) {
+          var opt = document.createElement('option');
+          opt.value = inst.address;
+          opt.textContent = inst.name + '  —  ' + inst['class'] + (inst.description ? ' · ' + inst.description : '');
+          opt.dataset.instanceName = inst.name;
+          sel._vizInstanceConfigs[opt.value + '|' + inst.name] = inst.config || {};
+          gi.appendChild(opt);
+        });
+        sel.appendChild(gi);
+      }
+      if (classes.length) {
+        var gc = document.createElement('optgroup');
+        gc.label = 'Raw classes (write config JSON)';
+        classes.forEach(function(c) {
+          var opt = document.createElement('option');
+          opt.value = c.address;
+          opt.textContent = c.name + (c.doc ? '  —  ' + c.doc : '');
+          gc.appendChild(opt);
+        });
+        sel.appendChild(gc);
+      }
+      sel.onchange = function() {
+        var picked = sel.options[sel.selectedIndex];
+        if (!picked) return;
+        var instName = picked.dataset && picked.dataset.instanceName;
+        if (instName) {
+          var key = sel.value + '|' + instName;
+          var cfg = sel._vizInstanceConfigs[key] || {};
+          if (cfgField) cfgField.value = JSON.stringify(cfg, null, 2);
+          // Default the new investigation viz name to the instance name when empty.
+          var nameField = document.querySelector('#form-investigation-add-viz input[name="name"]');
+          if (nameField && !nameField.value) nameField.value = instName;
+        }
+      };
       openModal('modal-investigation-add-viz');
     });
   }
