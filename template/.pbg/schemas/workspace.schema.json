@@ -60,6 +60,16 @@
     "tasks": {
       "type": "array",
       "items": {"$ref": "#/definitions/task"}
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "composite_view": {
+          "enum": ["loom-explore", "bigraph-viz"],
+          "description": "Which renderer the dashboard uses for composite wiring. Default 'loom-explore' (interactive React Flow). Set to 'bigraph-viz' to fall back to the legacy static SVG render."
+        }
+      }
     }
   },
   "definitions": {

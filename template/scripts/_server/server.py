@@ -544,6 +544,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_visualization_instances()
         if self.path.startswith("/api/visualization-classes"):
             return self._get_visualization_classes()
+        if self.path.startswith("/api/ui-config"):
+            return self._get_ui_config()
         # Serve the bundled loom-explore viewer.
         if self.path.startswith("/loom-explore"):
             rel = self.path[len("/loom-explore"):].lstrip("/") or "index.html"
@@ -2951,6 +2953,17 @@ if __name__ == "__main__":
                 doc = ""
             out.append({"address": f"local:{name}", "name": name, "doc": doc})
         return out
+
+    def _get_ui_config(self):
+        """GET /api/ui-config — return UI feature flags from workspace.yaml."""
+        try:
+            ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+        except Exception:
+            ws = {}
+        ui = ws.get("ui") or {}
+        return self._json({
+            "composite_view": ui.get("composite_view", "loom-explore"),
+        }, 200)
 
     def _get_visualization_classes(self):
         """GET /api/visualization-classes — list registered Visualization v2 classes.

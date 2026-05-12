@@ -48,6 +48,31 @@
   });
 
   // -------------------------------------------------------------------------
+  // UI feature flags (ui.composite_view)
+  // -------------------------------------------------------------------------
+  window._uiConfig = null;
+  fetch('/api/ui-config').then(function(r) { return r.json(); }).then(function(cfg) {
+    window._uiConfig = cfg || {};
+    _applyCompositeViewMode();
+  });
+
+  function _applyCompositeViewMode() {
+    var cfg = window._uiConfig || {};
+    var mode = cfg.composite_view || 'loom-explore';
+    var iframe = document.getElementById('composite-explore-frame');
+    var svgLegacy = document.getElementById('composite-explore-svg-legacy');
+    if (!iframe || !svgLegacy) return;
+    if (mode === 'bigraph-viz') {
+      iframe.style.display = 'none';
+      svgLegacy.style.display = '';
+    } else {
+      iframe.style.display = '';
+      svgLegacy.style.display = 'none';
+    }
+  }
+  window._applyCompositeViewMode = _applyCompositeViewMode;
+
+  // -------------------------------------------------------------------------
   // Form submission helper
   // -------------------------------------------------------------------------
 
@@ -2004,10 +2029,39 @@
       });
   }
 
+  function _legacyLoadCompositeSvg(ref) {
+    var el = document.getElementById('composite-explore-svg-legacy');
+    if (!el) return;
+    el.innerHTML = '<p style="color:#888">Loading SVG…</p>';
+    fetch('/api/composite-resolve?id=' + encodeURIComponent(ref))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.svg) {
+          el.innerHTML = data.svg;
+        } else {
+          el.innerHTML = '<p style="color:#666">No SVG returned from legacy render.</p>';
+        }
+      })
+      .catch(function() {
+        el.innerHTML = '<p style="color:#666">Legacy SVG render unavailable.</p>';
+      });
+  }
+
   // _loadCompositeExplorer: send composite state to the loom-explore iframe.
   // Can be called with a pre-resolved state object (from _ceFetch) or with
   // just a ref string, in which case it fetches /api/composite-state first.
+  // When ui.composite_view === 'bigraph-viz', uses the legacy SVG path instead.
   function _loadCompositeExplorer(ref, stateObj, nameHint) {
+    // Apply visibility toggle each time the explorer is loaded (catches cases
+    // where the config fetch completed after the first render).
+    _applyCompositeViewMode();
+
+    var cfg = window._uiConfig || {};
+    if ((cfg.composite_view || 'loom-explore') === 'bigraph-viz') {
+      _legacyLoadCompositeSvg(ref);
+      return;
+    }
+
     var iframe = document.getElementById('composite-explore-frame');
     if (!iframe) return;
 

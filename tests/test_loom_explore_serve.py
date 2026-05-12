@@ -1,4 +1,5 @@
 """Test that the loom-explore static bundle is served by the dashboard."""
+import json
 import sys
 import threading
 import urllib.request
@@ -96,3 +97,21 @@ def test_loom_explore_missing_file_404(workspace_server):
         raise AssertionError("expected 404")
     except urllib.error.HTTPError as e:
         assert e.code == 404
+
+
+def test_ui_config_default_is_loom_explore(workspace_server):
+    """When no ui block is set in workspace.yaml, the default is loom-explore."""
+    with urllib.request.urlopen(workspace_server.url + "/api/ui-config") as resp:
+        data = json.loads(resp.read())
+    assert data["composite_view"] == "loom-explore"
+
+
+def test_ui_config_respects_workspace_flag(workspace_server):
+    """Setting ui.composite_view in workspace.yaml flips the flag."""
+    ws_file = workspace_server.root / "workspace.yaml"
+    ws = yaml.safe_load(ws_file.read_text()) or {}
+    ws["ui"] = {"composite_view": "bigraph-viz"}
+    ws_file.write_text(yaml.safe_dump(ws, sort_keys=False))
+    with urllib.request.urlopen(workspace_server.url + "/api/ui-config") as resp:
+        data = json.loads(resp.read())
+    assert data["composite_view"] == "bigraph-viz"
