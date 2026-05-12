@@ -1592,6 +1592,54 @@
   }
   window._ceToggleJt = _ceToggleJt;
 
+  // ─── Snapshot to initial ──────────────────────────────────────────────
+  function _ceSnapshotToInitial() {
+    var state = window._ceCurrentStateForSnapshot || {};
+    var paramInputs = document.querySelectorAll('#ce-parameters input[data-param]');
+    var matched = [], skipped = [];
+    function walk(obj, prefix) {
+      Object.keys(obj || {}).forEach(function(k) {
+        var v = obj[k];
+        var path = prefix ? prefix + '.' + k : k;
+        if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+          walk(v, path);
+        } else {
+          // Try to find a parameter input whose name matches the leaf key
+          var target = null;
+          paramInputs.forEach(function(inp) {
+            if (inp.dataset.param === k) target = inp;
+          });
+          if (!target) {
+            skipped.push({ path: path, reason: 'no matching parameter' });
+            return;
+          }
+          var declaredType = target.dataset.type;
+          var ok = (declaredType === 'float' && typeof v === 'number')
+                || (declaredType === 'int'   && typeof v === 'number' && Number.isInteger(v))
+                || (declaredType === 'string' && typeof v === 'string')
+                || (declaredType === 'bool'  && typeof v === 'boolean');
+          if (!ok) {
+            skipped.push({ path: path, reason: 'type mismatch (' + declaredType + ' vs ' + typeof v + ')' });
+            return;
+          }
+          target.value = v;
+          matched.push({ path: path, value: v });
+        }
+      });
+    }
+    walk(state, '');
+    var report = document.getElementById('ce-snapshot-report');
+    var skippedHtml = skipped.length
+      ? '<details style="margin-top:4px"><summary>Show ' + skipped.length + ' skipped</summary><ul style="font-size:0.85em">' +
+          skipped.map(function(s) { return '<li><code>' + _esc(s.path) + '</code> — ' + _esc(s.reason) + '</li>'; }).join('') +
+        '</ul></details>'
+      : '';
+    report.innerHTML = 'Mapped ' + matched.length + ' of ' +
+                       (matched.length + skipped.length) + ' leaves. ' + skippedHtml;
+    _ceSwitchTab('wiring');
+  }
+  window._ceSnapshotToInitial = _ceSnapshotToInitial;
+
   function _ceFetch() {
     var url = '/api/composite-resolve?id=' + encodeURIComponent(window._ceCurrent.id) +
       '&overrides=' + encodeURIComponent(JSON.stringify(window._ceCurrent.overrides));
