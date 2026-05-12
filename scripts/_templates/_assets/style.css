@@ -314,3 +314,61 @@ body.focus-mode::before{
   0%,30% { box-shadow:0 0 0 3px #fef3c7; background:#fffbeb; }
   100%   { box-shadow:none; background:transparent; }
 }
+
+/* ── Composite explorer — workbench tabs (v0.5.4) ────────────────────── */
+.ce-tab-strip{
+  display:flex; gap:2px; margin:12px 0; padding:0;
+  border-bottom:2px solid #e5e7eb;
+}
+.ce-tab{
+  background:transparent; border:none; padding:8px 16px;
+  font-size:0.9em; font-weight:500; color:#64748b; cursor:pointer;
+  border-bottom:2px solid transparent; margin-bottom:-2px;
+}
+.ce-tab:hover{ color:#1e293b; background:#f8fafc }
+.ce-tab.active{
+  color:#1e293b; border-bottom-color:#3b82f6; font-weight:600;
+}
+.ce-tab-badge{
+  display:inline-block; background:#e2e8f0; color:#475569;
+  border-radius:9999px; padding:0 6px; margin-left:4px;
+  font-size:0.75em; font-weight:600;
+}
+.ce-tab-panel{ display:none }
+.ce-tab-panel.active{ display:block }
+
+/* State tree (collapsible JSON) */
+.ce-state-tree{
+  font-family:"SF Mono",Menlo,Monaco,monospace;
+  font-size:0.82em; line-height:1.5;
+  background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;
+  padding:10px 14px; max-height:520px; overflow:auto;
+}
+.ce-jt-key{ color:#7c3aed; font-weight:600 }
+.ce-jt-str{ color:#059669 }
+.ce-jt-num{ color:#2563eb }
+.ce-jt-bool{ color:#d97706 }
+.ce-jt-null{ color:#94a3b8 }
+.ce-jt-toggle{ cursor:pointer; user-select:none; color:#94a3b8; margin-right:4px }
+.ce-jt-toggle:hover{ color:#1e293b }
+.ce-jt-collapsed{ display:none }
+.ce-jt-bracket{ color:#64748b }
+
+/* History table */
+#ce-history-body table{ width:100%; border-collapse:collapse; font-size:0.85em }
+#ce-history-body th, #ce-history-body td{ padding:6px 8px; border-bottom:1px solid #e5e7eb; text-align:left }
+#ce-history-body th{ background:#f8fafc; font-weight:600 }
+.ce-history-status{ display:inline-block; padding:2px 8px; border-radius:9999px; font-size:0.75em; font-weight:600 }
+.ce-history-status.completed{ background:#d1fae5; color:#065f46 }
+.ce-history-status.running{ background:#fef3c7; color:#92400e }
+.ce-history-status.failed{ background:#fee2e2; color:#991b1b }
+
+/* Compare diff table */
+.ce-diff-table{ width:100%; border-collapse:collapse; font-size:0.85em; margin-top:12px }
+.ce-diff-table th, .ce-diff-table td{ padding:6px 8px; border:1px solid #e5e7eb }
+.ce-diff-table td.differs{ background:#fef9c3 }
+.ce-compare-legend{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:8px; font-size:0.85em }
+.ce-compare-legend .swatch{ display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:middle }
+
+/* "Create simulation" panel accent (was inline style on the HTML element) */
+.ce-create-sim-panel{ background:#eff6ff }
