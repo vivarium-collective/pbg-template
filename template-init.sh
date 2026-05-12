@@ -19,7 +19,7 @@ if [[ ! "$WS_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 
 TODAY="$(date -u +%Y-%m-%d)"
-PLUGIN_VERSION="0.4.15"
+PLUGIN_VERSION="0.4.16"
 # Python package name for the workspace: hyphens become underscores
 PACKAGE_PATH="pbg_${WS_NAME//-/_}"
 
