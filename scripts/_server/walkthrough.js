@@ -1480,7 +1480,7 @@
                     name: run.meta.label || run.run_id.slice(-12),
                     line: { color: run.color, width: 2 } };
         });
-        Plotly.newPlot('ce-cmp-' + k, traces, {
+        Plotly.newPlot('ce-cmp-' + _esc(k), traces, {
           title: { text: k, font: { size: 13 } },
           margin: { l: 55, r: 15, t: 35, b: 40 },
           showlegend: false,
