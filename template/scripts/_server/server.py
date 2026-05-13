@@ -629,6 +629,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_composite_state()
         if self.path.startswith("/api/composite-resolve"):
             return self._get_composite_resolve()
+        if self.path.startswith("/api/investigation-viz-html"):
+            return self._get_investigation_viz_html()
         if self.path.startswith("/api/investigation-composites"):
             return self._get_investigation_composites()
         if self.path.startswith("/api/investigation-state-tree"):
@@ -2592,6 +2594,38 @@ if __name__ == "__main__":
             "runs_summary": runs_summary,
         }, 200)
 
+    def _get_investigation_viz_html(self):
+        """GET /api/investigation-viz-html?investigation=<inv>&run_id=<run_id>
+        — list the persisted viz HTML files for one run.
+
+        Returns ``{viz_files: [{name, html_path}]}`` where ``html_path`` is the
+        workspace-relative path the static-file handler can serve. Symmetric
+        with the inline ``viz_html`` payload returned from
+        ``/api/investigation-run-one``; the run handler writes one HTML file
+        per inlined ``Visualization`` step under
+        ``investigations/<inv>/viz/<run_id>/<name>.html``.
+        """
+        from urllib.parse import urlparse, parse_qs
+
+        qs = parse_qs(urlparse(self.path).query)
+        inv = (qs.get("investigation") or [""])[0].strip()
+        run_id = (qs.get("run_id") or [""])[0].strip()
+        if not inv or not run_id:
+            return self._json(
+                {"error": "investigation and run_id are required",
+                 "viz_files": []}, 400,
+            )
+        viz_dir = WORKSPACE / "investigations" / inv / "viz" / run_id
+        if not viz_dir.is_dir():
+            return self._json({"viz_files": []}, 200)
+        out = []
+        for html_file in sorted(viz_dir.glob("*.html")):
+            out.append({
+                "name": html_file.stem,
+                "html_path": str(html_file.relative_to(WORKSPACE)),
+            })
+        return self._json({"viz_files": out}, 200)
+
     def _get_investigation_composites(self):
         """GET /api/investigation-composites?investigation=<n>
         Returns: {composites: [{name, source?, extends?, document, ...}]}
@@ -3637,17 +3671,54 @@ if __name__ == "__main__":
 
         ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        path = find_composite_path(WORKSPACE, pkg, spec["composite"])
-        if path is None:
-            return self._json({"error": f"composite not found: {spec['composite']}"}, 404)
 
-        text = path.read_text()
-        composite_spec = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
-        state = substitute_parameters(composite_spec.get("state") or {},
-                                       composite_spec.get("parameters") or {},
+        # Resolve which composite to run. v2 studies have `baseline` + `variants[]`
+        # with each variant carrying a `document: ./composites/<name>.yaml`
+        # sidecar that is the single source of truth (already merged + frozen
+        # at create time). Legacy specs use a single top-level `composite` key
+        # and resolve via the workspace registry.
+        composite_name = None
+        composite_doc = None  # raw {state, parameters, ...} dict
+        inv_dir = WORKSPACE / "investigations" / inv
+        if "variants" in spec:
+            # v2 study shape: prefer baseline; if absent, the first declared variant.
+            variants = spec.get("variants") or []
+            baseline_name = spec.get("baseline") or (variants[0].get("name") if variants else None)
+            variant_entry = None
+            for v in variants:
+                if v.get("name") == baseline_name:
+                    variant_entry = v
+                    break
+            if variant_entry is None:
+                return self._json({"error": f"baseline variant not found: {baseline_name!r}"}, 404)
+            composite_name = variant_entry.get("name") or baseline_name
+            sidecar_rel = variant_entry.get("document") or f"./composites/{composite_name}.yaml"
+            sidecar_path = (inv_dir / sidecar_rel).resolve()
+            if not sidecar_path.is_file():
+                return self._json({"error": f"composite sidecar not found: {sidecar_path}"}, 404)
+            text = sidecar_path.read_text()
+            composite_doc = (json.loads(text) if sidecar_path.suffix.lower() == ".json"
+                              else yaml.safe_load(text)) or {}
+        elif spec.get("composite"):
+            # Legacy single-composite shape: resolve via workspace registry.
+            composite_name = spec["composite"]
+            path = find_composite_path(WORKSPACE, pkg, composite_name)
+            if path is None:
+                return self._json({"error": f"composite not found: {composite_name}"}, 404)
+            text = path.read_text()
+            composite_doc = (json.loads(text) if path.suffix.lower() == ".json"
+                              else yaml.safe_load(text)) or {}
+        else:
+            return self._json(
+                {"error": "spec has neither 'variants' (v2) nor 'composite' (legacy)"},
+                400,
+            )
+
+        state = substitute_parameters(composite_doc.get("state") or {},
+                                       composite_doc.get("parameters") or {},
                                        overrides)
         db_file = str(WORKSPACE / "investigations" / inv / "runs.db")
-        run_id = cr.generate_run_id(spec["composite"], overrides)
+        run_id = cr.generate_run_id(composite_name, overrides)
         state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
 
         # Ensure the DB exists + the runs_meta table has sim_name column
@@ -3661,7 +3732,7 @@ if __name__ == "__main__":
 
         label = body.get("label") or f"ad-hoc {sim_name}"
         import time as _time
-        cr.save_metadata(conn, spec_id=spec["composite"], run_id=run_id,
+        cr.save_metadata(conn, spec_id=composite_name, run_id=run_id,
                           params=overrides, label=label, started_at=_time.time())
         conn.execute("UPDATE runs_meta SET sim_name=? WHERE run_id=?", (sim_name, run_id))
         conn.commit()
@@ -3678,7 +3749,18 @@ if __name__ == "__main__":
                 core.register_link('SQLiteEmitter', SQLiteEmitter)
                 composite = Composite({{'state': __import__('json').loads({json.dumps(json.dumps(state, default=_json_default))})}}, core=core)
                 composite.run({steps})
-                print('@@@OK@@@')
+                # Gather rendered viz HTML, if pbg_superpowers is importable.
+                viz_html = {{}}
+                try:
+                    from pbg_superpowers.visualization import render_results
+                    rendered = render_results(composite)
+                    for path_tuple, payload in rendered.items():
+                        key = '.'.join(str(p) for p in path_tuple)
+                        viz_html[key] = payload
+                except Exception:
+                    viz_html = {{}}
+                print('@@@RESULTS@@@')
+                print(json.dumps({{'viz_html': viz_html}}, default=str))
             except Exception:
                 print('@@@ERROR@@@')
                 print(traceback.format_exc())
@@ -3687,10 +3769,50 @@ if __name__ == "__main__":
                                  capture_output=True, text=True, timeout=300)
         conn = cr.connect(db_file)
         try:
-            if "@@@OK@@@" in result.stdout:
+            if "@@@RESULTS@@@" in result.stdout:
+                # Parse the viz_html block. Persist each viz's html to disk at
+                # investigations/<inv>/viz/<run_id>/<viz_path_safe>.html so the
+                # dashboard's static-file handler can serve it.
+                viz_html_resp = {}
+                try:
+                    payload = json.loads(
+                        result.stdout.split("@@@RESULTS@@@", 1)[1].strip()
+                    )
+                    viz_html = payload.get("viz_html") or {}
+                except (IndexError, json.JSONDecodeError):
+                    viz_html = {}
+
+                if viz_html:
+                    viz_dir = inv_dir / "viz" / run_id
+                    viz_dir.mkdir(parents=True, exist_ok=True)
+                    for viz_key, viz_payload in viz_html.items():
+                        # Sanitise key for filesystem use: replace any '.', '/', or
+                        # other separators with '_'.
+                        safe = re.sub(r"[^A-Za-z0-9_-]+", "_", viz_key).strip("_") or "viz"
+                        html_str = ""
+                        if isinstance(viz_payload, dict):
+                            html_str = viz_payload.get("html") or ""
+                        elif isinstance(viz_payload, str):
+                            html_str = viz_payload
+                        out_path = viz_dir / f"{safe}.html"
+                        try:
+                            out_path.write_text(html_str if isinstance(html_str, str) else str(html_str))
+                            rel_path = out_path.relative_to(WORKSPACE)
+                            viz_html_resp[safe] = {
+                                "html": html_str if isinstance(html_str, str) else "",
+                                "path": str(rel_path),
+                            }
+                        except OSError:
+                            # Best-effort persistence; still include the HTML inline.
+                            viz_html_resp[safe] = {
+                                "html": html_str if isinstance(html_str, str) else "",
+                                "path": "",
+                            }
+
                 cr.complete_metadata(conn, run_id=run_id, n_steps=steps, status="completed")
                 return self._json({"ok": True, "run_id": run_id,
-                                   "investigation": inv, "sim_name": sim_name}, 200)
+                                   "investigation": inv, "sim_name": sim_name,
+                                   "viz_html": viz_html_resp}, 200)
             else:
                 cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
                 err = result.stdout.split("@@@ERROR@@@", 1)[-1].strip()[-500:] \

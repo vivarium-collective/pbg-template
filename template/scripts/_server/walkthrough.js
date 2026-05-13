@@ -4878,10 +4878,59 @@
       }),
     }).then(function(r) { return r.json(); }).then(function(j) {
       if (!j.ok) { alert('Duplicate-run failed: ' + (j.error || 'unknown')); return; }
+      // Re-render the investigation; the new run's viz HTML lives at
+      // /investigations/<inv>/viz/<run_id>/<name>.html and is discoverable
+      // via GET /api/investigation-viz-html?investigation=...&run_id=...
       _openInvestigation(investigationName);
+      // Surface any inline viz from this run so the user sees confirmation
+      // without hunting through the Visualizations tab.
+      _renderRunViz(investigationName, j.run_id);
     });
   }
   window._dupRun = _dupRun;
+
+  function _renderRunViz(investigationName, runId) {
+    // Append a per-run viz panel beneath the runs table. Idempotent: each
+    // call replaces the previous panel for the same run_id.
+    if (!runId) return;
+    var detail = document.getElementById('investigation-detail');
+    if (!detail) return;
+    var runsPanel = detail.querySelector('.investigation-detail-panel[data-tab="runs"]');
+    if (!runsPanel) return;
+    var existing = document.getElementById('run-viz-' + runId);
+    if (existing) existing.remove();
+    var url = '/api/investigation-viz-html?investigation=' +
+              encodeURIComponent(investigationName) +
+              '&run_id=' + encodeURIComponent(runId);
+    fetch(url).then(function(r) { return r.json(); }).then(function(j) {
+      var files = (j && j.viz_files) || [];
+      var panel = document.createElement('div');
+      panel.id = 'run-viz-' + runId;
+      panel.style.marginTop = '14px';
+      panel.style.padding = '10px';
+      panel.style.border = '1px solid #ddd';
+      panel.style.borderRadius = '4px';
+      if (!files.length) {
+        panel.innerHTML = '<p class="empty-state" style="margin:0">No visualizations for run <code>' +
+                          _esc(runId.slice(-12)) + '</code>.</p>';
+      } else {
+        var iframes = files.map(function(f) {
+          return '<figure style="margin:0 0 14px 0">' +
+            '<figcaption style="font-size:0.85em;color:#555;margin-bottom:4px">' +
+              _esc(f.name) +
+              ' <small><a href="/' + _esc(f.html_path) + '" target="_blank">open ↗</a></small>' +
+            '</figcaption>' +
+            '<iframe src="/' + _esc(f.html_path) + '" sandbox="allow-scripts" ' +
+              'style="width:100%;height:380px;border:1px solid #eee;background:#fff"></iframe>' +
+          '</figure>';
+        }).join('');
+        panel.innerHTML = '<h4 style="margin:0 0 8px 0">Run ' + _esc(runId.slice(-12)) +
+                          ' visualizations</h4>' + iframes;
+      }
+      runsPanel.appendChild(panel);
+    });
+  }
+  window._renderRunViz = _renderRunViz;
 
   function _openWorkspaceVizModal() {
     var classSel = document.getElementById('viz-class-picker');
