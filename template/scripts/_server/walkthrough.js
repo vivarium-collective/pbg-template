@@ -1072,14 +1072,21 @@
   // -------------------------------------------------------------------------
 
   function _refreshWorkStrip() {
-    fetch('/api/work-status')
-      .then(function(r){ return r.json(); })
-      .then(_renderWorkStrip)
-      .catch(function(err){ console.warn('work-status failed:', err); });
+    Promise.all([
+      fetch('/api/work-status').then(function(r){ return r.json(); }),
+      fetch('/api/dirty-status').then(function(r){ return r.json(); }).catch(function(){ return {count: 0, files: []}; }),
+    ]).then(function(parts){
+      _renderWorkStrip(parts[0], parts[1]);
+    }).catch(function(err){ console.warn('work-status failed:', err); });
+    // Start a 30s poller once so the pill updates against external edits.
+    if (!window._dirtyPollerStarted) {
+      window._dirtyPollerStarted = true;
+      setInterval(_refreshWorkStrip, 30000);
+    }
   }
   window._refreshWorkStrip = _refreshWorkStrip;
 
-  function _renderWorkStrip(s) {
+  function _renderWorkStrip(s, dirty) {
     var el = document.getElementById('workstream-strip');
     if (!el) return;
     if (!s.active) {
@@ -1115,8 +1122,77 @@
     }
 
     parts.push('<button class="ws-btn ws-end" onclick="_endWork()" title="Switch back to ' + s.base + ' (workstream branch is preserved)">End</button>');
+
+    // Dirty-files pill — appears only when porcelain-filtered count > 0.
+    if (dirty && dirty.count > 0) {
+      parts.push(
+        '<span class="ws-dirty-pill" ' +
+          'title="' + dirty.count + ' uncommitted file' + (dirty.count === 1 ? '' : 's') + '" ' +
+          'onclick="_toggleDirtyPanel()" ' +
+          'style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;cursor:pointer;margin-left:6px">' +
+          '&#x1F7E1; ' + dirty.count + ' uncommitted' +
+        '</span>'
+      );
+    } else {
+      // If the pill no longer applies, close any open dirty panel.
+      var openPanel = document.getElementById('ws-dirty-panel');
+      if (openPanel) openPanel.remove();
+    }
+
     el.innerHTML = parts.join(' ');
   }
+
+  function _toggleDirtyPanel() {
+    var panel = document.getElementById('ws-dirty-panel');
+    if (panel) { panel.remove(); return; }
+    fetch('/api/dirty-status')
+      .then(function(r){ return r.json(); })
+      .then(_renderDirtyPanel)
+      .catch(function(err){ console.warn('dirty-status failed:', err); });
+  }
+  window._toggleDirtyPanel = _toggleDirtyPanel;
+
+  function _renderDirtyPanel(d) {
+    var existing = document.getElementById('ws-dirty-panel');
+    if (existing) existing.remove();
+    var strip = document.getElementById('workstream-strip');
+    if (!strip || !d || !d.files || d.files.length === 0) return;
+    var div = document.createElement('div');
+    div.id = 'ws-dirty-panel';
+    div.style.cssText = 'background:#fef3c7;border:1px solid #fcd34d;border-radius:4px;padding:8px;margin:6px 0;font-size:0.85em';
+    var rows = d.files.map(function(f){
+      return '<div><code>' + _esc(f.status) + '</code> ' + _esc(f.path) + '</div>';
+    }).join('');
+    div.innerHTML =
+      '<div style="margin-bottom:6px"><strong>' + d.count + ' uncommitted file' + (d.count === 1 ? '' : 's') + '</strong></div>' +
+      rows +
+      '<div style="margin-top:8px">' +
+        '<button class="ws-btn ws-primary" onclick="_commitDirtyAll()">Commit all</button> ' +
+        '<button class="ws-btn" onclick="_refreshWorkStrip(); _toggleDirtyPanel()">Refresh</button> ' +
+        '<button class="ws-btn" onclick="_toggleDirtyPanel()">Close</button>' +
+      '</div>';
+    strip.insertAdjacentElement('afterend', div);
+  }
+
+  function _commitDirtyAll() {
+    fetch('/api/dirty-commit-all', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: '{}',
+    })
+      .then(function(r){ return r.json().then(function(j){ return {ok: r.ok, body: j}; }); })
+      .then(function(res){
+        if (!res.ok) {
+          alert(res.body.error || 'Commit failed');
+          return;
+        }
+        if (typeof _showToast === 'function') _showToast('Committed: ' + res.body.message);
+        _toggleDirtyPanel();
+        _refreshWorkStrip();
+      })
+      .catch(function(e){ alert('Network error: ' + e); });
+  }
+  window._commitDirtyAll = _commitDirtyAll;
 
   function _createGithubRepo() {
     openModal('modal-create-github-repo');

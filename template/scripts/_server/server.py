@@ -285,6 +285,37 @@ def _dirty_workspace() -> str:
     return "\n".join(kept)
 
 
+def _suggest_dirty_commit_message(paths: list[str]) -> str:
+    """Auto-generate a conventional commit message from a list of dirty paths.
+
+    Uses the top-level directory of each path to pick a category prefix. When all
+    dirty files share one top-level directory we map it to a conventional scope
+    (chore(scripts), docs, chore(composites), ...). Otherwise falls back to a
+    generic ``chore:`` prefix.
+    """
+    if not paths:
+        return "chore: commit pending files"
+    top_dirs = sorted(set(p.split('/')[0] for p in paths if p))
+    n = len(paths)
+    suffix = f"commit {n} pending file{'s' if n != 1 else ''}"
+    if len(top_dirs) == 1:
+        cat = top_dirs[0]
+        # Map common top-level dirs to conventional categories
+        known = {
+            'scripts': 'chore(scripts)',
+            'composites': 'chore(composites)',
+            'investigations': 'chore(investigations)',
+            'docs': 'docs',
+            'tests': 'chore(tests)',
+            'reports': 'chore(reports)',
+            'pbg_chromosome_rep1': 'chore(pkg)',  # workspace package
+        }
+        # Generic fallback
+        prefix = known.get(cat, f'chore({cat})')
+        return f"{prefix}: {suffix}"
+    return f"chore: {suffix}"
+
+
 def _safe_slug(s: str) -> str:
     """Convert a string to a safe branch name component."""
     s = re.sub(r"[^a-zA-Z0-9_-]", "-", s)
@@ -540,6 +571,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_catalog()
         if self.path.startswith("/api/work-status"):
             return self._get_work_status()
+        if self.path.startswith("/api/dirty-status"):
+            return self._get_dirty_status()
         if self.path.startswith("/api/suggest-poll"):
             return self._get_suggest_poll()
         if self.path.startswith("/api/visualization-status"):
@@ -602,6 +635,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/work-create-github-repo": self._post_work_create_github_repo,
             "/api/work-create-pr":     self._post_work_create_pr,
             "/api/work-end":           self._post_work_end,
+            "/api/dirty-commit-all":   self._post_dirty_commit_all,
             "/api/catalog-install":    self._post_catalog_install,
             "/api/catalog-uninstall":  self._post_catalog_uninstall,
             "/api/suggest":            self._post_suggest,
@@ -2166,6 +2200,63 @@ if __name__ == "__main__":
         subprocess.run(["git", "checkout", base], cwd=WORKSPACE, check=True, capture_output=True)
         clear_state()
         return self._json({"ok": True}, 200)
+
+    def _get_dirty_status(self):
+        """Return the filtered porcelain list of uncommitted files."""
+        try:
+            dirty = _dirty_workspace()
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+            return self._json({"error": f"git status failed: {stderr[:200]}"}, 500)
+        files = []
+        for raw in dirty.splitlines():
+            if len(raw) < 4:
+                continue
+            files.append({"status": raw[:2].strip(), "path": raw[3:]})
+        return self._json({"count": len(files), "files": files}, 200)
+
+    def _post_dirty_commit_all(self, body: dict):
+        """Stage and commit all dirty files (minus reports/) under the active workstream."""
+        _ws_add_to_sys_path()
+        from scripts._lib.work_state import load_state
+        state = load_state()
+        branch = state.get("active_branch")
+        if not branch:
+            return self._json({"error": "no active workstream"}, 409)
+        # Ensure we're on the active branch
+        try:
+            current = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=WORKSPACE, capture_output=True, text=True, check=True,
+            ).stdout.strip()
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+            return self._json({"error": f"git rev-parse failed: {stderr[:200]}"}, 500)
+        if current != branch:
+            r = subprocess.run(["git", "checkout", branch], cwd=WORKSPACE, capture_output=True, text=True)
+            if r.returncode != 0:
+                return self._json({"error": f"could not check out '{branch}': {r.stderr[:200]}"}, 500)
+        dirty = _dirty_workspace().strip()
+        if not dirty:
+            return self._json({"error": "working tree is already clean"}, 409)
+        paths = [line[3:] for line in dirty.splitlines() if len(line) >= 4]
+        message = _suggest_dirty_commit_message(paths)
+        try:
+            subprocess.run(["git", "add", "-A"], cwd=WORKSPACE, check=True, capture_output=True)
+            subprocess.run(["git", "reset", "HEAD", "--", "reports/"], cwd=WORKSPACE, check=False, capture_output=True)
+            subprocess.run([
+                "git", "-c", "user.email=pbg-template@local",
+                      "-c", "user.name=pbg-template",
+                      "commit", "-m", message,
+            ], cwd=WORKSPACE, check=True, capture_output=True)
+            sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=WORKSPACE, capture_output=True, text=True, check=True,
+            ).stdout.strip()
+            return self._json({"commit_sha": sha[:7], "message": message, "paths": paths}, 200)
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+            return self._json({"error": f"git operation failed: {stderr[:300]}"}, 500)
 
     def _post_render(self, body: dict):
         """Re-render workspace dashboard."""

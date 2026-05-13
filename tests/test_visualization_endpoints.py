@@ -1303,3 +1303,109 @@ def test_get_investigations_includes_v2_summary_fields(workspace_server):
     assert 'n_simulations' in row
     # n_runs mirrors n_simulations (alias for v2 consumers)
     assert row['n_runs'] == row['n_simulations']
+
+
+# ---------------------------------------------------------------------------
+# /api/dirty-status + /api/dirty-commit-all endpoint tests
+# ---------------------------------------------------------------------------
+
+import subprocess
+
+
+def _git(args, cwd):
+    return subprocess.run(
+        ["git"] + list(args), cwd=str(cwd),
+        capture_output=True, text=True, check=True,
+    )
+
+
+def _git_init_clean(ws_root):
+    """Initialise a clean git repo with one initial commit in ws_root."""
+    _git(["init", "-q", "-b", "main"], cwd=ws_root)
+    _git(["config", "user.email", "test@local"], cwd=ws_root)
+    _git(["config", "user.name", "test"], cwd=ws_root)
+    # Match the real workspace: .pbg/state.json is gitignored so workstream
+    # state never shows up in porcelain output.
+    (ws_root / ".gitignore").write_text(".pbg/\n__pycache__/\n*.pyc\n")
+    _git(["add", "-A"], cwd=ws_root)
+    _git(["commit", "-q", "-m", "initial"], cwd=ws_root)
+
+
+def _get(url):
+    with urllib.request.urlopen(url) as resp:
+        return resp.status, json.loads(resp.read())
+
+
+def test_get_dirty_status_empty_when_clean(workspace_server):
+    """A freshly committed workspace reports zero dirty files."""
+    _git_init_clean(workspace_server.root)
+    code, j = _get(workspace_server.url + "/api/dirty-status")
+    assert code == 200, j
+    assert j["count"] == 0, j
+    assert j["files"] == [], j
+
+
+def test_get_dirty_status_lists_uncommitted_files(workspace_server):
+    """Adding an untracked file shows up in the dirty-status response."""
+    _git_init_clean(workspace_server.root)
+    (workspace_server.root / "scratch_file.txt").write_text("hello dirty\n")
+    code, j = _get(workspace_server.url + "/api/dirty-status")
+    assert code == 200, j
+    assert j["count"] >= 1, j
+    paths = [f["path"] for f in j["files"]]
+    assert "scratch_file.txt" in paths, paths
+
+
+def test_post_dirty_commit_all_commits_and_returns_message(workspace_server, monkeypatch):
+    """POST /api/dirty-commit-all stages and commits dirty files with auto-generated message."""
+    ws_root = workspace_server.root
+    _git_init_clean(ws_root)
+    # Create an active workstream branch and corresponding state file.
+    _git(["checkout", "-q", "-b", "feat/test-branch"], cwd=ws_root)
+    (ws_root / ".pbg").mkdir(parents=True, exist_ok=True)
+    (ws_root / ".pbg" / "state.json").write_text(
+        json.dumps({"active_branch": "feat/test-branch", "base": "main"}) + "\n"
+    )
+    # Point work_state.workspace_root at our temp dir so load_state reads our state file.
+    import scripts._lib._root as root_mod
+    import scripts._lib.work_state as work_state_mod
+    monkeypatch.setattr(root_mod, "workspace_root", lambda: ws_root)
+    monkeypatch.setattr(work_state_mod, "_state_path", lambda: ws_root / ".pbg" / "state.json")
+
+    # Create an uncommitted file under scripts/ so the auto-generated prefix is "chore(scripts)".
+    (ws_root / "scripts").mkdir(parents=True, exist_ok=True)
+    (ws_root / "scripts" / "scratch.py").write_text("# scratch\n")
+
+    code, j = _post(workspace_server.url + "/api/dirty-commit-all", {})
+    assert code == 200, j
+    assert "commit_sha" in j and j["commit_sha"], j
+    # 7-char short sha
+    assert len(j["commit_sha"]) == 7, j
+    # Message should follow the conventional pattern produced by _suggest_dirty_commit_message.
+    msg = j["message"]
+    assert msg.startswith("chore("), msg
+    assert "commit" in msg and "pending file" in msg, msg
+
+    # Verify the working tree is now clean (porcelain-filtered).
+    code2, j2 = _get(workspace_server.url + "/api/dirty-status")
+    assert code2 == 200, j2
+    assert j2["count"] == 0, j2
+
+
+def test_post_dirty_commit_all_409_when_clean(workspace_server, monkeypatch):
+    """POST /api/dirty-commit-all returns 409 when working tree is already clean."""
+    ws_root = workspace_server.root
+    _git_init_clean(ws_root)
+    _git(["checkout", "-q", "-b", "feat/clean-branch"], cwd=ws_root)
+    (ws_root / ".pbg").mkdir(parents=True, exist_ok=True)
+    (ws_root / ".pbg" / "state.json").write_text(
+        json.dumps({"active_branch": "feat/clean-branch", "base": "main"}) + "\n"
+    )
+    import scripts._lib._root as root_mod
+    import scripts._lib.work_state as work_state_mod
+    monkeypatch.setattr(root_mod, "workspace_root", lambda: ws_root)
+    monkeypatch.setattr(work_state_mod, "_state_path", lambda: ws_root / ".pbg" / "state.json")
+
+    code, j = _post(workspace_server.url + "/api/dirty-commit-all", {})
+    assert code == 409, j
+    assert "clean" in (j.get("error") or "").lower(), j
