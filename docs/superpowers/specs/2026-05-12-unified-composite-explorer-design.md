@@ -1,7 +1,7 @@
 # Unified Composite Study + Composite Explorer
 
 **Date:** 2026-05-12
-**Status:** Approved for implementation
+**Status:** ⚠️ Superseded by [`2026-05-12-study-model-design.md`](./2026-05-12-study-model-design.md) on 2026-05-12. The Composite Study + Composite Explorer split (this spec) still stands; the Study data model has since been enriched with Baseline / Variant / Intervention / Comparison / Conclusions vocabulary and the 6-tab strip. Read the superseding spec for the current shape.
 **Owner:** Eran (process-bigraph workspaces)
 **Supersedes:**
 - The split between the workspace-level Composite Explorer (current editor) and the per-investigation detail viewer (`investigation-detail-tab` strip).
