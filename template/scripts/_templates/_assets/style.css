@@ -929,3 +929,71 @@ body.focus-mode::before{
   z-index:60;
 }
 
+/* Study detail — cleaner tab strip + summary header (UX polish pass) -------- */
+.investigation-detail-tabs{
+  display:flex; gap:24px; align-items:center;
+  border-bottom:1px solid #e5e7eb;
+  margin:20px 0 16px;
+}
+.investigation-detail-tab{
+  background:transparent; border:0;
+  display:inline-flex; align-items:center; gap:8px;
+  padding:8px 0; margin:0;
+  font:inherit; font-size:0.95em; color:#6b7280;
+  cursor:pointer;
+  border-bottom:2px solid transparent;
+  transition:color 0.12s, border-color 0.12s;
+}
+.investigation-detail-tab:hover{ color:#1f2937 }
+.investigation-detail-tab.active{
+  color:#2563eb; border-bottom-color:#2563eb;
+  font-weight:600;
+}
+.investigation-detail-tab .tab-icon{
+  width:18px; height:18px; flex:0 0 18px;
+  display:block;
+}
+.investigation-detail-tab .tab-count-badge{
+  background:#f3f4f6; color:#374151;
+  padding:1px 6px; border-radius:10px;
+  font-size:0.78em; font-weight:600;
+  margin-left:4px;
+}
+
+/* Study-header card styling */
+.study-header{
+  margin-bottom:8px;
+}
+.study-title{
+  margin:0 0 4px; font-size:1.6em; color:#111827;
+}
+.study-title .study-name{ color:#1f2937 }
+.study-subtitle{
+  margin:0 0 12px; color:#4b5563; font-size:0.95em; line-height:1.4;
+}
+.study-summary{
+  display:flex; gap:24px; margin:12px 0; padding:12px;
+  background:#fafafa; border:1px solid #e5e7eb; border-radius:6px;
+}
+.study-summary > div{ flex:1 }
+.study-summary dt{
+  font-size:0.78em; color:#6b7280;
+  text-transform:uppercase; letter-spacing:0.04em;
+  margin:0 0 4px;
+}
+.study-summary dd{
+  margin:0; font-weight:600; color:#1f2937; font-size:0.95em;
+}
+.study-summary dd.status-pill{
+  display:inline-block;
+}
+
+/* Action row on investigation cards (Run / Re-run / Delete) */
+.investigation-card .ic-actions{
+  margin-top:10px; display:flex; gap:8px;
+  padding-top:10px; border-top:1px solid #f3f4f6;
+}
+.investigation-card .ic-actions .btn-mini{
+  flex:none;
+}
+

@@ -182,7 +182,7 @@
 
     <!-- Investigations grouped list -->
     <div class="viv-rail-section">
-      <div class="viv-rail-section-label">Investigations</div>
+      <div class="viv-rail-section-label">Studies</div>
       <div id="viv-rail-investigations">
         <p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>
       </div>
@@ -596,6 +596,13 @@
   <div class="card-browse-toolbar" id="investigations-toolbar">
     <input type="search" class="card-browse-search" id="investigations-search" placeholder="Filter investigations…">
     <div class="card-browse-chips" id="investigations-tag-chips"></div>
+    <select id="investigations-sort" onchange="_setInvestigationsSort(this.value)" style="margin-left:12px">
+      <option value="name">Sort: Name</option>
+      <option value="last_run">Sort: Last run</option>
+      <option value="status">Sort: Status</option>
+      <option value="topic">Sort: Topic</option>
+      <option value="n_runs">Sort: Run count</option>
+    </select>
     <span class="card-browse-view-toggle">
       <button class="view-btn active" data-view="grid" onclick="_setInvestigationsView('grid')">▦</button>
       <button class="view-btn" data-view="list" onclick="_setInvestigationsView('list')">≡</button>
