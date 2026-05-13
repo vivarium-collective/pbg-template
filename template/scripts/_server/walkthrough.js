@@ -47,6 +47,37 @@
     }
   });
 
+  // Pop the current loom-explore iframe contents into a separate window.
+  // We re-send the last-posted {type:'composite:load', state, metadata} payload
+  // once the popup signals explore:ready (with a 2s failsafe re-post).
+  function _popoutLoom(iframeId) {
+    var iframe = document.getElementById(iframeId);
+    if (!iframe) return;
+    var snapshot = window._loomLastState && window._loomLastState[iframeId];
+    if (!snapshot) {
+      alert('No composite loaded in this view yet — open a composite first.');
+      return;
+    }
+    var w = window.open('/loom-explore/index.html', '_blank',
+      'width=1200,height=800,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes');
+    if (!w) {
+      alert('Popup blocked. Allow popups from this site to pop out the wiring view.');
+      return;
+    }
+    var listener = function(ev) {
+      if (ev.source === w && ev.data && ev.data.type === 'explore:ready') {
+        w.postMessage(snapshot, '*');
+        window.removeEventListener('message', listener);
+      }
+    };
+    window.addEventListener('message', listener);
+    // Failsafe: if the popup never sends ready (older bundle?), post after a delay.
+    setTimeout(function() {
+      try { w.postMessage(snapshot, '*'); } catch(_) {}
+    }, 2000);
+  }
+  window._popoutLoom = _popoutLoom;
+
   // -------------------------------------------------------------------------
   // UI feature flags (ui.composite_view)
   // -------------------------------------------------------------------------
@@ -2480,12 +2511,15 @@
     if (!iframe) return;
 
     function _postState(state, name) {
+      var payload = {
+        type: 'composite:load',
+        state: state,
+        metadata: { name: name || ref },
+      };
+      window._loomLastState = window._loomLastState || {};
+      window._loomLastState[iframe.id] = payload;
       var post = function() {
-        iframe.contentWindow.postMessage({
-          type: 'composite:load',
-          state: state,
-          metadata: { name: name || ref },
-        }, '*');
+        iframe.contentWindow.postMessage(payload, '*');
       };
       if (window._loomExploreReady && window._loomExploreReady[iframe.id]) {
         post();
@@ -3112,6 +3146,11 @@
         '<div id="inv-composites-list" style="display:grid;grid-template-columns:220px 1fr;gap:16px">' +
           '<div id="inv-composites-sidebar"></div>' +
           '<div id="inv-composite-detail" style="border-left:1px solid #eee;padding-left:14px">' +
+            '<div class="loom-frame-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:6px">' +
+              '<button class="btn-mini" onclick="_popoutLoom(\'inv-composite-explore-frame\')" title="Open this wiring view in a separate window">' +
+                'Pop out ↗' +
+              '</button>' +
+            '</div>' +
             '<iframe id="inv-composite-explore-frame"' +
                     ' src="/loom-explore/index.html"' +
                     ' title="Composite wiring"' +
@@ -3909,12 +3948,15 @@
         }
         // Show the iframe before posting so it has a layout.
         iframe.style.display = '';
+        var payload = {
+          type: 'composite:load',
+          state: data.state,
+          metadata: { name: compName, context: 'investigation:' + invName },
+        };
+        window._loomLastState = window._loomLastState || {};
+        window._loomLastState[iframe.id] = payload;
         var post = function() {
-          iframe.contentWindow.postMessage({
-            type: 'composite:load',
-            state: data.state,
-            metadata: { name: compName, context: 'investigation:' + invName },
-          }, '*');
+          iframe.contentWindow.postMessage(payload, '*');
         };
         if (window._loomExploreReady && window._loomExploreReady[iframe.id]) {
           post();

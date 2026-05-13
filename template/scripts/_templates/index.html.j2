@@ -743,6 +743,11 @@
       </div>
       <div class="panel">
         <h3>Wiring diagram <button class="btn-mini" onclick="_ceUpdateDiagram()">Update diagram</button></h3>
+        <div class="loom-frame-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:6px">
+          <button class="btn-mini" onclick="_popoutLoom('composite-explore-frame')" title="Open this wiring view in a separate window">
+            Pop out ↗
+          </button>
+        </div>
         <iframe id="composite-explore-frame"
                 src="/loom-explore/index.html"
                 title="Composite wiring"
