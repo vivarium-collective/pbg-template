@@ -1649,6 +1649,54 @@
   }
   window._initCompositeExplorer = _initCompositeExplorer;
 
+  function _beginStudyFromComposite() {
+    var id = window._ceCurrent && window._ceCurrent.id;
+    if (!id) { alert('No composite loaded.'); return; }
+    // id is the dotted ref (pkg.composites.name); the endpoint accepts the bare composite name.
+    // Take the last segment after the final '.' as the composite_name.
+    var name = id.indexOf('.') >= 0 ? id.split('.').pop() : id;
+    var btn = document.getElementById('ce-begin-study-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Starting study…'; }
+    fetch('/api/investigation-create-from-composite', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({composite_name: name}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, body: j}; }); })
+      .then(function(res) {
+        if (!res.ok) {
+          alert(res.body.error || ('Begin Study failed (' + JSON.stringify(res.body) + ')'));
+          if (btn) { btn.disabled = false; btn.textContent = 'Begin Study'; }
+          return;
+        }
+        // Navigate to the new investigation's detail view.
+        var newName = res.body.name;
+        var url = new URL(window.location.href);
+        url.searchParams.delete('id');
+        url.hash = '#investigations';
+        window.history.pushState({}, '', url.toString());
+        window._currentInvestigation = newName;
+        _switchPage('investigations');
+        // Open the detail pane. Prefer the existing helper if available.
+        if (typeof _openInvestigation === 'function') {
+          _openInvestigation(newName);
+        } else {
+          fetch('/api/investigation/' + encodeURIComponent(newName))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (typeof _renderInvestigationDetail === 'function') {
+                _renderInvestigationDetail(newName, data);
+              }
+            });
+        }
+      })
+      .catch(function(e) {
+        alert('Network error: ' + e);
+        if (btn) { btn.disabled = false; btn.textContent = 'Begin Study'; }
+      });
+  }
+  window._beginStudyFromComposite = _beginStudyFromComposite;
+
   function _ceSwitchTab(tab) {
     document.querySelectorAll('.ce-tab').forEach(function(b) {
       b.classList.toggle('active', b.dataset.tab === tab);
@@ -1664,10 +1712,6 @@
     if (tab === 'compare' && window._ceCompareSet && window._ceCompareSet.size >= 2) {
       if (typeof _ceRenderCompare === 'function') _ceRenderCompare();
     }
-    // Editor tabs (Tasks 4-6 supply the real renderers)
-    if (tab === 'configure'     && typeof _ceRenderConfigure     === 'function') _ceRenderConfigure();
-    if (tab === 'observables'   && typeof _ceRenderObservables   === 'function') _ceRenderObservables();
-    if (tab === 'visualization' && typeof _ceRenderVisualization === 'function') _ceRenderVisualization();
   }
   window._ceSwitchTab = _ceSwitchTab;
 
@@ -2019,15 +2063,10 @@
         document.getElementById('ce-description').textContent = data.description || '';
         document.getElementById('ce-id').textContent = data.id;
         window._ceCurrent.parameters = data.parameters;
-        // Populate in-memory doc for editor tabs
-        window._composeDoc = data.state;
-        window._composeDocSourceRef = data.id;
         // Send wiring state to loom-explore iframe via postMessage
         _loadCompositeExplorer(data.id, data.state, data.name);
         // Render parameter editor
         _ceRenderParameters(data.parameters);
-        // Render default (configure) editor tab
-        if (typeof _ceRenderConfigure === 'function') _ceRenderConfigure();
         // Render state JSON
         document.getElementById('ce-state-json').textContent =
           JSON.stringify(data.state, null, 2);
@@ -2116,369 +2155,6 @@
   }
   window._loadCompositeExplorer = _loadCompositeExplorer;
 
-  /* ── In-memory composite document (Task 3) ──────────────────────────────
-     Populated by _ceFetch; mutated by editor tab renderers (Tasks 4-6).
-     Tasks 4-6 replace the stub renderers below with real implementations. */
-  window._composeDoc = null;
-  window._composeDocSourceRef = null;
-
-  /** Post the current in-memory doc to the loom iframe so wiring re-renders. */
-  function _cePushDocToLoom() {
-    var iframe = document.getElementById('composite-explore-frame');
-    if (!iframe || !window._composeDoc) return;
-    var post = function() {
-      iframe.contentWindow.postMessage({
-        type: 'composite:load',
-        state: window._composeDoc,
-        metadata: { name: window._composeDocSourceRef || 'edited' },
-      }, '*');
-    };
-    if (window._loomExploreReady && window._loomExploreReady[iframe.id]) {
-      post();
-    } else {
-      var listener = function(ev) {
-        if (ev.source === iframe.contentWindow && ev.data && ev.data.type === 'explore:ready') {
-          window._loomExploreReady = window._loomExploreReady || {};
-          window._loomExploreReady[iframe.id] = true;
-          window.removeEventListener('message', listener);
-          post();
-        }
-      };
-      window.addEventListener('message', listener);
-    }
-  }
-  window._cePushDocToLoom = _cePushDocToLoom;
-
-  /** Stub renderers — replaced by Tasks 4-6 when those tasks land. */
-  function _ceRenderConfigure() {
-    var panel = document.getElementById('ce-panel-configure');
-    if (!panel) return;
-    if (!window._composeDoc) {
-      panel.innerHTML = '<p class="empty-state">No composite loaded.</p>';
-      return;
-    }
-    fetch('/api/composite-process-configs', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ document: window._composeDoc }),
-    }).then(function(r) { return r.json(); })
-      .then(function(data) {
-        var rows = data.rows || [];
-        if (rows.length === 0) {
-          panel.innerHTML = '<p class="empty-state">No processes in this composite.</p>';
-          return;
-        }
-        panel.innerHTML = rows.map(function(row) {
-          var configs = (row.configs || []).map(function(c) {
-            var inputType = typeof c.value;
-            var inputAttr, valAttr;
-            if (inputType === 'number') {
-              inputAttr = 'type="number" step="any"';
-              valAttr = 'value="' + _esc(String(c.value)) + '"';
-            } else if (inputType === 'boolean') {
-              inputAttr = 'type="checkbox"' + (c.value ? ' checked' : '');
-              valAttr = '';
-            } else {
-              inputAttr = 'type="text"';
-              valAttr = 'value="' + _esc(String(c.value == null ? '' : c.value)) + '"';
-            }
-            var unitsBadge = c.units
-              ? '<span style="color:#888;font-size:0.8em;margin-left:6px">[' + _esc(String(c.units)) + ']</span>'
-              : '';
-            var defStr = (c.default !== undefined)
-              ? ('default: ' + _esc(JSON.stringify(c.default)))
-              : '';
-            return '<div style="display:grid;grid-template-columns:160px 1fr 200px;gap:8px;padding:4px 0;align-items:center">' +
-                   '<code>' + _esc(c.key) + '</code>' +
-                   '<input ' + inputAttr + ' ' + valAttr +
-                       ' onchange="_ceUpdateConfig(\'' + _esc(row.name) + '\',\'' + _esc(c.key) + '\',this)">' +
-                   '<small style="color:#888">' + defStr + unitsBadge + '</small>' +
-                   '</div>';
-          }).join('');
-          return '<details open style="margin-bottom:10px;border:1px solid #e5e7eb;border-radius:4px;padding:8px">' +
-                 '<summary style="cursor:pointer;font-weight:600">' +
-                 _esc(row.name) +
-                 ' <small style="color:#666;font-weight:normal">(' + _esc(row.address) + ')</small>' +
-                 '</summary>' +
-                 '<div style="margin-top:8px">' + configs + '</div>' +
-                 '</details>';
-        }).join('');
-      })
-      .catch(function(err) {
-        panel.innerHTML = '<p style="color:#991b1b">Failed to load configs: ' + _esc(String(err)) + '</p>';
-      });
-  }
-  window._ceRenderConfigure = _ceRenderConfigure;
-
-  function _ceUpdateConfig(processName, key, inputEl) {
-    if (!window._composeDoc) return;
-    var raw = inputEl.type === 'checkbox' ? inputEl.checked : inputEl.value;
-    // Best-effort type coercion based on the input element's type attribute
-    var value;
-    if (inputEl.type === 'number') {
-      value = parseFloat(raw);
-      if (isNaN(value)) value = raw;
-    } else if (inputEl.type === 'checkbox') {
-      value = !!raw;
-    } else {
-      value = raw;
-    }
-    var state = window._composeDoc.state || {};
-    var proc = state[processName];
-    if (!proc || !proc.config) {
-      console.warn('process not found:', processName);
-      return;
-    }
-    proc.config[key] = value;
-    _cePushDocToLoom();  // wiring view doesn't change for config edits, but cheap to keep in sync
-  }
-  window._ceUpdateConfig = _ceUpdateConfig;
-
-  function _ceRenderObservables() {
-    var panel = document.getElementById('ce-panel-observables');
-    if (!panel) return;
-    if (!window._composeDoc) {
-      panel.innerHTML = '<p class="empty-state">No composite loaded.</p>';
-      return;
-    }
-    fetch('/api/composite-state-tree-doc', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ document: window._composeDoc }),
-    }).then(function(r) { return r.json(); })
-      .then(function(data) {
-        var leaves = (data.nodes || []).filter(function(n) { return n.kind === 'store'; });
-        var existingEmitter = (window._composeDoc.state || {}).emitter;
-        var selected = new Set();
-        if (existingEmitter && existingEmitter.inputs) {
-          Object.values(existingEmitter.inputs).forEach(function(p) {
-            selected.add((p || []).join('.'));
-          });
-        }
-        var useRam = !!(existingEmitter && existingEmitter.address === 'local:RAMEmitter');
-        var rows = leaves.map(function(n) {
-          var key = (n.path || []).join('.');
-          var checked = selected.has(key) ? ' checked' : '';
-          var typeStr = n.type || '';
-          var defStr = (n.default !== undefined)
-            ? '  default: ' + _esc(JSON.stringify(n.default))
-            : '';
-          return '<div style="padding:3px 0"><label>' +
-                 '<input type="checkbox" data-path="' + _esc(key) + '"' + checked +
-                       ' onchange="_ceObservablesChanged()"> ' +
-                 '<code>' + _esc(key) + '</code> ' +
-                 '<small style="color:#888">' + _esc(typeStr) + defStr + '</small>' +
-                 '</label></div>';
-        }).join('');
-        panel.innerHTML =
-          '<p class="panel-lead" style="margin-bottom:8px">Tick paths to wire an inline emitter into the composite. Untick everything to strip the emitter.</p>' +
-          '<label style="margin-bottom:8px;display:block"><input type="checkbox" id="ce-use-ram"' +
-          (useRam ? ' checked' : '') +
-          ' onchange="_ceObservablesChanged()"> ' +
-          'Use <code>RAMEmitter</code> (default: <code>SQLiteEmitter</code>)</label>' +
-          (rows || '<p class="empty-state">No leaf stores found.</p>');
-      })
-      .catch(function(err) {
-        panel.innerHTML = '<p style="color:#991b1b">Failed to load state tree: ' + _esc(String(err)) + '</p>';
-      });
-  }
-  window._ceRenderObservables = _ceRenderObservables;
-
-  function _ceObservablesChanged() {
-    if (!window._composeDoc) return;
-    var panel = document.getElementById('ce-panel-observables');
-    var paths = [];
-    panel.querySelectorAll('input[type=checkbox][data-path]:checked').forEach(function(cb) {
-      paths.push(cb.dataset.path.split('.'));
-    });
-    var useRam = !!(document.getElementById('ce-use-ram') || {}).checked;
-    fetch('/api/compose-doc-inject-emitter', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        document: window._composeDoc,
-        paths: paths,
-        address: useRam ? 'local:RAMEmitter' : 'local:SQLiteEmitter',
-      }),
-    }).then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.document) {
-          window._composeDoc = data.document;
-          _cePushDocToLoom();
-        }
-      })
-      .catch(function(err) { console.error('inject emitter failed:', err); });
-  }
-  window._ceObservablesChanged = _ceObservablesChanged;
-
-  function _ceRenderVisualization() {
-    var panel = document.getElementById('ce-panel-visualization');
-    if (!panel) return;
-    if (!window._composeDoc) {
-      panel.innerHTML = '<p class="empty-state">No composite loaded.</p>';
-      return;
-    }
-    fetch('/api/visualization-classes')
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        var classes = data.classes || [];
-        var currentViz = (window._composeDoc.state || {}).viz;
-        var currentClass = '';
-        if (currentViz && currentViz.address) {
-          currentClass = (currentViz.address.split(':')[1] || '').split('.').pop();
-        }
-        var currentCfgStr = (currentViz && currentViz.config)
-          ? JSON.stringify(currentViz.config, null, 2) : '{}';
-        var emitterPorts = Object.keys(((window._composeDoc.state || {}).emitter || {}).inputs || {});
-        var optionsHtml = '<option value="">— pick a Visualization class —</option>' +
-                          classes.map(function(c) {
-                            var sel = (c.name === currentClass) ? ' selected' : '';
-                            var doc = c.doc ? ' — ' + _esc(c.doc) : '';
-                            return '<option value="' + _esc(c.name) + '"' + sel + '>' +
-                                   _esc(c.name) + doc + '</option>';
-                          }).join('');
-        var portsHint = emitterPorts.length
-          ? emitterPorts.map(function(p) { return '<code>' + _esc(p) + '</code>'; }).join(', ')
-          : '<em>none — add observables first</em>';
-        panel.innerHTML =
-          '<label>Visualization class' +
-          '<select id="ce-viz-class" onchange="_ceVizChanged()">' + optionsHtml + '</select>' +
-          '</label>' +
-          '<label>Config (JSON)' +
-          '<textarea id="ce-viz-config" rows="4" onchange="_ceVizChanged()">' +
-          _esc(currentCfgStr) + '</textarea>' +
-          '</label>' +
-          '<p style="font-size:0.85em;color:#555;margin:8px 0">' +
-          'Auto-wire: viz inputs that match these emitter ports will be connected: ' +
-          portsHint + '</p>' +
-          '<button class="btn-mini" onclick="_ceVizRemove()" style="margin-top:8px">Remove visualization</button>';
-      })
-      .catch(function(err) {
-        panel.innerHTML = '<p style="color:#991b1b">Failed to load Viz classes: ' + _esc(String(err)) + '</p>';
-      });
-  }
-  window._ceRenderVisualization = _ceRenderVisualization;
-
-  function _ceVizChanged() {
-    if (!window._composeDoc) return;
-    var className = (document.getElementById('ce-viz-class') || {}).value || '';
-    var configRaw = (document.getElementById('ce-viz-config') || {}).value || '{}';
-    var config;
-    try { config = JSON.parse(configRaw); }
-    catch (e) { console.warn('viz config JSON parse:', e); return; }
-    if (!className) {
-      // Strip viz
-      fetch('/api/compose-doc-strip-viz', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ document: window._composeDoc }),
-      }).then(function(r) { return r.json(); })
-        .then(function(data) {
-          if (data.document) { window._composeDoc = data.document; _cePushDocToLoom(); }
-        });
-      return;
-    }
-    // Fetch the class's declared inputs() for auto-wire
-    fetch('/api/visualization-class-inputs?name=' + encodeURIComponent(className))
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        var vizInputs = data.inputs || {};
-        return fetch('/api/compose-doc-inject-viz', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            document: window._composeDoc,
-            class_name: className,
-            viz_inputs: vizInputs,
-            config: config,
-          }),
-        });
-      })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.document) {
-          window._composeDoc = data.document;
-          _cePushDocToLoom();
-          // Re-render the hint line in case emitter ports changed in between
-          // (no full re-render to preserve current input focus).
-        }
-      })
-      .catch(function(err) { console.error('viz inject failed:', err); });
-  }
-  window._ceVizChanged = _ceVizChanged;
-
-  function _ceVizRemove() {
-    var sel = document.getElementById('ce-viz-class');
-    if (sel) sel.value = '';
-    _ceVizChanged();
-  }
-  window._ceVizRemove = _ceVizRemove;
-
-  function _ceOpenSaveModal() {
-    if (!window._composeDoc) {
-      alert('No composite to save.');
-      return;
-    }
-    var sel = document.getElementById('ce-save-investigation');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">— pick an investigation —</option>';
-    var srcEl = document.getElementById('ce-save-source-ref');
-    if (srcEl) {
-      srcEl.innerHTML = window._composeDocSourceRef
-        ? 'Source: <code>' + _esc(window._composeDocSourceRef) + '</code>'
-        : '';
-    }
-    var errEl = document.querySelector('#form-ce-save .form-error');
-    if (errEl) errEl.textContent = '';
-    fetch('/api/investigations').then(function(r) { return r.json(); })
-      .then(function(data) {
-        (data.investigations || []).forEach(function(inv) {
-          var opt = document.createElement('option');
-          opt.value = inv.name;
-          opt.textContent = inv.name;
-          sel.appendChild(opt);
-        });
-        openModal('modal-ce-save');
-      })
-      .catch(function(err) {
-        if (errEl) errEl.textContent = 'Failed to load investigations: ' + String(err);
-        openModal('modal-ce-save');
-      });
-  }
-  window._ceOpenSaveModal = _ceOpenSaveModal;
-
-  function _ceSubmitSave(form) {
-    var data = new FormData(form);
-    var errEl = form.querySelector('.form-error');
-    if (errEl) errEl.textContent = '';
-    if (!window._composeDoc) {
-      if (errEl) errEl.textContent = 'No composite loaded.';
-      return;
-    }
-    var payload = {
-      investigation: data.get('investigation'),
-      name: data.get('name'),
-      document: window._composeDoc,
-      source_ref: window._composeDocSourceRef || '',
-    };
-    if (!payload.investigation) {
-      if (errEl) errEl.textContent = 'Pick an investigation.';
-      return;
-    }
-    fetch('/api/investigation-composite-save-sidecar', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload),
-    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
-      .then(function(parts) {
-        var ok = parts[0], j = parts[1];
-        if (!ok) {
-          if (errEl) errEl.textContent = j.error || 'save failed';
-          return;
-        }
-        closeModal('modal-ce-save');
-        // Nav to investigation Composites tab; reuse the existing helper if available.
-        window.location.hash = '#investigations';
-        if (typeof _openInvestigation === 'function') {
-          _openInvestigation(payload.investigation);
-        }
-      });
-  }
-  window._ceSubmitSave = _ceSubmitSave;
 
   function _ceRenderParameters(params) {
     var container = document.getElementById('ce-parameters');

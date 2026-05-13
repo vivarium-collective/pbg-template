@@ -592,11 +592,20 @@
     <h2 class="page-title" style="margin:0">Composite explorer</h2>
     <button class="btn-mini" onclick="_ceOpenPopout()" title="Open this composite in its own window">Pop out</button>
   </div>
-  <p class="page-lead">Inspect the wiring of a composite, edit its parameters, run short test simulations, browse run history, and compare trajectories across runs.</p>
+  <p class="page-lead">Inspect the wiring of a composite, run short test simulations, browse run history, and compare trajectories across runs. To edit parameters, design variants, and capture conclusions, start a <strong>Composite Study</strong>.</p>
 
   <div id="ce-loading" class="empty-state">Loading composite&hellip;</div>
 
   <div id="ce-main" style="display:none">
+
+    <!-- Begin Study CTA -->
+    <div id="ce-begin-study-bar" class="panel" style="display:flex;align-items:center;gap:12px;background:#f0f9ff;border:1px solid #bae6fd">
+      <div style="flex:1">
+        <strong>Ready to investigate?</strong>
+        <span class="muted">Start a Composite Study from this composite to design variants, run simulations, and capture conclusions.</span>
+      </div>
+      <button class="action-btn" id="ce-begin-study-btn" onclick="_beginStudyFromComposite()">Begin Study</button>
+    </div>
 
     <!-- In-page tab strip -->
     <div class="ce-tab-strip" role="tablist">
@@ -604,11 +613,6 @@
       <button class="ce-tab"        data-tab="history" onclick="_ceSwitchTab('history')">History <span class="ce-tab-badge" id="ce-history-count"></span></button>
       <button class="ce-tab"        data-tab="compare" onclick="_ceSwitchTab('compare')" style="display:none">Compare <span class="ce-tab-badge" id="ce-compare-count"></span></button>
       <button class="ce-tab"        data-tab="state"     onclick="_ceSwitchTab('state')">State</button>
-      <button class="ce-tab"        data-tab="configure" onclick="_ceSwitchTab('configure')">Configure</button>
-      <button class="ce-tab"        data-tab="observables" onclick="_ceSwitchTab('observables')">Observables</button>
-      <button class="ce-tab"        data-tab="visualization" onclick="_ceSwitchTab('visualization')">Visualization</button>
-      <span style="flex:1"></span>
-      <button class="action-btn" style="margin-top:0;align-self:center" onclick="_ceOpenSaveModal()">Save sidecar</button>
     </div>
 
     <!-- TAB: Wiring (current contents preserved) -->
@@ -679,21 +683,6 @@
           <div id="ce-snapshot-report" style="margin-top:8px;font-size:0.85em"></div>
         </div>
       </div>
-    </div>
-
-    <!-- TAB: Configure (Task 4 fills this in) -->
-    <div class="ce-tab-panel" data-tab="configure">
-      <div id="ce-panel-configure" class="ce-panel"></div>
-    </div>
-
-    <!-- TAB: Observables (Task 5 fills this in) -->
-    <div class="ce-tab-panel" data-tab="observables">
-      <div id="ce-panel-observables" class="ce-panel"></div>
-    </div>
-
-    <!-- TAB: Visualization (Task 6 fills this in) -->
-    <div class="ce-tab-panel" data-tab="visualization">
-      <div id="ce-panel-visualization" class="ce-panel"></div>
     </div>
 
   </div>
@@ -977,26 +966,6 @@
       </label>
       <div class="form-error"></div>
       <button type="submit" class="action-btn">Create PR</button>
-    </form>
-  </div>
-</div>
-
-<!-- Composite Explorer: Save edited composite as sidecar -->
-<div id="modal-ce-save" class="modal-overlay">
-  <div class="modal-box">
-    <button class="modal-close" onclick="closeModal('modal-ce-save')">&times;</button>
-    <h3>Save edited composite as sidecar</h3>
-    <form id="form-ce-save" onsubmit="event.preventDefault(); _ceSubmitSave(this)">
-      <label>Investigation
-        <select name="investigation" id="ce-save-investigation" required></select>
-      </label>
-      <label>Sidecar name
-        <input name="name" pattern="^[a-zA-Z0-9_-]+$" required
-               placeholder="e.g. chromosome-partition-tuned">
-      </label>
-      <div id="ce-save-source-ref" style="margin:8px 0;font-size:0.85em;color:#666"></div>
-      <div class="form-error"></div>
-      <button type="submit" class="action-btn">Save</button>
     </form>
   </div>
 </div>
