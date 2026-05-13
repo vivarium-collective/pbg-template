@@ -459,6 +459,57 @@ body.focus-mode::before{
   overflow:auto; max-height:480px;
 }
 
+/* Richer Investigations cards ------------------------------------------------ */
+.investigation-card .ic-header{
+  display:flex; align-items:flex-start; justify-content:space-between;
+  gap:12px; margin-bottom:6px;
+}
+.investigation-card .ic-title{
+  font-weight:600; font-size:1.02em; color:#111827;
+}
+.investigation-card .ic-status{
+  flex:none;
+}
+.investigation-card .ic-baseline{
+  font-size:0.86em; color:#4b5563; margin-bottom:6px;
+}
+.investigation-card .ic-baseline code{
+  font-size:0.95em; background:#f3f4f6; padding:1px 6px; border-radius:4px;
+}
+.investigation-card .ic-conclusions{
+  font-size:0.86em; color:#6b7280; line-height:1.4; margin:8px 0;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.investigation-card .ic-meta{
+  display:flex; gap:14px; flex-wrap:wrap;
+  font-size:0.8em; color:#6b7280;
+}
+.investigation-card .ic-meta .ic-lastrun{
+  margin-left:auto;
+}
+
+/* Investigations focus-mode: hide index chrome, show only the detail -------- */
+#page-investigations.inv-focus-mode #investigations-toolbar,
+#page-investigations.inv-focus-mode .investigations-search,
+#page-investigations.inv-focus-mode #investigations-tag-chips,
+#page-investigations.inv-focus-mode #investigations-grid,
+#page-investigations.inv-focus-mode .page-title,
+#page-investigations.inv-focus-mode .page-lead{
+  display:none;
+}
+/* The page-title shares a flex-row with the "+ New investigation" button.
+ * Hide that wrapper entirely while focused so the button doesn't dangle. */
+#page-investigations.inv-focus-mode > div:first-child{
+  display:none;
+}
+#page-investigations.inv-focus-mode #investigation-detail{
+  display:block;
+}
+.inv-detail-back a:hover{
+  text-decoration:underline;
+}
+
 /* ============================================================================
  * Vivarium chrome — left rail + topbar (V2 of vivarium-chrome-design)
  * Activated when <body> wraps content in .viv-layout. Old top-banner styles
@@ -613,6 +664,26 @@ body.focus-mode::before{
   display:block; font-size:0.74em; color:#9ca3af;
   margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
+
+/* Focused-study rail state (single-investigation view) -------------------- */
+.viv-rail-focused-study{
+  margin:4px 8px; padding:8px 12px;
+  background:#eff6ff; border-left:3px solid #3b82f6;
+  border-radius:0 6px 6px 0;
+}
+.viv-rail-focused-study .viv-rail-link.active{
+  background:transparent; color:#1e40af; border-left:none; padding:4px 0;
+}
+.viv-rail-focused-study .viv-rail-study-icon{
+  color:#3b82f6;
+}
+.viv-rail-focused-hint{
+  display:block; padding:4px 0 6px 28px; color:#6b7280; font-size:0.78em;
+}
+.viv-rail-focused-study .viv-rail-back-link{
+  padding:4px 0 4px 28px; font-size:0.85em; color:#6b7280; border-left:none;
+}
+.viv-rail-focused-study .viv-rail-back-link:hover{ color:#3b82f6 }
 
 /* Rail footer (user identity) ---------------------------------------------- */
 .viv-rail-footer{

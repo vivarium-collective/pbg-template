@@ -1344,6 +1344,103 @@ def test_get_investigations_includes_topic(workspace_server):
 
 
 # ---------------------------------------------------------------------------
+# Richer-card projection: /api/investigations surfaces baseline_source +
+# conclusions_excerpt so the index can render at-a-glance cards.
+# ---------------------------------------------------------------------------
+
+def test_get_investigations_includes_baseline_source_and_conclusions_excerpt(workspace_server):
+    """Two new projected fields:
+
+    1. ``baseline_source`` — baseline variant's ``source`` dotted path
+       reformatted as ``pkg_short:name`` when the path contains
+       ``.composites.``; empty when no baseline.
+    2. ``conclusions_excerpt`` — first 240 chars of ``spec.conclusions`` with
+       the structured H2 headers stripped; empty when no conclusions.
+    """
+    inv_root = workspace_server.root / 'investigations'
+
+    # Case A — full happy path. Baseline source with ``.composites.`` segment +
+    # long structured conclusions that should be header-stripped + truncated.
+    long_prose = (
+        'The baseline replication run converges in 42 minutes which matches the '
+        'wet-lab doubling-time estimate from Smith 2019. The mutant variant runs '
+        'consistently slower, suggesting the modification adds load to the '
+        'replication fork. We should re-run with seeds 1..16 and compare CV.'
+    )
+    inv_a = inv_root / 'with-baseline'
+    inv_a.mkdir(parents=True)
+    (inv_a / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'with-baseline',
+        'baseline': 'base',
+        'variants': [
+            {'name': 'base',
+             'source': 'pbg_chromosome_rep1.composites.chromosome-partition'},
+            {'name': 'mut', 'extends': 'base'},
+        ],
+        'conclusions': (
+            '## Claims\n'
+            + long_prose + '\n'
+            '## Evidence\n'
+            'Run logs show fork-stall events.\n'
+            '## Limitations\nSmall n.\n'
+            '## Next steps\nSweep seeds.\n'
+        ),
+    }, sort_keys=False))
+
+    # Case B — at least one variant declared, but no ``baseline`` set and no
+    # ``conclusions`` prose. baseline_source and conclusions_excerpt should
+    # both come back as empty strings. (Empty ``variants`` would fail
+    # validation entirely, so we declare one but skip the baseline pointer.)
+    inv_b = inv_root / 'no-baseline'
+    inv_b.mkdir(parents=True)
+    (inv_b / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'no-baseline',
+        'variants': [{'name': 'lone', 'source': 'pkg.x'}],
+    }, sort_keys=False))
+
+    # Case C — baseline whose source does NOT have ``.composites.`` (fallback
+    # path: the full source string is returned verbatim).
+    inv_c = inv_root / 'opaque-source'
+    inv_c.mkdir(parents=True)
+    (inv_c / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'opaque-source',
+        'baseline': 'base',
+        'variants': [{'name': 'base', 'source': 'some.opaque.path'}],
+    }, sort_keys=False))
+
+    with urllib.request.urlopen(workspace_server.url + '/api/investigations') as resp:
+        body = json.loads(resp.read())
+    rows = {r['name']: r for r in body['investigations']}
+
+    # Case A — pretty-formatted baseline_source.
+    row_a = rows['with-baseline']
+    assert row_a['baseline_source'] == \
+        'pbg_chromosome_rep1:chromosome-partition'
+    # The excerpt drops the H2 markers, collapses whitespace, and caps at 240
+    # chars (an ellipsis is appended when truncated).
+    excerpt_a = row_a['conclusions_excerpt']
+    assert excerpt_a, 'conclusions_excerpt should be non-empty when prose exists'
+    assert '## Claims' not in excerpt_a
+    assert '## Evidence' not in excerpt_a
+    assert '## Limitations' not in excerpt_a
+    assert '## Next steps' not in excerpt_a
+    assert len(excerpt_a) <= 241  # 240 + trailing ellipsis
+    assert excerpt_a.endswith('…')
+    # The prose itself should still show through (start of the Claims block).
+    assert 'baseline replication run' in excerpt_a
+
+    # Case B — empty fields when no baseline / no conclusions.
+    row_b = rows['no-baseline']
+    assert row_b['baseline_source'] == ''
+    assert row_b['conclusions_excerpt'] == ''
+
+    # Case C — fallback to raw source string when not a ``.composites.`` path.
+    row_c = rows['opaque-source']
+    assert row_c['baseline_source'] == 'some.opaque.path'
+    assert row_c['conclusions_excerpt'] == ''
+
+
+# ---------------------------------------------------------------------------
 # /api/dirty-status + /api/dirty-commit-all endpoint tests
 # ---------------------------------------------------------------------------
 

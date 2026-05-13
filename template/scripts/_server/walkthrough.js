@@ -1640,6 +1640,41 @@
         '</p>';
       return;
     }
+    // Focus mode: a specific study is open. Replace the grouped sub-list with
+    // a single highlighted entry + a "back to index" affordance so the rail
+    // visibly tracks the index/detail split.
+    var active = window._currentInvestigation || '';
+    if (active) {
+      var match = null;
+      for (var i = 0; i < investigations.length; i++) {
+        if (investigations[i] && investigations[i].name === active) {
+          match = investigations[i];
+          break;
+        }
+      }
+      if (!match) {
+        host.innerHTML =
+          '<p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">' +
+          'Loading study…' +
+          '</p>';
+        return;
+      }
+      var topic = (match.topic && match.topic.trim()) ? match.topic.trim() : 'Ungrouped';
+      host.innerHTML =
+        '<div class="viv-rail-focused-study">' +
+          '<a href="#" class="viv-rail-link viv-rail-study-link active" ' +
+             'onclick="return false;">' +
+            '<span class="viv-rail-link-icon viv-rail-study-icon">●</span>' +
+            '<span class="viv-rail-link-label">' + _esc(match.name) + '</span>' +
+          '</a>' +
+          '<small class="viv-rail-focused-hint">in <em>' + _esc(topic) + '</em></small>' +
+          '<a href="#" class="viv-rail-link viv-rail-back-link" ' +
+             'onclick="_closeInvestigationFocus(); return false;">' +
+            '<span class="viv-rail-link-label">← All investigations</span>' +
+          '</a>' +
+        '</div>';
+      return;
+    }
     // Group by topic. Investigations with empty/missing topic go to "Ungrouped".
     var groups = {};
     var order = [];
@@ -2659,38 +2694,44 @@
                         invalid:'gate_pending'})[status] || 'planned';
     var lastRun = inv.last_run ? new Date(inv.last_run + 'Z').toLocaleString() : '—';
 
-    // v2 summary stats (Task E1). When the server is a legacy build that does
-    // not surface the new fields, fall back to the old `composite` summary.
+    // Pretty baseline source comes from the server's v2 projection
+    // (``pkg_short:name``). Fall back to the raw baseline name or the legacy
+    // ``composite`` summary so old payloads still render something useful.
     var hasV2 = (inv.n_variants !== undefined) || (inv.baseline !== undefined);
-    var baselineCell;
-    if (inv.baseline) {
-      baselineCell = '<code>' + _esc(inv.baseline) + '</code>';
+    var baselineDisplay;
+    if (inv.baseline_source) {
+      baselineDisplay = inv.baseline_source;
+    } else if (inv.baseline) {
+      baselineDisplay = inv.baseline;
     } else if (!hasV2 && inv.composite) {
-      // Legacy server: surface the composite summary in place of baseline.
-      baselineCell = '<code>' + _esc(inv.composite) + '</code>';
+      baselineDisplay = inv.composite;
     } else {
-      baselineCell = '<em>none</em>';
+      baselineDisplay = 'unknown';
     }
 
-    var nVariants = (inv.n_variants !== undefined) ? inv.n_variants : null;
-    var nGroups = (inv.n_groups !== undefined) ? inv.n_groups : null;
+    var nVariants = (inv.n_variants !== undefined) ? inv.n_variants : 0;
+    var nGroups = (inv.n_groups !== undefined) ? inv.n_groups : 0;
     var nRuns = (inv.n_runs !== undefined) ? inv.n_runs
               : (inv.n_simulations !== undefined ? inv.n_simulations : 0);
+    var excerpt = inv.conclusions_excerpt || '';
 
-    var metaParts = ['<span class="status-pill ' + statusClass + '">' + _esc(status) + '</span>'];
-    if (nVariants !== null) {
-      metaParts.push('<span>' + nVariants + ' variant' + (nVariants === 1 ? '' : 's') + '</span>');
-    }
-    if (nGroups !== null) {
-      metaParts.push('<span>' + nGroups + ' group' + (nGroups === 1 ? '' : 's') + '</span>');
-    }
-    metaParts.push('<span>' + nRuns + ' run' + (nRuns === 1 ? '' : 's') + '</span>');
-    metaParts.push('<span>last run: ' + _esc(lastRun) + '</span>');
+    var conclusionsHtml = excerpt
+      ? '<div class="ic-conclusions"><em>“' + _esc(excerpt) + '”</em></div>'
+      : '';
 
     return '<div class="investigation-card" onclick="_openInvestigation(\'' + _esc(inv.name) + '\')">' +
-      '<div class="name">' + _esc(inv.name) + '</div>' +
-      '<div class="baseline-line"><small>Baseline: ' + baselineCell + '</small></div>' +
-      '<div class="meta">' + metaParts.join('') + '</div>' +
+      '<div class="ic-header">' +
+        '<div class="ic-title">' + _esc(inv.name) + '</div>' +
+        '<span class="ic-status status-pill ' + statusClass + '">' + _esc(status) + '</span>' +
+      '</div>' +
+      '<div class="ic-baseline"><small>Baseline:</small> <code>' + _esc(baselineDisplay) + '</code></div>' +
+      conclusionsHtml +
+      '<div class="ic-meta">' +
+        '<span>' + nVariants + ' variant' + (nVariants === 1 ? '' : 's') + '</span>' +
+        '<span>' + nGroups + ' group' + (nGroups === 1 ? '' : 's') + '</span>' +
+        '<span>' + nRuns + ' run' + (nRuns === 1 ? '' : 's') + '</span>' +
+        '<span class="ic-lastrun">last run: ' + _esc(lastRun) + '</span>' +
+      '</div>' +
     '</div>';
   }
 
@@ -2755,18 +2796,48 @@
   function _openInvestigation(name) {
     window._currentInvestigation = name;
     var detail = document.getElementById('investigation-detail');
-    detail.style.display = '';
-    detail.innerHTML = '<p class="empty-state">Loading…</p>';
+    if (detail) {
+      detail.style.display = '';
+      detail.innerHTML = '<p class="empty-state">Loading…</p>';
+    }
+    // Switch the Investigations page into single-study focus mode: hide the
+    // grid + toolbar + chips and let the detail panel take the full width.
+    _setInvestigationsFocusMode(true);
     fetch('/api/investigation/' + encodeURIComponent(name))
       .then(function(r) { return r.json(); })
       .then(function(data) { _renderInvestigationDetail(name, data); })
       .catch(function(err) {
-        detail.innerHTML = '<p style="color:#c00">Failed: ' + _esc(String(err)) + '</p>';
+        if (detail) {
+          detail.innerHTML = '<p style="color:#c00">Failed: ' + _esc(String(err)) + '</p>';
+        }
+        console.error('Failed to open investigation:', err);
+        _setInvestigationsFocusMode(false);
       });
-    // Refresh the rail so the active-state moves with the selection (V4).
-    if (typeof _vivRefreshInvestigationsRail === 'function') _vivRefreshInvestigationsRail();
   }
   window._openInvestigation = _openInvestigation;
+
+  function _setInvestigationsFocusMode(on) {
+    var page = document.getElementById('page-investigations');
+    if (!page) return;
+    page.classList.toggle('inv-focus-mode', !!on);
+    // Rail mirrors focus state: shows just the active study while focused,
+    // restores the grouped sub-list when we're back on the index.
+    if (typeof _vivRefreshInvestigationsRail === 'function') {
+      _vivRefreshInvestigationsRail();
+    }
+  }
+  window._setInvestigationsFocusMode = _setInvestigationsFocusMode;
+
+  function _closeInvestigationFocus() {
+    window._currentInvestigation = null;
+    _setInvestigationsFocusMode(false);
+    var detail = document.getElementById('investigation-detail');
+    if (detail) {
+      detail.style.display = 'none';
+      detail.innerHTML = '';
+    }
+  }
+  window._closeInvestigationFocus = _closeInvestigationFocus;
 
   function _renderInvestigationDetail(name, data) {
     var detail = document.getElementById('investigation-detail');
@@ -2857,6 +2928,12 @@
       '</section>';
 
     detail.innerHTML =
+      '<div class="inv-detail-back" style="margin-bottom:12px">' +
+        '<a href="#" onclick="_closeInvestigationFocus(); return false;" ' +
+           'style="color:#3b82f6; text-decoration:none; font-size:0.9em">' +
+          '← Back to all investigations' +
+        '</a>' +
+      '</div>' +
       '<div class="investigation-detail-header">' +
         '<div><strong style="font-size:1.1em">' + _esc(name) + '</strong> ' +
         '<span class="status-pill ' + statusClass + '" style="margin-left:8px">' + _esc(status) + '</span><br>' +

@@ -323,6 +323,53 @@ def _safe_slug(s: str) -> str:
     return s[:40]
 
 
+def _format_baseline_source(spec: dict) -> str:
+    """Return the baseline variant's source dotted path reformatted as ``pkg_short:name``.
+
+    Example: ``pbg_chromosome_rep1.composites.chromosome-partition`` becomes
+    ``pbg_chromosome_rep1:chromosome-partition``. If the source has no
+    ``.composites.`` segment we fall back to the raw string. When no baseline
+    variant is declared (or the named baseline is missing from ``variants``)
+    we return an empty string so the dashboard can show ``unknown``.
+    """
+    baseline_name = spec.get("baseline")
+    if not baseline_name:
+        return ""
+    for v in (spec.get("variants") or []):
+        if v.get("name") == baseline_name:
+            src = v.get("source") or ""
+            if ".composites." in src:
+                pkg, _, name = src.partition(".composites.")
+                return f"{pkg}:{name}"
+            return src
+    return ""
+
+
+def _conclusions_excerpt(spec: dict, limit: int = 240) -> str:
+    """Return a single-line preview of ``spec.conclusions`` for the index cards.
+
+    The Conclusions tab (B6) stores a structured markdown document with H2
+    headers (``## Claims``, ``## Evidence``, ``## Limitations``, ``## Next
+    steps``). For an at-a-glance preview we drop those headers, collapse
+    whitespace, and truncate to ``limit`` characters.
+    """
+    text = (spec.get("conclusions") or "").strip()
+    if not text:
+        return ""
+    # Drop the structured H2 headers so the excerpt is just the prose.
+    text = re.sub(
+        r"^##\s+(Claims|Evidence|Limitations|Next steps)\s*$",
+        "",
+        text,
+        flags=re.MULTILINE | re.IGNORECASE,
+    )
+    # Collapse whitespace + truncate.
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > limit:
+        text = text[:limit].rstrip() + "…"
+    return text
+
+
 def _active_branch_action(commit_message: str, action_fn) -> tuple[dict, int]:
     """Run action_fn on the active workstream branch; commit; stay on it."""
     _ws_add_to_sys_path()
@@ -2620,6 +2667,11 @@ if __name__ == "__main__":
                     "n_groups": len(spec.get("groups") or []),
                     "n_comparisons": len(spec.get("comparisons") or []),
                     "n_runs": n_runs,
+                    # Richer-card projection: pretty baseline source + one-line
+                    # conclusions preview so the index can render at-a-glance
+                    # study cards without a second fetch.
+                    "baseline_source": _format_baseline_source(spec),
+                    "conclusions_excerpt": _conclusions_excerpt(spec),
                 })
             except InvestigationSpecError as e:
                 out.append({
