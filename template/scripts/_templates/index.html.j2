@@ -97,6 +97,10 @@
   background:#eff6ff; border-left:4px solid #3b82f6; padding:10px 14px;
   border-radius:4px; margin:0 0 16px; font-size:0.92em;
 }
+/* Composite Explorer editing tab panels (Tasks 4-6 populate these) */
+.ce-panel {
+  border: 1px solid #eee; border-radius: 4px; padding: 12px; background: #fff;
+}
 </style>
 </head><body>
 
@@ -620,7 +624,12 @@
       <button class="ce-tab active" data-tab="wiring"  onclick="_ceSwitchTab('wiring')">Wiring</button>
       <button class="ce-tab"        data-tab="history" onclick="_ceSwitchTab('history')">History <span class="ce-tab-badge" id="ce-history-count"></span></button>
       <button class="ce-tab"        data-tab="compare" onclick="_ceSwitchTab('compare')" style="display:none">Compare <span class="ce-tab-badge" id="ce-compare-count"></span></button>
-      <button class="ce-tab"        data-tab="state"   onclick="_ceSwitchTab('state')">State</button>
+      <button class="ce-tab"        data-tab="state"     onclick="_ceSwitchTab('state')">State</button>
+      <button class="ce-tab"        data-tab="configure" onclick="_ceSwitchTab('configure')">Configure</button>
+      <button class="ce-tab"        data-tab="observables" onclick="_ceSwitchTab('observables')">Observables</button>
+      <button class="ce-tab"        data-tab="visualization" onclick="_ceSwitchTab('visualization')">Visualization</button>
+      <span style="flex:1"></span>
+      <button class="action-btn" style="margin-top:0;align-self:center" onclick="_ceOpenSaveModal()">Save sidecar</button>
     </div>
 
     <!-- TAB: Wiring (current contents preserved) -->
@@ -691,6 +700,21 @@
           <div id="ce-snapshot-report" style="margin-top:8px;font-size:0.85em"></div>
         </div>
       </div>
+    </div>
+
+    <!-- TAB: Configure (Task 4 fills this in) -->
+    <div class="ce-tab-panel" data-tab="configure">
+      <div id="ce-panel-configure" class="ce-panel"></div>
+    </div>
+
+    <!-- TAB: Observables (Task 5 fills this in) -->
+    <div class="ce-tab-panel" data-tab="observables">
+      <div id="ce-panel-observables" class="ce-panel"></div>
+    </div>
+
+    <!-- TAB: Visualization (Task 6 fills this in) -->
+    <div class="ce-tab-panel" data-tab="visualization">
+      <div id="ce-panel-visualization" class="ce-panel"></div>
     </div>
 
   </div>

@@ -1664,6 +1664,10 @@
     if (tab === 'compare' && window._ceCompareSet && window._ceCompareSet.size >= 2) {
       if (typeof _ceRenderCompare === 'function') _ceRenderCompare();
     }
+    // Editor tabs (Tasks 4-6 supply the real renderers)
+    if (tab === 'configure'     && typeof _ceRenderConfigure     === 'function') _ceRenderConfigure();
+    if (tab === 'observables'   && typeof _ceRenderObservables   === 'function') _ceRenderObservables();
+    if (tab === 'visualization' && typeof _ceRenderVisualization === 'function') _ceRenderVisualization();
   }
   window._ceSwitchTab = _ceSwitchTab;
 
@@ -2015,10 +2019,15 @@
         document.getElementById('ce-description').textContent = data.description || '';
         document.getElementById('ce-id').textContent = data.id;
         window._ceCurrent.parameters = data.parameters;
+        // Populate in-memory doc for editor tabs
+        window._composeDoc = data.state;
+        window._composeDocSourceRef = data.id;
         // Send wiring state to loom-explore iframe via postMessage
         _loadCompositeExplorer(data.id, data.state, data.name);
         // Render parameter editor
         _ceRenderParameters(data.parameters);
+        // Render default (configure) editor tab
+        if (typeof _ceRenderConfigure === 'function') _ceRenderConfigure();
         // Render state JSON
         document.getElementById('ce-state-json').textContent =
           JSON.stringify(data.state, null, 2);
@@ -2106,6 +2115,62 @@
     }
   }
   window._loadCompositeExplorer = _loadCompositeExplorer;
+
+  /* ── In-memory composite document (Task 3) ──────────────────────────────
+     Populated by _ceFetch; mutated by editor tab renderers (Tasks 4-6).
+     Tasks 4-6 replace the stub renderers below with real implementations. */
+  window._composeDoc = null;
+  window._composeDocSourceRef = null;
+
+  /** Post the current in-memory doc to the loom iframe so wiring re-renders. */
+  function _cePushDocToLoom() {
+    var iframe = document.getElementById('composite-explore-frame');
+    if (!iframe || !window._composeDoc) return;
+    var post = function() {
+      iframe.contentWindow.postMessage({
+        type: 'composite:load',
+        state: window._composeDoc,
+        metadata: { name: window._composeDocSourceRef || 'edited' },
+      }, '*');
+    };
+    if (window._loomExploreReady && window._loomExploreReady[iframe.id]) {
+      post();
+    } else {
+      var listener = function(ev) {
+        if (ev.source === iframe.contentWindow && ev.data && ev.data.type === 'explore:ready') {
+          window._loomExploreReady = window._loomExploreReady || {};
+          window._loomExploreReady[iframe.id] = true;
+          window.removeEventListener('message', listener);
+          post();
+        }
+      };
+      window.addEventListener('message', listener);
+    }
+  }
+  window._cePushDocToLoom = _cePushDocToLoom;
+
+  /** Stub renderers — replaced by Tasks 4-6 when those tasks land. */
+  function _ceRenderConfigure() {
+    var el = document.getElementById('ce-panel-configure');
+    if (el) el.innerHTML = '<p class="empty-state">Configure tab — Task 4.</p>';
+  }
+  function _ceRenderObservables() {
+    var el = document.getElementById('ce-panel-observables');
+    if (el) el.innerHTML = '<p class="empty-state">Observables tab — Task 5.</p>';
+  }
+  function _ceRenderVisualization() {
+    var el = document.getElementById('ce-panel-visualization');
+    if (el) el.innerHTML = '<p class="empty-state">Visualization tab — Task 6.</p>';
+  }
+  window._ceRenderConfigure     = _ceRenderConfigure;
+  window._ceRenderObservables   = _ceRenderObservables;
+  window._ceRenderVisualization = _ceRenderVisualization;
+
+  /** Save dialog stub — Task 7 implements the real modal. */
+  function _ceOpenSaveModal() {
+    alert('Save sidecar — Task 7 implements the modal.');
+  }
+  window._ceOpenSaveModal = _ceOpenSaveModal;
 
   function _ceRenderParameters(params) {
     var container = document.getElementById('ce-parameters');
