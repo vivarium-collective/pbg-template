@@ -87,6 +87,51 @@
     setTimeout(function() {
       try { w.postMessage(snapshot, '*'); } catch(_) {}
     }, 2000);
+
+    // Embedded-view handoff: show a "Popped out" placeholder over the iframe
+    // so the original page doesn't compete with the popup window. Restore
+    // when the popup closes (poll once a second).
+    _showPopoutPlaceholder(iframeId, w);
+  }
+
+  function _showPopoutPlaceholder(iframeId, popupWin) {
+    var iframe = document.getElementById(iframeId);
+    if (!iframe) return;
+    var placeholderId = iframeId + '-popout-placeholder';
+    if (document.getElementById(placeholderId)) return; // already showing
+    iframe.style.display = 'none';
+    var placeholder = document.createElement('div');
+    placeholder.id = placeholderId;
+    placeholder.style.cssText =
+      'width:100%;height:' + (iframe.style.height || '640px') + ';' +
+      'border:1px dashed #93c5fd;background:#eff6ff;border-radius:4px;' +
+      'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+      'gap:10px;color:#1e3a8a;font-size:0.95em;';
+    placeholder.innerHTML =
+      '<div>↗ Wiring is open in a separate window.</div>' +
+      '<div style="font-size:0.85em;color:#4b5563">Close the popup or click below to return it here.</div>' +
+      '<button class="btn-mini" id="' + placeholderId + '-restore">Bring back here</button>';
+    iframe.insertAdjacentElement('afterend', placeholder);
+    var restoreBtn = document.getElementById(placeholderId + '-restore');
+    var restore = function() {
+      try { popupWin.close(); } catch(_) {}
+      _restoreEmbeddedLoom(iframeId);
+    };
+    if (restoreBtn) restoreBtn.onclick = restore;
+    // Poll until popup closes; then restore.
+    var poller = setInterval(function() {
+      if (!popupWin || popupWin.closed) {
+        clearInterval(poller);
+        _restoreEmbeddedLoom(iframeId);
+      }
+    }, 1000);
+  }
+
+  function _restoreEmbeddedLoom(iframeId) {
+    var iframe = document.getElementById(iframeId);
+    var placeholder = document.getElementById(iframeId + '-popout-placeholder');
+    if (placeholder) placeholder.remove();
+    if (iframe) iframe.style.display = '';
   }
   window._popoutLoom = _popoutLoom;
 
