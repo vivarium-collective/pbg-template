@@ -71,6 +71,7 @@ def test_migrate_initializes_blank_fields(tmp_path):
     assert data['question'] == ''
     assert data['hypothesis'] == ''
     assert data['status'] == 'draft'
+    assert data['topic'] == ''
 
 
 def test_migrate_initializes_groups_blank_on_v2_spec(tmp_path):
@@ -98,6 +99,7 @@ def test_migrate_idempotent(tmp_path):
         question: ""
         hypothesis: ""
         status: draft
+        topic: ""
         variants:
           - {name: a, source: pkg.a}
         comparisons: []

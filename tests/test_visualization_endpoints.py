@@ -830,6 +830,22 @@ def test_post_set_overview_partial_update_preserves_other_fields(workspace_serve
     assert spec['status'] == 'completed'
 
 
+def test_post_set_overview_accepts_topic(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-overview',
+        {'investigation': 'demo', 'fields': {'topic': 'Antibiotic response'}},
+    )
+    assert code in (200, 500), j
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['topic'] == 'Antibiotic response'
+
+
 # ---------------------------------------------------------------------------
 # Investigation comparison add/update/delete endpoints (Task A4)
 # ---------------------------------------------------------------------------
@@ -1303,6 +1319,28 @@ def test_get_investigations_includes_v2_summary_fields(workspace_server):
     assert 'n_simulations' in row
     # n_runs mirrors n_simulations (alias for v2 consumers)
     assert row['n_runs'] == row['n_simulations']
+
+
+def test_get_investigations_includes_topic(workspace_server):
+    """The list endpoint must surface the study `topic` field for sidebar grouping."""
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'description': 'topic fixture',
+        'topic': 'Antibiotic response',
+        'baseline': 'base',
+        'variants': [{'name': 'base', 'source': 'pkg.x'}],
+        'runs': [],
+        'observables': [],
+    }, sort_keys=False))
+
+    with urllib.request.urlopen(workspace_server.url + '/api/investigations') as resp:
+        body = json.loads(resp.read())
+
+    rows = [r for r in body['investigations'] if r['name'] == 'demo']
+    assert len(rows) == 1
+    assert rows[0]['topic'] == 'Antibiotic response'
 
 
 # ---------------------------------------------------------------------------

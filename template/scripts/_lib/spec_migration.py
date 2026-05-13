@@ -20,6 +20,7 @@ def migrate_study_to_v2_vocabulary(spec_path: pathlib.Path) -> bool:
             'question': '',
             'hypothesis': '',
             'status': 'draft',
+            'topic': '',
         }
         changed = False
         for k, v in defaults.items():
@@ -56,6 +57,7 @@ def migrate_study_to_v2_vocabulary(spec_path: pathlib.Path) -> bool:
     data.setdefault('question', '')
     data.setdefault('hypothesis', '')
     data.setdefault('status', 'draft')
+    data.setdefault('topic', '')
     _atomic_write(spec_path, yaml.safe_dump(data, sort_keys=False))
     return True
 

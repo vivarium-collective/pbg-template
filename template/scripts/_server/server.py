@@ -2609,6 +2609,7 @@ if __name__ == "__main__":
                     "composite": composite_summary,
                     "composites": composites,
                     "description": spec.get("description", ""),
+                    "topic": spec.get("topic", ""),
                     "tags": spec.get("tags") or [],
                     "status": spec.get("status", "planned"),
                     "last_run": spec.get("last_run"),
@@ -4089,7 +4090,7 @@ if __name__ == "__main__":
                 {"error": f"status must be one of {sorted(_VALID_OVERVIEW_STATUSES)}"},
                 400,
             )
-        for key in ("question", "hypothesis"):
+        for key in ("question", "hypothesis", "topic"):
             if key in fields and not isinstance(fields[key], str):
                 return self._json({"error": f"{key} must be a string"}, 400)
         inv_dir = WORKSPACE / "investigations" / inv_name
@@ -4101,7 +4102,7 @@ if __name__ == "__main__":
 
         def do_action():
             spec = yaml.safe_load(spec_path.read_text()) or {}
-            for key in ("question", "hypothesis", "status"):
+            for key in ("question", "hypothesis", "status", "topic"):
                 if key in fields:
                     spec[key] = fields[key]
             spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
