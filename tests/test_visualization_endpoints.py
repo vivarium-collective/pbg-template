@@ -727,3 +727,77 @@ def test_post_composite_process_configs_rejects_missing_document(workspace_serve
         {},
     )
     assert code == 400, j
+
+
+# ---------------------------------------------------------------------------
+# Composite state-tree-doc + compose-doc-inject-emitter endpoint tests
+# ---------------------------------------------------------------------------
+
+def test_post_composite_state_tree_doc_returns_nodes(workspace_server):
+    doc = {
+        'state': {
+            'stores': {
+                'chromosome': {'_type': 'integer', '_default': 1},
+                'membrane': {'_type': 'float', '_default': 0.5},
+            },
+            'process': {'_type': 'process', 'address': 'local:Foo',
+                        'config': {}, 'inputs': {}, 'outputs': {}},
+        },
+    }
+    code, j = _post(
+        workspace_server.url + '/api/composite-state-tree-doc',
+        {'document': doc},
+    )
+    assert code == 200, j
+    paths = {tuple(n['path']) for n in j['nodes']}
+    assert ('stores', 'chromosome') in paths
+    assert ('stores', 'membrane') in paths
+    # process appears as a kind='process' node
+    process_nodes = [n for n in j['nodes'] if n['kind'] == 'process']
+    assert any(tuple(n['path']) == ('process',) for n in process_nodes)
+
+
+def test_post_compose_doc_inject_emitter_wires_paths(workspace_server):
+    doc = {
+        'state': {
+            'stores': {
+                'chromosome': {'_type': 'integer', '_default': 1},
+            },
+        },
+    }
+    code, j = _post(
+        workspace_server.url + '/api/compose-doc-inject-emitter',
+        {'document': doc, 'paths': [['stores', 'chromosome']]},
+    )
+    assert code == 200, j
+    em = j['document']['state']['emitter']
+    assert em['_type'] == 'step'
+    assert em['address'] == 'local:SQLiteEmitter'
+    assert em['inputs']['chromosome'] == ['stores', 'chromosome']
+    assert em['config']['emit']['chromosome'] == 'integer'
+
+
+def test_post_compose_doc_inject_emitter_ram_address(workspace_server):
+    doc = {'state': {'x': {'_type': 'integer', '_default': 1}}}
+    code, j = _post(
+        workspace_server.url + '/api/compose-doc-inject-emitter',
+        {'document': doc, 'paths': [['x']], 'address': 'local:RAMEmitter'},
+    )
+    assert code == 200, j
+    assert j['document']['state']['emitter']['address'] == 'local:RAMEmitter'
+
+
+def test_post_compose_doc_inject_emitter_empty_paths_strips(workspace_server):
+    doc = {
+        'state': {
+            'x': {'_type': 'integer', '_default': 1},
+            'emitter': {'_type': 'step', 'address': 'local:SQLiteEmitter',
+                         'config': {'emit': {}}, 'inputs': {}},
+        },
+    }
+    code, j = _post(
+        workspace_server.url + '/api/compose-doc-inject-emitter',
+        {'document': doc, 'paths': []},
+    )
+    assert code == 200, j
+    assert 'emitter' not in j['document']['state']

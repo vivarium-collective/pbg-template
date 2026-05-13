@@ -616,6 +616,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-composite-save-sidecar": self._post_investigation_composite_save_sidecar,
             "/api/investigation-set-observables":    self._post_investigation_set_observables,
             "/api/composite-process-configs": self._post_composite_process_configs,
+            "/api/composite-state-tree-doc":     self._post_composite_state_tree_doc,
+            "/api/compose-doc-inject-emitter":   self._post_compose_doc_inject_emitter,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -3674,6 +3676,38 @@ if __name__ == "__main__":
         if not isinstance(doc, dict):
             return self._json({"error": "document required"}, 400)
         return self._json({"rows": walk_process_configs(doc)}, 200)
+
+    def _post_composite_state_tree_doc(self, body: dict):
+        """POST /api/composite-state-tree-doc {document}
+        Returns: {nodes: [{path, kind, type, default}, ...]} — same shape as
+        /api/investigation-state-tree but walks a document supplied in the
+        body (used by the Composite Explorer Observables tab on the in-memory
+        doc; no investigation lookup needed).
+        """
+        from scripts._lib.composite_recipes import walk_state_tree
+        doc = body.get("document")
+        if not isinstance(doc, dict):
+            return self._json({"error": "document required"}, 400)
+        return self._json({"nodes": walk_state_tree(doc)}, 200)
+
+    def _post_compose_doc_inject_emitter(self, body: dict):
+        """POST /api/compose-doc-inject-emitter {document, paths, address?}
+        Returns: {document: <mutated copy>}
+        Stateless transform — deep-copies document, applies inject_emitter().
+        """
+        from scripts._lib.compose_doc_edit import inject_emitter
+        import copy
+        doc = body.get("document")
+        if not isinstance(doc, dict):
+            return self._json({"error": "document required"}, 400)
+        paths = body.get("paths") or []
+        address = (body.get("address") or "local:SQLiteEmitter").strip()
+        out = copy.deepcopy(doc)
+        try:
+            inject_emitter(out, paths=paths, address=address)
+        except Exception as e:
+            return self._json({"error": f"inject failed: {e}"}, 400)
+        return self._json({"document": out}, 200)
 
     def _post_investigation_composite_rebuild(self, body: dict):
         """POST /api/investigation-composite-rebuild {investigation, name}

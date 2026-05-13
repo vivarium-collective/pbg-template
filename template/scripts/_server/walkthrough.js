@@ -2234,14 +2234,84 @@
   window._ceUpdateConfig = _ceUpdateConfig;
 
   function _ceRenderObservables() {
-    var el = document.getElementById('ce-panel-observables');
-    if (el) el.innerHTML = '<p class="empty-state">Observables tab — Task 5.</p>';
+    var panel = document.getElementById('ce-panel-observables');
+    if (!panel) return;
+    if (!window._composeDoc) {
+      panel.innerHTML = '<p class="empty-state">No composite loaded.</p>';
+      return;
+    }
+    fetch('/api/composite-state-tree-doc', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ document: window._composeDoc }),
+    }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        var leaves = (data.nodes || []).filter(function(n) { return n.kind === 'store'; });
+        var existingEmitter = (window._composeDoc.state || {}).emitter;
+        var selected = new Set();
+        if (existingEmitter && existingEmitter.inputs) {
+          Object.values(existingEmitter.inputs).forEach(function(p) {
+            selected.add((p || []).join('.'));
+          });
+        }
+        var useRam = !!(existingEmitter && existingEmitter.address === 'local:RAMEmitter');
+        var rows = leaves.map(function(n) {
+          var key = (n.path || []).join('.');
+          var checked = selected.has(key) ? ' checked' : '';
+          var typeStr = n.type || '';
+          var defStr = (n.default !== undefined)
+            ? '  default: ' + _esc(JSON.stringify(n.default))
+            : '';
+          return '<div style="padding:3px 0"><label>' +
+                 '<input type="checkbox" data-path="' + _esc(key) + '"' + checked +
+                       ' onchange="_ceObservablesChanged()"> ' +
+                 '<code>' + _esc(key) + '</code> ' +
+                 '<small style="color:#888">' + _esc(typeStr) + defStr + '</small>' +
+                 '</label></div>';
+        }).join('');
+        panel.innerHTML =
+          '<p class="panel-lead" style="margin-bottom:8px">Tick paths to wire an inline emitter into the composite. Untick everything to strip the emitter.</p>' +
+          '<label style="margin-bottom:8px;display:block"><input type="checkbox" id="ce-use-ram"' +
+          (useRam ? ' checked' : '') +
+          ' onchange="_ceObservablesChanged()"> ' +
+          'Use <code>RAMEmitter</code> (default: <code>SQLiteEmitter</code>)</label>' +
+          (rows || '<p class="empty-state">No leaf stores found.</p>');
+      })
+      .catch(function(err) {
+        panel.innerHTML = '<p style="color:#991b1b">Failed to load state tree: ' + _esc(String(err)) + '</p>';
+      });
   }
+  window._ceRenderObservables = _ceRenderObservables;
+
+  function _ceObservablesChanged() {
+    if (!window._composeDoc) return;
+    var panel = document.getElementById('ce-panel-observables');
+    var paths = [];
+    panel.querySelectorAll('input[type=checkbox][data-path]:checked').forEach(function(cb) {
+      paths.push(cb.dataset.path.split('.'));
+    });
+    var useRam = !!(document.getElementById('ce-use-ram') || {}).checked;
+    fetch('/api/compose-doc-inject-emitter', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        document: window._composeDoc,
+        paths: paths,
+        address: useRam ? 'local:RAMEmitter' : 'local:SQLiteEmitter',
+      }),
+    }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.document) {
+          window._composeDoc = data.document;
+          _cePushDocToLoom();
+        }
+      })
+      .catch(function(err) { console.error('inject emitter failed:', err); });
+  }
+  window._ceObservablesChanged = _ceObservablesChanged;
+
   function _ceRenderVisualization() {
     var el = document.getElementById('ce-panel-visualization');
     if (el) el.innerHTML = '<p class="empty-state">Visualization tab — Task 6.</p>';
   }
-  window._ceRenderObservables   = _ceRenderObservables;
   window._ceRenderVisualization = _ceRenderVisualization;
 
   /** Save dialog stub — Task 7 implements the real modal. */
