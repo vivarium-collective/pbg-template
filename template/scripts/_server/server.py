@@ -546,8 +546,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_visualization_status()
         if self.path.startswith("/api/visualization-instances"):
             return self._get_visualization_instances()
-        if self.path.startswith("/api/visualization-class-inputs"):
-            return self._get_visualization_class_inputs()
         if self.path.startswith("/api/visualization-classes"):
             return self._get_visualization_classes()
         if self.path.startswith("/api/ui-config"):
@@ -620,18 +618,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-composite-add":          self._post_investigation_composite_add,
             "/api/investigation-composite-perturb":      self._post_investigation_composite_perturb,
             "/api/investigation-composite-rebuild":      self._post_investigation_composite_rebuild,
-            "/api/investigation-composite-save-sidecar": self._post_investigation_composite_save_sidecar,
             "/api/composite-promote-to-catalog":         self._post_composite_promote_to_catalog,
             "/api/investigation-set-observables":    self._post_investigation_set_observables,
             "/api/investigation-set-conclusions":    self._post_investigation_set_conclusions,
             "/api/investigation-set-overview":       self._post_investigation_set_overview,
             "/api/investigation-comparison-add":     self._post_investigation_comparison_add,
             "/api/investigation-comparison-update":  self._post_investigation_comparison_update,
-            "/api/composite-process-configs": self._post_composite_process_configs,
-            "/api/composite-state-tree-doc":     self._post_composite_state_tree_doc,
-            "/api/compose-doc-inject-emitter":   self._post_compose_doc_inject_emitter,
-            "/api/compose-doc-inject-viz":       self._post_compose_doc_inject_viz,
-            "/api/compose-doc-strip-viz":        self._post_compose_doc_strip_viz,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -3752,61 +3744,6 @@ if __name__ == "__main__":
         except Exception as e:
             return self._json({"error": f"workstream error: {e}"}, 500)
 
-    def _post_investigation_composite_save_sidecar(self, body: dict):
-        """POST /api/investigation-composite-save-sidecar
-        Body: {investigation, name, document, source_ref?}
-        Writes the document as a new sidecar; appends entry to spec.composites[].
-        Used by the Composite Explorer's Save flow.
-        """
-        inv_name = (body.get("investigation") or "").strip()
-        comp_name = (body.get("name") or "").strip()
-        document = body.get("document")
-        source_ref = (body.get("source_ref") or "").strip()
-        if not (inv_name and comp_name and isinstance(document, dict)):
-            return self._json(
-                {"error": "investigation, name, and document required"}, 400
-            )
-        if not re.match(r"^[a-zA-Z0-9_-]+$", comp_name):
-            return self._json({"error": "name must match ^[a-zA-Z0-9_-]+$"}, 400)
-
-        inv_dir = WORKSPACE / "investigations" / inv_name
-        spec_path = inv_dir / "spec.yaml"
-        if not spec_path.is_file():
-            return self._json({"error": "investigation not found"}, 404)
-
-        composites_dir = inv_dir / "composites"
-        composites_dir.mkdir(parents=True, exist_ok=True)
-        sidecar = composites_dir / f"{comp_name}.yaml"
-        if sidecar.is_file():
-            return self._json({"error": f"composite {comp_name!r} already exists"}, 409)
-
-        # Validate that the document is well-formed (round-trips cleanly)
-        try:
-            text = yaml.safe_dump(document, sort_keys=False)
-            yaml.safe_load(text)
-        except Exception as e:
-            return self._json({"error": f"document not serialisable: {e}"}, 400)
-
-        commit_msg = f"feat(investigations/{inv_name}): save sidecar composite '{comp_name}'"
-
-        def do_action():
-            sidecar.write_text(text)
-            spec = yaml.safe_load(spec_path.read_text()) or {}
-            composites = spec.setdefault("composites", [])
-            entry: dict = {
-                "name": comp_name,
-                "document": f"./composites/{comp_name}.yaml",
-            }
-            if source_ref:
-                entry["source"] = source_ref
-            composites.append(entry)
-            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
-
-        try:
-            return self._json(*_commit_or_run(commit_msg, do_action))
-        except Exception as e:
-            return self._json({"error": f"workstream error: {e}"}, 500)
-
     def _post_composite_promote_to_catalog(self, body: dict):
         """POST /api/composite-promote-to-catalog
         Body: {investigation, variant, target_name?, description?}
@@ -3898,105 +3835,6 @@ if __name__ == "__main__":
             resp["path"] = rel_path
             return self._json(resp, 200)
         return self._json(resp, code)
-
-    def _post_composite_process_configs(self, body: dict):
-        """POST /api/composite-process-configs {document}
-        Returns: {rows: [{name, address, configs: [{key, value, default?, units?, description?}]}, ...]}
-
-        Walks the document and returns a row per process node, with all its
-        config keys + defaults/units pulled from the parameters block when
-        available.
-        """
-        from scripts._lib.compose_doc_edit import walk_process_configs
-        doc = body.get("document")
-        if not isinstance(doc, dict):
-            return self._json({"error": "document required"}, 400)
-        return self._json({"rows": walk_process_configs(doc)}, 200)
-
-    def _post_composite_state_tree_doc(self, body: dict):
-        """POST /api/composite-state-tree-doc {document}
-        Returns: {nodes: [{path, kind, type, default}, ...]} — same shape as
-        /api/investigation-state-tree but walks a document supplied in the
-        body (used by the Composite Explorer Observables tab on the in-memory
-        doc; no investigation lookup needed).
-        """
-        from scripts._lib.composite_recipes import walk_state_tree
-        doc = body.get("document")
-        if not isinstance(doc, dict):
-            return self._json({"error": "document required"}, 400)
-        return self._json({"nodes": walk_state_tree(doc)}, 200)
-
-    def _post_compose_doc_inject_emitter(self, body: dict):
-        """POST /api/compose-doc-inject-emitter {document, paths, address?}
-        Returns: {document: <mutated copy>}
-        Stateless transform — deep-copies document, applies inject_emitter().
-        """
-        from scripts._lib.compose_doc_edit import inject_emitter
-        import copy
-        doc = body.get("document")
-        if not isinstance(doc, dict):
-            return self._json({"error": "document required"}, 400)
-        paths = body.get("paths") or []
-        address = (body.get("address") or "local:SQLiteEmitter").strip()
-        out = copy.deepcopy(doc)
-        try:
-            inject_emitter(out, paths=paths, address=address)
-        except Exception as e:
-            return self._json({"error": f"inject failed: {e}"}, 400)
-        return self._json({"document": out}, 200)
-
-    def _post_compose_doc_inject_viz(self, body: dict):
-        """POST /api/compose-doc-inject-viz {document, class_name, viz_inputs, config?}
-        Returns: {document: <mutated copy>}
-        """
-        from scripts._lib.compose_doc_edit import inject_viz_step
-        import copy
-        doc = body.get("document")
-        if not isinstance(doc, dict):
-            return self._json({"error": "document required"}, 400)
-        out = copy.deepcopy(doc)
-        try:
-            inject_viz_step(
-                out,
-                class_name=body.get("class_name") or "",
-                viz_inputs=body.get("viz_inputs") or {},
-                config=body.get("config") or {},
-            )
-        except Exception as e:
-            return self._json({"error": f"inject failed: {e}"}, 400)
-        return self._json({"document": out}, 200)
-
-    def _post_compose_doc_strip_viz(self, body: dict):
-        """POST /api/compose-doc-strip-viz {document}  →  {document: <without viz>}"""
-        from scripts._lib.compose_doc_edit import strip_viz_step
-        import copy
-        doc = body.get("document")
-        if not isinstance(doc, dict):
-            return self._json({"error": "document required"}, 400)
-        out = copy.deepcopy(doc)
-        strip_viz_step(out)
-        return self._json({"document": out}, 200)
-
-    def _get_visualization_class_inputs(self):
-        """GET /api/visualization-class-inputs?name=<short>
-        Returns: {inputs: {<port>: <type>, ...}}
-        Used by the Composite Explorer Visualization tab to auto-wire viz
-        ports to the emitter's outputs by name match.
-        """
-        import urllib.parse
-        qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
-        name = qs.get("name", "").strip()
-        if not name:
-            return self._json({"error": "name required"}, 400)
-        cls, _short = self._resolve_viz_class(f"local:{name}")
-        if cls is None:
-            return self._json({"error": f"class not found: {name}"}, 404)
-        try:
-            inst = cls.__new__(cls)
-            inputs = inst.inputs() or {}
-        except Exception as e:
-            return self._json({"error": f"inputs() failed: {e}"}, 500)
-        return self._json({"inputs": inputs}, 200)
 
     def _post_investigation_composite_rebuild(self, body: dict):
         """POST /api/investigation-composite-rebuild {investigation, name}
