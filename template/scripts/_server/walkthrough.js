@@ -2631,6 +2631,7 @@
 
   function _ceRenderParameters(params) {
     var container = document.getElementById('ce-parameters');
+    if (!container) return;  // Parameters panel removed from Composite Explorer; no-op.
     var keys = Object.keys(params || {});
     if (!keys.length) {
       container.innerHTML = '<p class="muted">No parameters.</p>';
