@@ -2161,13 +2161,15 @@
     document.querySelectorAll('.ce-tab-panel').forEach(function(p) {
       p.classList.toggle('active', p.dataset.tab === tab);
     });
-    // Lazy-load each tab's content on first switch
-    if (tab === 'history' && !window._ceHistoryLoaded) {
-      window._ceHistoryLoaded = true;
-      if (typeof _ceLoadHistory === 'function') _ceLoadHistory();
-    }
-    if (tab === 'compare' && window._ceCompareSet && window._ceCompareSet.size >= 2) {
-      if (typeof _ceRenderCompare === 'function') _ceRenderCompare();
+    // Lazy-load Results tab content (History/Compare/State now folded into Results)
+    if (tab === 'results') {
+      if (!window._ceHistoryLoaded) {
+        window._ceHistoryLoaded = true;
+        if (typeof _ceLoadHistory === 'function') _ceLoadHistory();
+      }
+      if (window._ceCompareSet && window._ceCompareSet.size >= 2) {
+        if (typeof _ceRenderCompare === 'function') _ceRenderCompare();
+      }
     }
   }
   window._ceSwitchTab = _ceSwitchTab;
@@ -2199,9 +2201,11 @@
         var runs = data.runs || [];
         var body = document.getElementById('ce-history-body');
         var countBadge = document.getElementById('ce-history-count');
-        if (countBadge) countBadge.textContent = '(' + runs.length + ')';
+        if (countBadge) countBadge.textContent = runs.length ? '(' + runs.length + ')' : '';
+        var resultsCount = document.getElementById('ce-results-count');
+        if (resultsCount) resultsCount.textContent = runs.length ? '(' + runs.length + ')' : '';
         if (!runs.length) {
-          body.innerHTML = '<p class="empty-state">No runs yet — click <em>Test run</em> on the Wiring tab.</p>';
+          body.innerHTML = '<p class="empty-state">No runs yet — click <em>Run</em> on the View tab.</p>';
           window._ceHistoryFetching = false;
           return;
         }
@@ -2243,7 +2247,9 @@
 
   function _ceViewRun(run_id) {
     window._ceSelectedRunId = run_id;
-    _ceSwitchTab('state');
+    _ceSwitchTab('results');
+    var statePanel = document.getElementById('ce-state-panel');
+    if (statePanel) statePanel.style.display = '';
     if (typeof _ceLoadState === 'function') _ceLoadState(run_id, 0);
   }
   window._ceViewRun = _ceViewRun;
@@ -2251,11 +2257,10 @@
   function _ceToggleCompareSelection(run_id, checked) {
     if (checked) window._ceCompareSet.add(run_id);
     else window._ceCompareSet.delete(run_id);
-    var badge = document.getElementById('ce-compare-count');
-    var tabBtn = document.querySelector('.ce-tab[data-tab="compare"]');
     var count = window._ceCompareSet.size;
-    if (badge) badge.textContent = count > 0 ? '(' + count + ')' : '';
-    if (tabBtn) tabBtn.style.display = count >= 2 ? '' : 'none';
+    var comparePanel = document.getElementById('ce-compare-panel');
+    if (comparePanel) comparePanel.style.display = count >= 2 ? '' : 'none';
+    if (count >= 2 && typeof _ceRenderCompare === 'function') _ceRenderCompare();
   }
   window._ceToggleCompareSelection = _ceToggleCompareSelection;
 
@@ -2499,7 +2504,7 @@
       : '';
     report.innerHTML = 'Mapped ' + matched.length + ' of ' +
                        (matched.length + skipped.length) + ' leaves. ' + skippedHtml;
-    _ceSwitchTab('wiring');
+    _ceSwitchTab('view');
   }
   window._ceSnapshotToInitial = _ceSnapshotToInitial;
 
@@ -2726,8 +2731,8 @@
         resultsEl.innerHTML = resultsHtml;
         // Persist + refresh history
         window._ceHistoryLoaded = false;  // force re-fetch on next visit
-        if (document.querySelector('.ce-tab-panel[data-tab="history"]') &&
-            document.querySelector('.ce-tab-panel[data-tab="history"]').classList.contains('active')) {
+        var resultsPanel = document.querySelector('.ce-tab-panel[data-tab="results"]');
+        if (resultsPanel && resultsPanel.classList.contains('active')) {
           _ceLoadHistory();
         }
       })

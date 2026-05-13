@@ -1544,3 +1544,51 @@ def test_post_dirty_commit_all_409_when_clean(workspace_server, monkeypatch):
     code, j = _post(workspace_server.url + "/api/dirty-commit-all", {})
     assert code == 409, j
     assert "clean" in (j.get("error") or "").lower(), j
+
+
+def test_post_composite_test_run_accepts_generator_id(workspace_server):
+    """POST /api/composite-test-run must resolve @composite_generator ids via
+    the in-process registry, not just file-based specs.
+
+    Before the generator-resolution branch was added, generator-kind composites
+    fell through to find_composite_path() and returned 404 'spec file not
+    found'. This test pins the new behaviour: the endpoint must NOT return
+    404/'spec file not found' for a registered generator id.
+
+    The actual subprocess run may legitimately fail in the minimal test
+    workspace (no real processes registered), but the failure must come from
+    the run/build path — not from spec lookup. Accepts 200 on a successful
+    run, or any non-404-spec-lookup error.
+    """
+    try:
+        from pbg_superpowers.composite_generator import (
+            _REGISTRY, composite_generator,
+        )
+    except ImportError:
+        pytest.skip("pbg-superpowers not importable")
+
+    @composite_generator(
+        name="vix-endpoints-gen",
+        description="Generator used by test_post_composite_test_run_accepts_generator_id.",
+        parameters={"x": {"type": "float", "default": 0.5}},
+    )
+    def _gen(core=None, x=0.5):
+        return {"state": {"x_value": x}}
+
+    expected_id = f"{__name__}.vix-endpoints-gen"
+    try:
+        assert expected_id in _REGISTRY, "decorator must register the generator"
+        code, j = _post(
+            workspace_server.url + "/api/composite-test-run",
+            {"id": expected_id, "overrides": {"x": 1.0}, "steps": 1},
+        )
+        # The key assertion: we must NOT hit the file-lookup 404.
+        assert not (code == 404 and "spec file not found" in (j.get("error") or "")), (
+            f"Generator id {expected_id} should not fall through to "
+            f"file-based 'spec file not found'; got code={code} body={j}"
+        )
+        # Acceptable outcomes: 200 (rare in this minimal ws), or any other
+        # non-404-spec-lookup error (run failure, parse failure, etc.).
+        assert code == 200 or code >= 400, f"unexpected status: {code} {j}"
+    finally:
+        _REGISTRY.pop(expected_id, None)

@@ -4748,15 +4748,37 @@ if __name__ == "__main__":
 
         ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
-        path = find_composite_path(WORKSPACE, pkg, spec_id)
-        if path is None:
-            return self._json({"error": "spec file not found"}, 404)
 
-        text = path.read_text()
-        spec = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
-        state = substitute_parameters(spec.get("state") or {},
-                                       spec.get("parameters") or {},
-                                       overrides)
+        # Generator-kind branch: resolve via pbg-superpowers' live registry.
+        state = None
+        try:
+            from pbg_superpowers.composite_generator import _REGISTRY, build_generator, discover_generators
+            if not _REGISTRY:
+                discover_generators()
+            entry = _REGISTRY.get(spec_id)
+            if entry is not None:
+                try:
+                    doc = build_generator(entry, overrides=overrides)
+                except Exception as e:  # noqa: BLE001
+                    return self._json({"error": f"generator build failed: {e}"}, 400)
+                # build_generator may return {state: ...} or a bare state dict.
+                if isinstance(doc, dict) and "state" in doc and isinstance(doc["state"], dict):
+                    state = doc["state"]
+                else:
+                    state = doc
+        except ImportError:
+            pass
+
+        if state is None:
+            # File-based spec resolution (existing path)
+            path = find_composite_path(WORKSPACE, pkg, spec_id)
+            if path is None:
+                return self._json({"error": "spec file not found"}, 404)
+            text = path.read_text()
+            spec = json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
+            state = substitute_parameters(spec.get("state") or {},
+                                           spec.get("parameters") or {},
+                                           overrides)
 
         # Persistence wiring
         db_file = str(WORKSPACE / ".pbg" / "composite-runs.db")
