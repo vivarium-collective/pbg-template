@@ -2432,7 +2432,12 @@ if __name__ == "__main__":
             spec = load_spec(spec_path)
         except InvestigationSpecError as e:
             return self._json({"error": f"spec error: {e}"}, 400)
-        return self._json({"composites": spec.get("composites") or []}, 200)
+        # Post-A2: legacy ``composites:`` specs are auto-migrated to ``variants:``
+        # on read. Return whichever key is present so the dashboard keeps working
+        # across the migration window. The wire-format key stays ``composites``
+        # until the dashboard rename in B-series tasks.
+        items = spec.get("variants") or spec.get("composites") or []
+        return self._json({"composites": items}, 200)
 
     def _get_investigation_state_tree(self):
         """GET /api/investigation-state-tree?investigation=<n>&composite=<c>

@@ -18,6 +18,8 @@ from typing import Any
 
 import yaml
 
+from .spec_migration import migrate_study_to_v2_vocabulary
+
 
 class InvestigationSpecError(ValueError):
     """Raised when an investigation spec.yaml fails validation."""
@@ -99,16 +101,93 @@ def _validate_composites_list(spec: dict) -> None:
                 )
 
 
+def _validate_variants_list(spec: dict) -> None:
+    """Validate the v2 ``variants:`` list shape.
+
+    Checks:
+    - Non-empty list of mappings, each with a ``name`` field.
+    - Baseline variants have ``source`` and no ``extends``; non-baseline
+      variants have ``extends`` referencing another (previously-declared)
+      variant by name.
+    - No duplicate ``name`` values.
+    - ``spec.baseline`` (if present) must name a declared variant.
+    """
+    variants = spec["variants"]
+    if not isinstance(variants, list) or not variants:
+        raise InvestigationSpecError(
+            "'variants' must be a non-empty list of mappings"
+        )
+
+    declared_names: list[str] = []
+    for i, entry in enumerate(variants):
+        if not isinstance(entry, dict):
+            raise InvestigationSpecError(f"variants[{i}] must be a mapping")
+        name = entry.get("name")
+        if not name:
+            raise InvestigationSpecError(f"variants[{i}].name is required")
+        if name in declared_names:
+            raise InvestigationSpecError(
+                f"duplicate variant name: {name!r} (variants[{i}])"
+            )
+        has_source = bool(entry.get("source"))
+        has_extends = bool(entry.get("extends"))
+        if not has_source and not has_extends:
+            raise InvestigationSpecError(
+                f"variants[{i}] ({name!r}) must declare 'source' or 'extends'"
+            )
+        if has_extends:
+            parent = entry["extends"]
+            if parent not in declared_names:
+                raise InvestigationSpecError(
+                    f"variants[{i}] extends {parent!r}, which is not declared "
+                    f"before it (forward references are not allowed)"
+                )
+        declared_names.append(name)
+
+    baseline = spec.get("baseline")
+    if baseline is not None and baseline != "":
+        if baseline not in declared_names:
+            raise InvestigationSpecError(
+                f"baseline {baseline!r} not in variants {declared_names}"
+            )
+
+    # Validate runs[] if present (post-migration the legacy ``runs:`` block
+    # is preserved alongside variants; its ``composite`` field references a
+    # declared variant name).
+    runs = spec.get("runs")
+    if runs is not None:
+        if not isinstance(runs, list):
+            raise InvestigationSpecError("'runs' must be a list")
+        for j, run in enumerate(runs):
+            if not isinstance(run, dict):
+                raise InvestigationSpecError(f"runs[{j}] must be a mapping")
+            composite_ref = run.get("composite")
+            if not composite_ref:
+                raise InvestigationSpecError(
+                    f"runs[{j}] must have a 'composite' field referencing a declared variant"
+                )
+            if composite_ref not in declared_names:
+                raise InvestigationSpecError(
+                    f"runs[{j}].composite {composite_ref!r} is not in the declared "
+                    f"variants list ({declared_names})"
+                )
+
+
 def load_spec(path: Path) -> dict:
     """Parse + validate ``investigations/<name>/spec.yaml``.
 
-    Accepts two shapes:
+    Accepts these shapes:
 
-    *New multi-composite shape* (``composites:`` key):
+    *V2 variants shape* (``variants:`` key):
       - ``name`` (required)
-      - ``composites:`` non-empty list of composite entries (new shape)
-      - ``runs:`` optional list of run entries, each with a ``composite`` field
-      - ``observables:`` / ``visualizations:`` optional lists
+      - ``variants:`` non-empty list of variant entries; the baseline variant
+        has ``source:`` and no ``extends``, derived variants ``extends:``
+        another (already-declared) variant.
+      - ``baseline:`` optional name of the baseline variant.
+
+    *Legacy multi-composite shape* (``composites:`` key — auto-migrated):
+      Auto-migrated in place to the v2 variants shape via
+      :func:`migrate_study_to_v2_vocabulary` before parsing.
 
     *Legacy single-composite shape* (``composite:`` key):
       - ``name`` + ``composite`` (both required)
@@ -117,7 +196,20 @@ def load_spec(path: Path) -> dict:
     Raises:
         InvestigationSpecError: on any structural problem.
     """
-    text = Path(path).read_text()
+    path = Path(path)
+
+    # ------------------------------------------------------------------
+    # Auto-migrate legacy ``composites:`` specs to v2 ``variants:`` shape
+    # before parsing. The migration helper is idempotent and atomic.
+    # ------------------------------------------------------------------
+    try:
+        _peek = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as e:
+        raise InvestigationSpecError(f"malformed YAML: {e}") from e
+    if isinstance(_peek, dict) and "composites" in _peek and "variants" not in _peek:
+        migrate_study_to_v2_vocabulary(path)
+
+    text = path.read_text()
     try:
         spec = yaml.safe_load(text) or {}
     except yaml.YAMLError as e:
@@ -130,11 +222,17 @@ def load_spec(path: Path) -> dict:
     if not spec.get("name"):
         raise InvestigationSpecError("missing required field: name")
 
+    has_variants_list = "variants" in spec
     has_composites_list = "composites" in spec
     has_legacy_composite = "composite" in spec and spec["composite"]
 
-    if has_composites_list:
-        # New multi-composite shape
+    if has_variants_list:
+        # V2 variants shape
+        _validate_variants_list(spec)
+    elif has_composites_list:
+        # Transient state: a legacy composites-shape spec that the migration
+        # helper declined to rewrite (e.g. empty list). Fall through to the
+        # old validator so we don't lose coverage.
         _validate_composites_list(spec)
     elif has_legacy_composite:
         # Legacy single-composite shape — validate the simulations block as before
@@ -177,7 +275,7 @@ def load_spec(path: Path) -> dict:
     else:
         # Neither shape present
         raise InvestigationSpecError(
-            "spec must declare either 'composites' (new multi-composite shape) "
+            "spec must declare either 'variants' (v2 study shape) "
             "or 'composite' (legacy single-composite shape)"
         )
 
@@ -776,8 +874,10 @@ def run_investigation(ws_root: Path, name: str, *,
         return {"name": name, "error": "investigation is already running",
                 "status": "running"}
 
-    # Determine which orchestration path to use.
-    is_multi_composite = "composites" in spec and "runs" in spec
+    # Determine which orchestration path to use. Post-A2, legacy
+    # ``composites:`` specs are auto-migrated to ``variants:`` on read; both
+    # keys mark a multi-composite spec, while ``runs:`` survives migration.
+    is_multi_composite = ("variants" in spec or "composites" in spec) and "runs" in spec
 
     try:
         update_spec_status(ws_root, name, status="running")

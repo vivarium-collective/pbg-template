@@ -402,6 +402,7 @@ def test_render_visualizations_v2_writes_html(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_load_spec_accepts_composites_list(tmp_path):
+    """Legacy ``composites:`` shape is auto-migrated to ``variants:`` on read."""
     from scripts._lib.investigations import load_spec
     spec_path = tmp_path / 'spec.yaml'
     spec_path.write_text(
@@ -417,9 +418,11 @@ def test_load_spec_accepts_composites_list(tmp_path):
         'visualizations: []\n'
     )
     spec = load_spec(spec_path)
-    assert len(spec['composites']) == 2
-    assert spec['composites'][0]['name'] == 'baseline'
-    assert spec['composites'][1]['extends'] == 'baseline'
+    # Migration has run: composites is gone, variants is present.
+    assert 'composites' not in spec
+    assert len(spec['variants']) == 2
+    assert spec['variants'][0]['name'] == 'baseline'
+    assert spec['variants'][1]['extends'] == 'baseline'
     assert spec['runs'][0]['composite'] == 'baseline'
 
 
@@ -624,3 +627,47 @@ def test_run_investigation_iterates_runs_and_passes_state_doc(tmp_path):
     # Both injected emitters wired to chromosome.DnaA_count
     for c in captured:
         assert 'DnaA_count' in c['emitter_inputs']
+
+
+# ---------------------------------------------------------------------------
+# v2 variants-shape tests (load_spec auto-migration + baseline validation)
+# ---------------------------------------------------------------------------
+
+def test_load_spec_accepts_variants_shape(tmp_path):
+    p = tmp_path / 'spec.yaml'
+    p.write_text(
+        "name: s\n"
+        "baseline: a\n"
+        "variants:\n"
+        "  - {name: a, source: pkg.a}\n"
+    )
+    spec = load_spec(p)
+    assert spec['baseline'] == 'a'
+    assert len(spec['variants']) == 1
+
+
+def test_load_spec_migrates_legacy_composites_shape_on_read(tmp_path):
+    p = tmp_path / 'spec.yaml'
+    p.write_text(
+        "name: s\n"
+        "composites:\n"
+        "  - {name: a, source: pkg.a}\n"
+    )
+    spec = load_spec(p)
+    assert 'variants' in spec
+    assert 'composites' not in spec
+    # File on disk was rewritten.
+    assert 'variants' in p.read_text()
+    assert 'composites' not in p.read_text()
+
+
+def test_load_spec_validates_baseline_references_a_variant(tmp_path):
+    p = tmp_path / 'spec.yaml'
+    p.write_text(
+        "name: s\n"
+        "baseline: missing\n"
+        "variants:\n"
+        "  - {name: a, source: pkg.a}\n"
+    )
+    with pytest.raises(InvestigationSpecError, match="baseline 'missing'"):
+        load_spec(p)
