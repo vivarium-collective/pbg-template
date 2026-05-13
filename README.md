@@ -31,6 +31,17 @@ Either path produces the same workspace structure.
 - `scripts/lint-workspace.py` — validates `workspace.yaml` + cross-references
 - A canonical PR flow driven by the `pbg-superpowers` skills
 
+## Dashboard runtime
+
+As of `v0.5.0` the dashboard server, templates, assets, and lib helpers were
+extracted into a separate pip package: **`vivarium-dashboard`**. Workspaces
+scaffolded from this template depend on it (see `pyproject.toml.j2`) and the
+shim `scripts/serve.sh` calls `vivarium-dashboard serve --workspace .`.
+
+You no longer need to copy `scripts/_server/`, `scripts/_templates/`,
+`scripts/_assets/loom-explore/`, or `scripts/_lib/` into a workspace — they
+live inside the installed `vivarium_dashboard` Python package instead.
+
 ## Layout
 
 After `template-init.sh` (or `/pbg-workspace`), you'll have a working tree like:

@@ -1,37 +1,30 @@
 #!/usr/bin/env bash
-# Optional dashboard server. Renders the workspace dashboard once and serves
-# it locally so you can browse it. Idempotent. Ctrl-C to stop.
+# Thin shim around the vivarium-dashboard pip package.
+#
+# The dashboard runtime (server + templates + assets + lib helpers) was
+# extracted out of pbg-template into the standalone `vivarium-dashboard`
+# package. Workspaces now depend on it as a regular pip dep; this script
+# is just a convenience wrapper so `bash scripts/serve.sh` keeps working.
 set -euo pipefail
 
 WS_ROOT="$(pwd)"
 [ -f "$WS_ROOT/workspace.yaml" ] || { echo "ERROR: run from workspace root" >&2; exit 1; }
 
-# Use the workspace's venv python so all workspace deps (pypdf, jinja2, etc.) are visible.
-# Fall back to system python3 if no venv exists.
-if [ -x "$WS_ROOT/.venv/bin/python3" ]; then
-    PY="$WS_ROOT/.venv/bin/python3"
-elif [ -x "$WS_ROOT/.venv/bin/python" ]; then
-    PY="$WS_ROOT/.venv/bin/python"
+# Prefer the workspace venv (matches the pbg-template scaffolding flow);
+# fall back to a system-wide install if the venv has no vivarium-dashboard.
+if [ -x "$WS_ROOT/.venv/bin/vivarium-dashboard" ]; then
+    DASH="$WS_ROOT/.venv/bin/vivarium-dashboard"
 else
-    PY="python3"
-    echo "warning: no .venv found at $WS_ROOT/.venv; using system python3 (workspace deps may be missing)" >&2
+    DASH="$(command -v vivarium-dashboard 2>/dev/null || true)"
 fi
 
-# Render the workspace dashboard and all per-model reports
-"$PY" "$WS_ROOT/scripts/render-dashboard.py" --all
+if [ -z "$DASH" ]; then
+    echo "ERROR: vivarium-dashboard is not installed." >&2
+    echo "Install it into the workspace venv, e.g." >&2
+    echo "    .venv/bin/pip install vivarium-dashboard" >&2
+    echo "or, for local dev:" >&2
+    echo "    .venv/bin/pip install -e /path/to/vivarium-dashboard" >&2
+    exit 2
+fi
 
-# Pick a free port
-PORT=$("$PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
-
-mkdir -p "$WS_ROOT/.pbg/server/content" "$WS_ROOT/.pbg/server/state"
-cat > "$WS_ROOT/.pbg/server/server-info" <<EOF
-{"port": ${PORT}, "host": "127.0.0.1", "url": "http://localhost:${PORT}",
- "screen_dir": "$WS_ROOT/.pbg/server/content", "state_dir": "$WS_ROOT/.pbg/server/state"}
-EOF
-
-echo
-echo "Workspace dashboard: http://localhost:${PORT}"
-echo "   (Ctrl-C to stop)"
-echo
-
-exec "$PY" "$WS_ROOT/scripts/_server/server.py" --workspace "$WS_ROOT" --port "$PORT"
+exec "$DASH" serve --workspace "$WS_ROOT"
