@@ -1,9 +1,10 @@
 # Next steps for {{ workspace_name }}
 
 This workspace IS the model. You build it incrementally through phases.
-Most work happens in the **dashboard** — five tabs, each with the
-buttons you need. Skills (Claude Code) are the alternative for
-code-writing tasks.
+Most work happens in the **dashboard** — a side-rail of tabs, each with
+the buttons you need. Skills (Claude Code) are the alternative for
+code-writing tasks. The set of tabs evolves as the dashboard grows;
+see what's live at the URL printed by `scripts/serve.sh`.
 
 ```
 bash scripts/serve.sh   # opens browser at http://localhost:<port>
@@ -16,6 +17,19 @@ bash scripts/serve.sh   # opens browser at http://localhost:<port>
 - [ ] Install workspace deps: `uv pip install -e ".[dev]"`
 - [ ] Lint: `python3 scripts/lint-workspace.py` should print `workspace lint: OK`
 - [ ] Commit + (eventually) push: `git init && git add -A && git commit -m "feat: workspace bootstrap"`
+
+> **If `uv pip install` fails with "vivarium-dashboard was not found in
+> the package registry":** vivarium-dashboard isn't on PyPI yet. The
+> template's init script auto-pins it when a sibling `../vivarium-dashboard/`
+> checkout exists, but if you scaffolded elsewhere you'll need to add it
+> manually to `pyproject.toml`:
+>
+> ```toml
+> [tool.uv.sources]
+> vivarium-dashboard = { path = "/path/to/vivarium-dashboard", editable = true }
+> ```
+>
+> Re-run `uv pip install -e ".[dev]"` after the edit.
 
 ## The 5 dashboard tabs
 
