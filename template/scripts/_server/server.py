@@ -4856,8 +4856,18 @@ if __name__ == "__main__":
                 for path_tuple, entries in results.items():
                     key = '.'.join(str(p) for p in path_tuple)
                     out[key] = entries
+                # Gather rendered viz HTML, if pbg_superpowers is importable.
+                viz_html = {{}}
+                try:
+                    from pbg_superpowers.visualization import render_results
+                    rendered = render_results(composite)
+                    for path_tuple, payload in rendered.items():
+                        key = '.'.join(str(p) for p in path_tuple)
+                        viz_html[key] = payload
+                except Exception:
+                    viz_html = {{}}
                 print('@@@RESULTS@@@')
-                print(json.dumps(out, default=str))
+                print(json.dumps({{'results': out, 'viz_html': viz_html}}, default=str))
             except Exception as e:
                 print('@@@ERROR@@@')
                 print(traceback.format_exc())
@@ -4900,16 +4910,25 @@ if __name__ == "__main__":
                                     "traceback": traceback_text}, 502)
 
             try:
-                results = json.loads(out.split("@@@RESULTS@@@", 1)[1].strip())
+                payload = json.loads(out.split("@@@RESULTS@@@", 1)[1].strip())
             except (IndexError, json.JSONDecodeError):
                 cr.complete_metadata(conn, run_id=run_id, n_steps=0, status="failed")
                 return self._json({"simulation_id": run_id,
                                     "error": "could not parse run output",
                                     "stdout": out, "stderr": result.stderr}, 502)
 
+            # Subprocess emits {results, viz_html}; older versions emitted the
+            # results dict directly. Handle both for forward/backward compat.
+            if isinstance(payload, dict) and "results" in payload:
+                results = payload.get("results") or {}
+                viz_html = payload.get("viz_html") or {}
+            else:
+                results = payload
+                viz_html = {}
+
             cr.complete_metadata(conn, run_id=run_id, n_steps=steps, status="completed")
             return self._json({"simulation_id": run_id, "results": results,
-                                "steps": steps}, 200)
+                                "viz_html": viz_html, "steps": steps}, 200)
         finally:
             conn.close()
 
