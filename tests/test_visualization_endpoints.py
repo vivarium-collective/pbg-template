@@ -1852,3 +1852,119 @@ def test_get_catalog_no_drift_when_sync_helper_returns_none(workspace_server, mo
     bar = rows["bar"]
     assert bar["installed"] is True, bar
     assert bar.get("out_of_sync") is not True, bar
+
+
+# ---------------------------------------------------------------------------
+# /api/workspace-manifest and /api/open-window — agentic situational awareness
+# ---------------------------------------------------------------------------
+
+def test_get_workspace_manifest_returns_all_sections(workspace_server):
+    """Fresh workspace: manifest has all six top-level sections."""
+    code, body = _get(workspace_server.url + "/api/workspace-manifest")
+    assert code == 200, body
+    for key in ("workspace", "composites", "studies",
+                "registry", "health", "skills"):
+        assert key in body, f"missing section {key!r}: {body}"
+    ws = body["workspace"]
+    assert ws["name"] == "testws"
+    assert ws["package_path"] == "pbg_testws"
+    # Composites/studies/skills are lists; registry/health/workspace are dicts.
+    assert isinstance(body["composites"], list)
+    assert isinstance(body["studies"], list)
+    assert isinstance(body["skills"], list)
+    assert isinstance(body["registry"], dict)
+    assert isinstance(body["health"], dict)
+
+
+def test_get_workspace_manifest_studies_section_lists_specs(workspace_server):
+    """A workspace with one investigation surfaces it in the studies section."""
+    inv_dir = workspace_server.root / "investigations" / "demo"
+    inv_dir.mkdir(parents=True)
+    (inv_dir / "spec.yaml").write_text(yaml.safe_dump({
+        "name": "demo",
+        "topic": "metabolism",
+        "status": "in-progress",
+        "variants": [{"name": "baseline",
+                      "source": "pbg_testws.composites.demo"}],
+        "baseline": "baseline",
+        "runs": [],
+        "groups": [],
+        "comparisons": [],
+        "conclusions": "## Claims\nlooks promising",
+    }, sort_keys=False))
+
+    code, body = _get(workspace_server.url + "/api/workspace-manifest")
+    assert code == 200, body
+    studies = body["studies"]
+    assert len(studies) == 1, studies
+    s = studies[0]
+    assert s["name"] == "demo"
+    assert s["topic"] == "metabolism"
+    assert s["status"] == "in-progress"
+    assert s["n_variants"] == 1
+    assert s["n_runs"] == 0
+    assert s["baseline"] == "baseline"
+    assert s["conclusions_len"] > 0
+
+
+def test_get_workspace_manifest_health_reports_dirty_count(workspace_server):
+    """Newly added file shows up in dirty_files cap (after git init)."""
+    # Skip if git not available — _dirty_workspace will raise, manifest copes
+    # by returning zero, but we can't assert dirty unless we set up a repo.
+    _git_init_clean(workspace_server.root)
+    # Touch a new file
+    (workspace_server.root / "scratch.txt").write_text("hello")
+    code, body = _get(workspace_server.url + "/api/workspace-manifest")
+    assert code == 200, body
+    health = body["health"]
+    assert health["dirty_count"] >= 1, health
+    assert any("scratch.txt" in p for p in health["dirty_files"]), health
+
+
+def test_post_open_window_missing_server_info_503(workspace_server):
+    """When .pbg/server/server-info is absent, open-window returns 503."""
+    # The workspace_server fixture deliberately does not create server-info,
+    # so the route should report the dashboard isn't running.
+    code, body = _post(workspace_server.url + "/api/open-window",
+                       {"route": "/"})
+    assert code == 503, body
+    assert "server-info" in body.get("error", "")
+
+
+def test_post_open_window_normalises_route(workspace_server):
+    """Routes without a leading slash get normalised before being opened.
+
+    We don't actually invoke `open` (side effect); we simulate the success
+    path by writing a fake server-info file and stubbing subprocess.run.
+    """
+    info_dir = workspace_server.root / ".pbg" / "server"
+    info_dir.mkdir(parents=True)
+    (info_dir / "server-info").write_text(json.dumps({
+        "url": "http://127.0.0.1:9999",
+    }))
+
+    import scripts._server.server as srv
+    calls = []
+
+    def fake_run(cmd, **kw):  # noqa: ANN001
+        calls.append(cmd)
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return R()
+
+    # Stub only for this test.
+    orig = srv.subprocess.run
+    srv.subprocess.run = fake_run
+    try:
+        code, body = _post(workspace_server.url + "/api/open-window",
+                           {"route": "composite-explore?id=foo"})
+    finally:
+        srv.subprocess.run = orig
+    assert code == 200, body
+    assert body["ok"] is True
+    assert body["url"].endswith("/composite-explore?id=foo")
+    # subprocess.run should have been invoked with a command containing the URL.
+    assert calls, "open command was not invoked"
+    assert any("composite-explore" in part for part in calls[-1])

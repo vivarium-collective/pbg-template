@@ -292,6 +292,31 @@ def _diagnose_push_error(err: str) -> dict | None:
     return None
 
 
+def _count_viz_steps_in_state(state: dict) -> int:
+    """Best-effort count of Visualization-Step entries in a composite state.
+
+    Heuristic: a Visualization Step is any ``_type: step`` entry whose
+    address matches a known Visualization class. We don't have core access
+    here, so we use a name-based heuristic: address contains ``Viz`` /
+    ``Plot`` / ``Heatmap`` / ``Animation`` / ``Snapshots`` /
+    ``Distribution``. Best-effort - undercounts are fine; this just powers
+    the manifest dashboard glance.
+    """
+    if not isinstance(state, dict):
+        return 0
+    count = 0
+    for v in state.values():
+        if not isinstance(v, dict):
+            continue
+        if v.get("_type") != "step":
+            continue
+        addr = v.get("address") or ""
+        if re.search(r"(Viz|Plot|Heatmap|Animation|Snapshots|Distribution)",
+                     addr, re.I):
+            count += 1
+    return count
+
+
 def _dirty_workspace() -> str:
     """Return the porcelain status excluding generated reports + submodule pointers."""
     status = subprocess.run(
@@ -674,6 +699,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_composites()
         if self.path.startswith("/api/catalog"):
             return self._get_catalog()
+        if self.path.startswith("/api/workspace-manifest"):
+            return self._get_workspace_manifest()
         if self.path.startswith("/api/work-status"):
             return self._get_work_status()
         if self.path.startswith("/api/dirty-status"):
@@ -750,6 +777,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/dirty-commit-all":   self._post_dirty_commit_all,
             "/api/catalog-install":    self._post_catalog_install,
             "/api/catalog-uninstall":  self._post_catalog_uninstall,
+            "/api/open-window":        self._post_open_window,
             "/api/suggest":            self._post_suggest,
             "/api/composite-test-run": self._post_composite_test_run,
             "/api/investigation-create":      self._post_investigation_create,
@@ -5095,6 +5123,229 @@ if __name__ == "__main__":
                                 "viz_html": viz_html, "steps": steps}, 200)
         finally:
             conn.close()
+
+    # ------------------------------------------------------------------
+    # Workspace manifest — one-call situational awareness for agents
+    # ------------------------------------------------------------------
+
+    def _get_workspace_manifest(self):
+        """GET /api/workspace-manifest — one-call situational awareness for agents.
+
+        Returns a structured JSON snapshot of the workspace state without
+        making the agent stitch together 10 separate API calls. Aggregates:
+        workspace identity + git state, composites (kind/module), studies
+        (status/runs/variants), registry summary, dirty-tree count, and
+        available pbg-* skills.
+        """
+        out = {
+            "workspace":  self._manifest_workspace_section(),
+            "composites": self._manifest_composites_section(),
+            "studies":    self._manifest_studies_section(),
+            "registry":   self._manifest_registry_section(),
+            "health":     self._manifest_health_section(),
+            "skills":     self._manifest_skills_section(),
+        }
+        return self._json(out, 200)
+
+    def _manifest_workspace_section(self):
+        """name, branch, commits ahead, package_path, has_origin."""
+        _ws_add_to_sys_path()
+        ws = {}
+        ws_path = WORKSPACE / "workspace.yaml"
+        try:
+            from scripts._lib.workspace_yaml import load_workspace
+            ws = load_workspace(ws_path)
+        except Exception:
+            # Fall back to raw yaml.safe_load when validation fails so the
+            # manifest still surfaces basic identity for partially-formed
+            # workspaces (test fixtures, migrations in progress, ...).
+            try:
+                ws = yaml.safe_load(ws_path.read_text()) or {}
+            except Exception:
+                ws = {}
+        try:
+            branch = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=WORKSPACE, capture_output=True, text=True,
+            ).stdout.strip() or "unknown"
+        except Exception:
+            branch = "unknown"
+        try:
+            has_origin = _has_origin_remote()
+        except Exception:
+            has_origin = False
+        return {
+            "name":         ws.get("name", ""),
+            "description":  ws.get("description", ""),
+            "package_path": ws.get("package_path", ""),
+            "branch":       branch,
+            "has_origin":   has_origin,
+        }
+
+    def _manifest_composites_section(self):
+        """One-line summary per composite: id, name, kind, module, description, viz_step_count."""
+        _ws_add_to_sys_path()
+        all_comps = {}
+        try:
+            from scripts._lib.composite_lookup import discover_all_composites
+            try:
+                from scripts._lib.workspace_yaml import load_workspace
+                ws = load_workspace(WORKSPACE / "workspace.yaml")
+            except Exception:
+                ws = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+            pkg = ws.get("package_path") or (
+                "pbg_" + (ws.get("name") or "").replace("-", "_")
+            )
+            all_comps = discover_all_composites(WORKSPACE, pkg)
+        except Exception:
+            all_comps = {}
+        out = []
+        for cid, c in sorted(all_comps.items()):
+            viz_count = _count_viz_steps_in_state(c.get("state") or {})
+            out.append({
+                "id":              cid,
+                "name":            c.get("name", ""),
+                "kind":            c.get("kind", "spec"),
+                "module":          c.get("module", ""),
+                "description":     (c.get("description") or "")[:200],
+                "viz_step_count":  viz_count,
+            })
+        return out
+
+    def _manifest_studies_section(self):
+        """List of studies with name, topic, status, n_variants, n_runs, n_conclusions."""
+        inv_root = WORKSPACE / "investigations"
+        if not inv_root.is_dir():
+            return []
+        _ws_add_to_sys_path()
+        try:
+            from scripts._lib.investigations import load_spec, InvestigationSpecError
+        except Exception:
+            return []
+        out = []
+        for d in sorted(inv_root.iterdir()):
+            if not d.is_dir():
+                continue
+            spec_path = d / "spec.yaml"
+            if not spec_path.is_file():
+                continue
+            try:
+                spec = load_spec(spec_path)
+            except (InvestigationSpecError, Exception):
+                continue
+            n_runs = len(spec.get("runs") or [])
+            out.append({
+                "name":             spec.get("name", d.name),
+                "topic":            spec.get("topic", ""),
+                "status":           spec.get("status", "draft"),
+                "baseline":         spec.get("baseline", ""),
+                "n_variants":       len(spec.get("variants") or []),
+                "n_groups":         len(spec.get("groups") or []),
+                "n_runs":           n_runs,
+                "n_comparisons":    len(spec.get("comparisons") or []),
+                "conclusions_len":  len(spec.get("conclusions") or ""),
+            })
+        return out
+
+    def _manifest_registry_section(self):
+        """Summary of registered kinds: count per (process|step|emitter|visualization|type)."""
+        try:
+            data = _get_registry_data()
+            processes = data.get("processes") or []
+            by_kind = {"process": 0, "step": 0, "emitter": 0,
+                       "visualization": 0, "other": 0}
+            for p in processes:
+                k = p.get("kind") or "other"
+                by_kind[k] = by_kind.get(k, 0) + 1
+            return {
+                "process_count":       by_kind["process"],
+                "step_count":          by_kind["step"],
+                "emitter_count":       by_kind["emitter"],
+                "visualization_count": by_kind["visualization"],
+                "type_count":          len(data.get("types") or []),
+            }
+        except Exception:
+            return {"process_count": 0, "step_count": 0, "emitter_count": 0,
+                    "visualization_count": 0, "type_count": 0}
+
+    def _manifest_health_section(self):
+        """dirty_count + dirty file list + venv presence + python version."""
+        try:
+            dirty = _dirty_workspace()
+        except Exception:
+            dirty = ""
+        dirty_files = [line[3:] for line in dirty.splitlines() if len(line) >= 4]
+        venv_py = WORKSPACE / ".venv" / "bin" / "python3"
+        return {
+            "dirty_count":      len(dirty_files),
+            "dirty_files":      dirty_files[:10],  # cap
+            "venv_present":     venv_py.is_file(),
+            "python_version":   sys.version.split()[0],
+        }
+
+    def _manifest_skills_section(self):
+        """List installed pbg-* skills the agent can invoke. Reads ~/.claude/skills/."""
+        skills_dir = Path.home() / ".claude" / "skills"
+        if not skills_dir.is_dir():
+            return []
+        out = []
+        for d in sorted(skills_dir.iterdir()):
+            if not d.is_dir() or not d.name.startswith("pbg-"):
+                continue
+            skill_md = d / "SKILL.md"
+            description = ""
+            if skill_md.is_file():
+                try:
+                    text = skill_md.read_text()
+                except Exception:
+                    text = ""
+                m = re.search(r"^description:\s*(.+?)$", text, re.MULTILINE)
+                if m:
+                    description = m.group(1).strip()
+            out.append({"name": d.name, "description": description})
+        return out
+
+    # ------------------------------------------------------------------
+    # Open-window — let agents demonstrate work visually via the browser
+    # ------------------------------------------------------------------
+
+    def _post_open_window(self, body: dict):
+        """POST /api/open-window {route} — open a dashboard URL in the user's browser.
+
+        Lets agents demonstrate visually what they've just done (e.g. open
+        the Composite Explorer for a composite they just created/ran). The
+        ``route`` is appended to the workspace dashboard's base URL read
+        from ``.pbg/server/server-info``.
+        """
+        route = (body.get("route") or "/").strip()
+        if not route.startswith("/"):
+            route = "/" + route
+        info_file = WORKSPACE / ".pbg" / "server" / "server-info"
+        if not info_file.is_file():
+            return self._json(
+                {"error": "server-info file not found - is the dashboard running?"},
+                503,
+            )
+        try:
+            info = json.loads(info_file.read_text())
+        except Exception as e:
+            return self._json({"error": f"server-info parse failed: {e}"}, 500)
+        url = (info.get("url") or "").rstrip("/") + route
+        import platform
+        plat = platform.system().lower()
+        if plat == "darwin":
+            cmd = ["open", url]
+        elif plat.startswith("linux"):
+            cmd = ["xdg-open", url]
+        elif plat == "windows":
+            cmd = ["cmd", "/c", "start", url]
+        else:
+            return self._json({"error": f"unsupported platform: {plat}"}, 501)
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=5)
+        except Exception as e:
+            return self._json({"error": f"open failed: {e}"}, 500)
+        return self._json({"ok": True, "url": url}, 200)
 
     def _get_catalog(self):
         """GET /api/catalog — return the curated module catalog with installed annotations.
