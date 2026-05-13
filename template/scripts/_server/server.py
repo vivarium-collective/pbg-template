@@ -3736,12 +3736,14 @@ if __name__ == "__main__":
             # generator id (provenance); from the study's POV the sidecar is
             # an ordinary spec.
             try:
-                from pbg_superpowers.composite_generator import _REGISTRY, build_generator
+                from pbg_superpowers.composite_generator import _REGISTRY, build_generator, discover_generators
             except ImportError as e:
                 return self._json(
                     {"error": f"pbg-superpowers unavailable for generator resolution: {e}"},
                     500,
                 )
+            if not _REGISTRY:
+                discover_generators()
             entry = _REGISTRY.get(source_ref)
             if entry is None:
                 return self._json(
@@ -4568,7 +4570,11 @@ if __name__ == "__main__":
 
         # Generator-kind branch: resolve via pbg-superpowers' live registry.
         try:
-            from pbg_superpowers.composite_generator import _REGISTRY, build_generator
+            from pbg_superpowers.composite_generator import _REGISTRY, build_generator, discover_generators
+            if not _REGISTRY:
+                # Registry not primed yet — trigger discovery so @composite_generator
+                # imports fire. Self-heals when /api/composites hasn't been hit yet.
+                discover_generators()
             entry = _REGISTRY.get(ref)
             if entry is not None:
                 try:
@@ -4637,7 +4643,9 @@ if __name__ == "__main__":
 
         # Generator-kind branch: resolve via pbg-superpowers' live registry.
         try:
-            from pbg_superpowers.composite_generator import _REGISTRY, build_generator
+            from pbg_superpowers.composite_generator import _REGISTRY, build_generator, discover_generators
+            if not _REGISTRY:
+                discover_generators()
             entry = _REGISTRY.get(spec_id)
         except ImportError:
             entry = None
