@@ -1087,59 +1087,130 @@
   window._refreshWorkStrip = _refreshWorkStrip;
 
   function _renderWorkStrip(s, dirty) {
-    var el = document.getElementById('workstream-strip');
-    if (!el) return;
+    // V4: drive the new topbar (#viv-topbar-actions). The old #workstream-strip
+    // is kept as a hidden back-compat node and mirrored to so any legacy probe
+    // continues to read sensible markup.
+    var legacy = document.getElementById('workstream-strip');
+    var chip = document.getElementById('viv-branch-chip');
+    var topActions = document.getElementById('viv-topbar-actions');
+
+    // --- Inactive case --------------------------------------------------------
     if (!s.active) {
-      el.classList.add('inactive');
-      el.innerHTML =
-        '<span class="ws-label">No active workstream.</span>' +
-        '<button class="ws-btn ws-primary" onclick="_startWork()">Start workstream</button>';
+      if (chip) {
+        chip.innerHTML =
+          '<span class="viv-branch-icon">▴</span>' +
+          '<span class="viv-branch-name">no workstream</span>';
+        chip.title = 'No active workstream';
+      }
+      // Render the "Start workstream" button in the topbar buttons container.
+      var buttonsEl = _vivEnsureWorkButtonsContainer();
+      if (buttonsEl) {
+        buttonsEl.innerHTML =
+          '<button class="ws-btn ws-primary" onclick="_startWork()">Start workstream</button>';
+      }
+      if (legacy) {
+        legacy.classList.add('inactive');
+        legacy.innerHTML =
+          '<span class="ws-label">No active workstream.</span>' +
+          '<button class="ws-btn ws-primary" onclick="_startWork()">Start workstream</button>';
+      }
+      // Active state means no dirty pill — drop any open panel.
+      var openP0 = document.getElementById('ws-dirty-panel');
+      if (openP0) openP0.remove();
       return;
     }
-    el.classList.remove('inactive');
-    var parts = [];
-    parts.push('<span class="ws-label">Working on:</span>');
-    parts.push('<code class="ws-branch">' + s.branch + '</code>');
-    parts.push('<span class="ws-meta">' + s.commits_ahead + ' commit' + (s.commits_ahead === 1 ? '' : 's') + ' ahead of ' + s.base + '</span>');
 
-    // No origin remote yet — surface the Create-GitHub-repo path instead of Push.
-    if (s.has_origin === false) {
-      if (s.gh_available === false) {
-        parts.push('<span class="ws-warn" title="Install GitHub CLI to enable one-click repo creation">gh CLI missing</span>');
-      } else {
-        parts.push('<button class="ws-btn ws-primary" onclick="_createGithubRepo()" title="Create a GitHub repo for this workspace and push in one step">Create GitHub repo</button>');
-      }
-    } else {
-      // Origin exists — normal Push / PR flow.
-      if (s.unpushed > 0 || (!s.pushed && s.commits_ahead > 0)) {
-        parts.push('<button class="ws-btn" onclick="_pushWork()">Push (' + s.unpushed + ')</button>');
-      }
-      if (s.pr_url) {
-        parts.push('<a class="ws-link" href="' + s.pr_url + '" target="_blank">PR #' + s.pr_number + ' &#8599;</a>');
-      } else if (s.pushed) {
-        parts.push('<button class="ws-btn" onclick="_createPR()">Create PR</button>');
-      }
-    }
-
-    parts.push('<button class="ws-btn ws-end" onclick="_endWork()" title="Switch back to ' + s.base + ' (workstream branch is preserved)">End</button>');
-
-    // Dirty-files pill — appears only when porcelain-filtered count > 0.
+    // --- Active case ----------------------------------------------------------
+    var ahead = s.commits_ahead;
+    var aheadTxt = ahead + ' ahead of ' + s.base;
+    var dirtyPillHtml = '';
     if (dirty && dirty.count > 0) {
-      parts.push(
-        '<span class="ws-dirty-pill" ' +
-          'title="' + dirty.count + ' uncommitted file' + (dirty.count === 1 ? '' : 's') + '" ' +
-          'onclick="_toggleDirtyPanel()" ' +
-          'style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;cursor:pointer;margin-left:6px">' +
-          '&#x1F7E1; ' + dirty.count + ' uncommitted' +
-        '</span>'
-      );
+      dirtyPillHtml =
+        '<span class="viv-branch-dirty-pill" ' +
+              'title="' + dirty.count + ' uncommitted file' + (dirty.count === 1 ? '' : 's') + '" ' +
+              'onclick="event.stopPropagation(); _toggleDirtyPanel()">' +
+          dirty.count + ' uncommitted' +
+        '</span>';
     } else {
-      // If the pill no longer applies, close any open dirty panel.
+      // Pill no longer applies — close any open dirty panel.
       var openPanel = document.getElementById('ws-dirty-panel');
       if (openPanel) openPanel.remove();
     }
 
-    el.innerHTML = parts.join(' ');
+    if (chip) {
+      chip.innerHTML =
+        '<span class="viv-branch-icon">⎇</span>' +
+        '<span class="viv-branch-name">' + _esc(s.branch) + '</span>' +
+        '<span class="viv-branch-caret">·</span>' +
+        '<span class="viv-branch-caret">' + ahead + ' ahead</span>' +
+        dirtyPillHtml;
+      chip.title = aheadTxt;
+    }
+
+    // Build the action buttons that sit alongside the chip.
+    var btnParts = [];
+    if (s.has_origin === false) {
+      if (s.gh_available === false) {
+        btnParts.push('<span class="ws-warn" title="Install GitHub CLI to enable one-click repo creation">gh CLI missing</span>');
+      } else {
+        btnParts.push('<button class="ws-btn ws-primary" onclick="_createGithubRepo()" title="Create a GitHub repo for this workspace and push in one step">Create GitHub repo</button>');
+      }
+    } else {
+      if (s.unpushed > 0 || (!s.pushed && s.commits_ahead > 0)) {
+        btnParts.push('<button class="ws-btn" onclick="_pushWork()">Push (' + s.unpushed + ')</button>');
+      }
+      if (s.pr_url) {
+        btnParts.push('<a class="ws-link" href="' + _esc(s.pr_url) + '" target="_blank">PR #' + s.pr_number + ' &#8599;</a>');
+      } else if (s.pushed) {
+        btnParts.push('<button class="ws-btn" onclick="_createPR()">Create PR</button>');
+      }
+    }
+    btnParts.push('<button class="ws-btn ws-end" onclick="_endWork()" title="Switch back to ' + _esc(s.base) + ' (workstream branch is preserved)">End</button>');
+
+    var btnHost = _vivEnsureWorkButtonsContainer();
+    if (btnHost) btnHost.innerHTML = btnParts.join(' ');
+
+    // Mirror to the legacy strip so any back-compat probe keeps reading sane
+    // markup (it's hidden via display:none).
+    if (legacy) {
+      legacy.classList.remove('inactive');
+      var legacyParts = [
+        '<span class="ws-label">Working on:</span>',
+        '<code class="ws-branch">' + _esc(s.branch) + '</code>',
+        '<span class="ws-meta">' + ahead + ' commit' + (ahead === 1 ? '' : 's') + ' ahead of ' + _esc(s.base) + '</span>',
+      ].concat(btnParts);
+      if (dirty && dirty.count > 0) {
+        legacyParts.push(
+          '<span class="ws-dirty-pill" ' +
+            'title="' + dirty.count + ' uncommitted file' + (dirty.count === 1 ? '' : 's') + '" ' +
+            'onclick="_toggleDirtyPanel()" ' +
+            'style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;cursor:pointer;margin-left:6px">' +
+            '&#x1F7E1; ' + dirty.count + ' uncommitted' +
+          '</span>'
+        );
+      }
+      legacy.innerHTML = legacyParts.join(' ');
+    }
+  }
+
+  // Ensure #viv-topbar-work-buttons exists, sitting immediately after the
+  // branch chip and before the GitHub icon / Share / kebab / avatar elements.
+  function _vivEnsureWorkButtonsContainer() {
+    var topActions = document.getElementById('viv-topbar-actions');
+    if (!topActions) return null;
+    var existing = document.getElementById('viv-topbar-work-buttons');
+    if (existing) return existing;
+    var chip = document.getElementById('viv-branch-chip');
+    var span = document.createElement('span');
+    span.id = 'viv-topbar-work-buttons';
+    span.className = 'viv-topbar-work-buttons';
+    span.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:4px';
+    if (chip && chip.parentNode === topActions) {
+      chip.insertAdjacentElement('afterend', span);
+    } else {
+      topActions.appendChild(span);
+    }
+    return span;
   }
 
   function _toggleDirtyPanel() {
@@ -1155,8 +1226,12 @@
   function _renderDirtyPanel(d) {
     var existing = document.getElementById('ws-dirty-panel');
     if (existing) existing.remove();
-    var strip = document.getElementById('workstream-strip');
-    if (!strip || !d || !d.files || d.files.length === 0) return;
+    if (!d || !d.files || d.files.length === 0) return;
+    // V4: anchor below the new topbar; fall back to the legacy strip if the new
+    // chrome isn't rendered (older templates).
+    var anchor = document.getElementById('viv-topbar-actions')
+              || document.getElementById('workstream-strip');
+    if (!anchor) return;
     var div = document.createElement('div');
     div.id = 'ws-dirty-panel';
     div.style.cssText = 'background:#fef3c7;border:1px solid #fcd34d;border-radius:4px;padding:8px;margin:6px 0;font-size:0.85em';
@@ -1171,7 +1246,7 @@
         '<button class="ws-btn" onclick="_refreshWorkStrip(); _toggleDirtyPanel()">Refresh</button> ' +
         '<button class="ws-btn" onclick="_toggleDirtyPanel()">Close</button>' +
       '</div>';
-    strip.insertAdjacentElement('afterend', div);
+    anchor.insertAdjacentElement('afterend', div);
   }
 
   function _commitDirtyAll() {
@@ -1499,12 +1574,144 @@
     // Initialize menu navigation.
     _initMenuNav();
 
+    // Restore Vivarium left-rail collapsed state (V4).
+    _vivRestoreRailState();
+
     // Initialize workstream strip.
     _refreshWorkStrip();
+
+    // Populate the Investigations rail section (V4).
+    _vivRefreshInvestigationsRail();
 
     // Branches are now lazy-loaded when switching to the Branches tab.
     // (loadBranches() is called from _switchPage when pageId === 'branches'.)
   });
+
+  // -------------------------------------------------------------------------
+  // Vivarium left rail — collapse toggle (V4)
+  // -------------------------------------------------------------------------
+
+  function _vivToggleRail() {
+    var rail = document.getElementById('viv-rail');
+    if (!rail) return;
+    var collapsed = rail.classList.toggle('viv-rail-collapsed');
+    try { localStorage.setItem('vivarium.rail-collapsed', collapsed ? '1' : '0'); } catch (e) {}
+    var btn = document.getElementById('viv-rail-toggle');
+    if (btn) btn.textContent = collapsed ? '»' : '«';
+  }
+  window._vivToggleRail = _vivToggleRail;
+
+  function _vivRestoreRailState() {
+    var stored = null;
+    try { stored = localStorage.getItem('vivarium.rail-collapsed'); } catch (e) {}
+    if (stored === '1') {
+      var rail = document.getElementById('viv-rail');
+      var btn = document.getElementById('viv-rail-toggle');
+      if (rail) rail.classList.add('viv-rail-collapsed');
+      if (btn) btn.textContent = '»';
+    }
+  }
+  window._vivRestoreRailState = _vivRestoreRailState;
+
+  // -------------------------------------------------------------------------
+  // Vivarium left rail — Investigations grouping (V4)
+  // -------------------------------------------------------------------------
+
+  function _vivRefreshInvestigationsRail() {
+    var host = document.getElementById('viv-rail-investigations');
+    if (!host) return;
+    fetch('/api/investigations')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        _vivRenderInvestigationsRail(data.investigations || []);
+      })
+      .catch(function(err) {
+        host.innerHTML =
+          '<p class="viv-rail-empty" style="font-size:0.85em;color:#c00;padding:4px 12px">' +
+          'Failed to load' +
+          '</p>';
+      });
+  }
+  window._vivRefreshInvestigationsRail = _vivRefreshInvestigationsRail;
+
+  function _vivRenderInvestigationsRail(investigations) {
+    var host = document.getElementById('viv-rail-investigations');
+    if (!host) return;
+    if (!investigations.length) {
+      host.innerHTML =
+        '<p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">' +
+        'No investigations yet' +
+        '</p>';
+      return;
+    }
+    // Group by topic. Investigations with empty/missing topic go to "Ungrouped".
+    var groups = {};
+    var order = [];
+    investigations.forEach(function(inv) {
+      var topic = (typeof inv.topic === 'string' && inv.topic.trim()) ? inv.topic.trim() : '';
+      var key = topic || '__ungrouped__';
+      if (!groups[key]) {
+        groups[key] = { topic: topic, items: [] };
+        order.push(key);
+      }
+      groups[key].items.push(inv);
+    });
+    // Sort named topics alphabetically, push Ungrouped last.
+    order.sort(function(a, b) {
+      if (a === '__ungrouped__') return 1;
+      if (b === '__ungrouped__') return -1;
+      return groups[a].topic.localeCompare(groups[b].topic);
+    });
+    var active = window._currentInvestigation || '';
+    var html = order.map(function(key) {
+      var g = groups[key];
+      var label = g.topic ? g.topic : 'Ungrouped';
+      var items = g.items.map(function(inv) {
+        var baseline = inv.baseline ? inv.baseline : (inv.composite || '—');
+        var nRuns = (inv.n_runs !== undefined) ? inv.n_runs
+                  : (inv.n_simulations !== undefined ? inv.n_simulations : 0);
+        var isActive = (inv.name === active) ? ' active' : '';
+        return '<a class="viv-rail-link viv-rail-study-link' + isActive + '" ' +
+               'href="#investigations" ' +
+               'onclick="_vivOpenInvestigationFromRail(\'' + _esc(inv.name) + '\'); return false;">' +
+                 '<span class="viv-rail-link-label">' + _esc(inv.name) + '</span>' +
+                 '<small class="viv-rail-link-sublabel">' + _esc(baseline) +
+                   ' · ' + nRuns + ' run' + (nRuns === 1 ? '' : 's') +
+                 '</small>' +
+               '</a>';
+      }).join('');
+      return '<div class="viv-rail-investigations-group" data-topic="' + _esc(label) + '">' +
+               '<div class="viv-rail-investigations-group-header" onclick="_vivToggleInvGroup(this)">' +
+                 '<span class="viv-rail-investigations-group-arrow viv-arrow">▾</span>' +
+                 '<span class="viv-rail-investigations-group-name viv-investigations-topic-name">' +
+                   _esc(label) +
+                 '</span>' +
+                 '<span class="viv-rail-investigations-group-count viv-investigations-count">' +
+                   g.items.length +
+                 '</span>' +
+               '</div>' +
+               '<div class="viv-rail-investigations-group-items">' + items + '</div>' +
+             '</div>';
+    }).join('');
+    host.innerHTML = html;
+  }
+
+  function _vivToggleInvGroup(headerEl) {
+    if (!headerEl) return;
+    var group = headerEl.closest ? headerEl.closest('.viv-rail-investigations-group')
+                                 : headerEl.parentNode;
+    if (group) group.classList.toggle('collapsed');
+  }
+  window._vivToggleInvGroup = _vivToggleInvGroup;
+
+  function _vivOpenInvestigationFromRail(name) {
+    // Switch to Investigations page first, then open the detail panel and
+    // refresh the rail so the active-state moves with the selection.
+    if (typeof _switchPage === 'function') _switchPage('investigations');
+    if (typeof _openInvestigation === 'function') _openInvestigation(name);
+    _vivRefreshInvestigationsRail();
+  }
+  window._vivOpenInvestigationFromRail = _vivOpenInvestigationFromRail;
 
   // -------------------------------------------------------------------------
   // Internal helpers
@@ -2544,6 +2751,7 @@
         closeModal('modal-investigation-create');
         window._investigationsLoaded = false;
         _switchPage('investigations');
+        _vivRefreshInvestigationsRail();
       });
   }
   window._submitInvestigationCreate = _submitInvestigationCreate;
@@ -2559,6 +2767,8 @@
       .catch(function(err) {
         detail.innerHTML = '<p style="color:#c00">Failed: ' + _esc(String(err)) + '</p>';
       });
+    // Refresh the rail so the active-state moves with the selection (V4).
+    if (typeof _vivRefreshInvestigationsRail === 'function') _vivRefreshInvestigationsRail();
   }
   window._openInvestigation = _openInvestigation;
 
@@ -2580,6 +2790,7 @@
                         failed:'gate_pending'})[status] || 'planned';
 
     // ── Overview-tab data (B2) ────────────────────────────────────────────────
+    var ovTopic      = (typeof spec.topic === 'string') ? spec.topic : '';
     var ovQuestion   = (typeof spec.question === 'string') ? spec.question : '';
     var ovHypothesis = (typeof spec.hypothesis === 'string') ? spec.hypothesis : '';
     var ovStatus     = spec.status || 'draft';
@@ -2615,6 +2826,10 @@
     }
     var overviewHtml =
       '<section class="ws-overview-meta">' +
+        '<label>Topic' +
+          '<input type="text" id="ov-topic" value="' + _esc(ovTopic) + '" ' +
+                 'placeholder="e.g., Antibiotic response (optional)">' +
+        '</label>' +
         '<label>Question' +
           '<textarea id="ov-question" rows="2">' + _esc(ovQuestion) + '</textarea>' +
         '</label>' +
@@ -2658,7 +2873,7 @@
       '</div>' +
       '<div class="investigation-detail-tabs">' +
         '<button class="investigation-detail-tab active" data-tab="overview" onclick="_invDetailTab(\'overview\')">Overview</button>' +
-        '<button class="investigation-detail-tab" data-tab="composites" onclick="_invDetailTab(\'composites\')">Composites</button>' +
+        '<button class="investigation-detail-tab" data-tab="composites" onclick="_invDetailTab(\'composites\')">Baseline Composite</button>' +
         '<button class="investigation-detail-tab" data-tab="groups" onclick="_invDetailTab(\'groups\')">Groups</button>' +
         '<button class="investigation-detail-tab" data-tab="interventions" onclick="_invDetailTab(\'interventions\')">Interventions</button>' +
         '<button class="investigation-detail-tab" data-tab="runs" onclick="_invDetailTab(\'runs\')">Runs (' + runs.length + ')</button>' +
@@ -2751,6 +2966,16 @@
       '</div>';
 
     // ── Overview-tab auto-save wiring (B2) ────────────────────────────────────
+    var tEl = document.getElementById('ov-topic');
+    if (tEl) {
+      tEl.addEventListener('blur', function() {
+        _saveOverviewField(name, 'topic', tEl.value);
+        // Topic change can re-group the Investigations rail, so refresh it.
+        if (typeof _vivRefreshInvestigationsRail === 'function') {
+          _vivRefreshInvestigationsRail();
+        }
+      });
+    }
     var qEl = document.getElementById('ov-question');
     if (qEl) {
       qEl.addEventListener('blur', function() {
@@ -4162,6 +4387,7 @@
         // Refresh both the list (status update) and the detail panel
         window._investigationsLoaded = false;
         _loadInvestigations();
+        _vivRefreshInvestigationsRail();
         _openInvestigation(name);
       })
       .catch(function(err) { alert('Network error: ' + err); });
@@ -4177,8 +4403,10 @@
       if (!j.ok) { alert('Delete failed: ' + (j.error || 'unknown')); return; }
       var detail = document.getElementById('investigation-detail');
       if (detail) { detail.style.display = 'none'; detail.innerHTML = ''; }
+      window._currentInvestigation = null;
       window._investigationsLoaded = false;
       _loadInvestigations();
+      _vivRefreshInvestigationsRail();
     });
   }
   window._deleteInvestigation = _deleteInvestigation;
