@@ -148,7 +148,7 @@
             <path d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Simulation Setup</span>
+        <span class="viv-rail-link-label">Composites</span>
       </a>
       <a href="#investigations"    class="viv-rail-link menu-link" data-page="investigations">
         <span class="viv-rail-link-icon">
@@ -332,8 +332,8 @@
 
 <!-- ===== PAGE: SIMULATION SETUP ===== -->
 <section id="page-simulation-setup" class="page" data-page="simulation-setup">
-  <h2 class="page-title">Simulation Setup</h2>
-  <p class="page-lead">Define how you&rsquo;ll run the model. Pick a composite to explore, configure <strong>simulations</strong> (run configs: time interval, parameters, initial state), and choose emitters. Observables are managed inside Composite Explorer. Visualizations live in their own tab.</p>
+  <h2 class="page-title">Composites</h2>
+  <p class="page-lead">Browse and explore the composites available in this workspace. Each composite packages a runnable simulation state with parameters you can configure. Click <strong>Explore</strong> to open its wiring diagram and start a Study.</p>
 
   <!-- Available Composites (workspace-local discovery) -->
   <div class="panel">
@@ -355,68 +355,6 @@
     <div id="composite-cards" class="module-grid">
       <p class="empty-state">Loading composites&hellip;</p>
     </div>
-  </div>
-
-  <!-- Available Emitters (registry-driven) -->
-  <div class="panel">
-    <h3>Available Emitters <span id="emitter-count" class="count-badge"></span></h3>
-    <p class="panel-lead">Emitters capture observable values during simulation. These are discovered from <code>core.link_registry</code> &mdash; any installed pbg-* package can contribute one.</p>
-    <div id="emitter-picker-container">
-      <p class="empty-state">Loading from Registry&hellip;</p>
-    </div>
-  </div>
-
-  <!-- Simulations panel (NEW) -->
-  <div class="panel">
-    <h3>Simulations</h3>
-    <p class="panel-lead">A simulation is a run configuration: initial state, parameter overrides, time interval, and emitter config. Each simulation produces a trajectory that visualizations can render.</p>
-
-    {% if simulations %}
-    <table>
-      <thead><tr><th>Name</th><th>Description</th><th>Time</th><th>Phases</th><th>Processes</th><th>Actions</th></tr></thead>
-      <tbody>
-      {% for s in simulations %}
-      <tr>
-        <td><code>{{ s.name }}</code></td>
-        <td>{{ s.description or '' }}</td>
-        <td>{{ s.t_start }} &rarr; {{ s.t_end }}</td>
-        <td>{% if s.phases %}{{ s.phases | join(', ') }}{% else %}<em>all</em>{% endif %}</td>
-        <td>{% if s.processes %}{{ s.processes | join(', ') }}{% else %}<em>—</em>{% endif %}</td>
-        <td><button class="action-btn-small" onclick="_deleteSimulation('{{ s.name }}')">Remove</button></td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="empty-state" style="color:#888;font-style:italic">No simulations registered yet. Add one below.</p>
-    {% endif %}
-
-    <details style="margin-top:12px">
-      <summary><strong>Add simulation</strong></summary>
-      <div style="padding:12px 0">
-      <form id="form-simulation" onsubmit="event.preventDefault(); _submitSimulation(this);">
-        <label>Name <input name="sim_name" pattern="^[a-zA-Z0-9_-]+$" required placeholder="e.g. baseline-run"></label>
-        <label>Description <input name="description" placeholder="Short description (optional)"></label>
-        <label>t_start <input name="t_start" type="number" step="any" min="0" value="0" required></label>
-        <label>t_end <input name="t_end" type="number" step="any" required placeholder="e.g. 3600"></label>
-        <label>Initial state (JSON) <textarea name="initial_state" rows="3" placeholder="{}"></textarea></label>
-        <label>Parameter overrides (JSON) <textarea name="parameter_overrides" rows="3" placeholder="{}"></textarea></label>
-        <label>Emitter config (JSON) <textarea name="emitter_config" rows="3" placeholder="{}"></textarea></label>
-        <fieldset style="border:1px solid #ddd;border-radius:4px;padding:10px;margin-bottom:12px">
-          <legend style="font-size:0.88em;font-weight:600">Phases (leave all unchecked = applies globally)</legend>
-          {% for p in phases %}
-          <label style="display:inline-block; margin-right:12px; font-weight:normal">
-            <input type="checkbox" name="phases" value="{{ p.n }}">
-            Phase {{ p.n }}: {{ p.name }}
-          </label>
-          {% endfor %}
-          {% if not phases %}<em style="color:#888;font-size:0.88em">No phases registered yet &mdash; simulation will apply globally.</em>{% endif %}
-        </fieldset>
-        <div class="form-error"></div>
-        <button type="submit">Add simulation</button>
-      </form>
-      </div>
-    </details>
   </div>
 
 </section>
@@ -564,23 +502,29 @@
     {% endif %}
   </section>
 
-  <!-- Section 3: Discovered (existing tables, lazy-loaded) -->
+  <!-- Section 3: Discovered registry (tabbed browser, lazy-loaded) -->
   <section class="panel">
-    <h3>Discovered processes &amp; types</h3>
-    <p class="panel-lead">Live snapshot of <code>build_core()</code> &mdash; every Process and Type that <code>allocate_core()</code> registers via auto-discovery. Grouped by source module.</p>
+    <h3>Discovered registry <span class="count-badge muted" id="registry-total-count"></span></h3>
+    <p class="panel-lead">Live snapshot of <code>build_core()</code> &mdash; every Process, Step, Emitter, Visualization, and Type that <code>allocate_core()</code> registers via auto-discovery. Grouped by kind.</p>
 
     <button class="action-btn" onclick="_loadRegistry(true)">Refresh registry</button>
     <div id="registry-status" class="muted" style="margin:8px 0"></div>
 
-    <h4>Processes <span id="registry-process-count" class="count-badge"></span></h4>
-    <div id="registry-processes-container">
-      <p class="empty-state">Loading&hellip;</p>
+    <div class="registry-tabs">
+      <button class="registry-tab active" data-kind="process"       onclick="_setRegistryTab('process')">Processes <span class="count-badge" id="registry-process-count"></span></button>
+      <button class="registry-tab"        data-kind="step"          onclick="_setRegistryTab('step')">Steps <span class="count-badge" id="registry-step-count"></span></button>
+      <button class="registry-tab"        data-kind="emitter"       onclick="_setRegistryTab('emitter')">Emitters <span class="count-badge" id="registry-emitter-count"></span></button>
+      <button class="registry-tab"        data-kind="visualization" onclick="_setRegistryTab('visualization')">Visualizations <span class="count-badge" id="registry-visualization-count"></span></button>
+      <button class="registry-tab"        data-kind="type"          onclick="_setRegistryTab('type')">Types <span class="count-badge" id="registry-type-count"></span></button>
     </div>
 
-    <h4>Types <span id="registry-type-count" class="count-badge"></span></h4>
-    <div id="registry-types-container">
-      <p class="empty-state">Loading&hellip;</p>
-    </div>
+    <input type="search" class="registry-search" id="registry-search" placeholder="Filter&hellip;" oninput="_filterRegistry(this.value)">
+
+    <div class="registry-tab-panel active" data-kind="process"       id="registry-processes-container"><p class="empty-state">Loading&hellip;</p></div>
+    <div class="registry-tab-panel"        data-kind="step"          id="registry-steps-container"></div>
+    <div class="registry-tab-panel"        data-kind="emitter"       id="registry-emitters-container"></div>
+    <div class="registry-tab-panel"        data-kind="visualization" id="registry-visualizations-container"></div>
+    <div class="registry-tab-panel"        data-kind="type"          id="registry-types-container"></div>
   </section>
 </section>
 

@@ -500,6 +500,68 @@
   }
   window._useRegistryClass = _useRegistryClass;
 
+  function _renderRegistryGrid(containerId, entries) {
+    var el = document.getElementById(containerId);
+    if (!el) return;
+    if (!entries || !entries.length) {
+      el.innerHTML = '<p class="empty-state">None registered.</p>';
+      return;
+    }
+    el.innerHTML = entries.map(function(p) {
+      var aliases = (p.aliases || []).length
+        ? ' <small style="color:#888">(aliases: ' + p.aliases.map(_esc).join(', ') + ')</small>'
+        : '';
+      return '<div class="registry-entry">' +
+        '<strong>' + _esc(p.name) + '</strong>' + aliases + '<br>' +
+        '<small><code>' + _esc(p.address) + '</code></small>' +
+        (p.schema_preview
+          ? '<details><summary>config schema</summary><pre class="json-tree">' + _esc(p.schema_preview) + '</pre></details>'
+          : '') +
+      '</div>';
+    }).join('');
+  }
+
+  function _renderRegistryTypesGrid(containerId, types) {
+    var el = document.getElementById(containerId);
+    if (!el) return;
+    if (!types || !types.length) {
+      el.innerHTML = '<p class="empty-state">None registered.</p>';
+      return;
+    }
+    el.innerHTML = types.map(function(t) {
+      return '<div class="registry-entry">' +
+        '<strong>' + _esc(t.name) + '</strong><br>' +
+        (t.schema_preview
+          ? '<small style="color:#666">' + _esc(t.schema_preview) + '</small>'
+          : '') +
+      '</div>';
+    }).join('');
+  }
+
+  function _setRegistryTab(kind) {
+    document.querySelectorAll('.registry-tab').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.kind === kind);
+    });
+    document.querySelectorAll('.registry-tab-panel').forEach(function(p) {
+      p.classList.toggle('active', p.dataset.kind === kind);
+    });
+    // Re-apply filter to the now-visible panel.
+    var q = (document.getElementById('registry-search') || {value: ''}).value;
+    _filterRegistry(q);
+  }
+  window._setRegistryTab = _setRegistryTab;
+
+  function _filterRegistry(query) {
+    var q = (query || '').toLowerCase();
+    var activePanel = document.querySelector('.registry-tab-panel.active');
+    if (!activePanel) return;
+    activePanel.querySelectorAll('.registry-entry').forEach(function(row) {
+      var text = row.textContent.toLowerCase();
+      row.style.display = (!q || text.indexOf(q) !== -1) ? '' : 'none';
+    });
+  }
+  window._filterRegistry = _filterRegistry;
+
   function _loadRegistry(refresh) {
     var status = document.getElementById('registry-status');
     if (status) status.textContent = 'Loading…';
@@ -513,23 +575,42 @@
             status.textContent = '';
           }
         }
-        var procContainer = document.getElementById('registry-processes-container');
-        var typeContainer = document.getElementById('registry-types-container');
-        if (procContainer) _renderRegistryTable(data.processes || [], procContainer, 'processes');
-        if (typeContainer) _renderRegistryTable(data.types || [], typeContainer, 'types');
-        var procCount = document.getElementById('registry-process-count');
-        var typeCount = document.getElementById('registry-type-count');
-        if (procCount) procCount.textContent = '(' + (data.processes || []).length + ')';
-        if (typeCount) typeCount.textContent = '(' + (data.types || []).length + ')';
+        var processes = data.processes || [];
+        var types = data.types || [];
+        var byKind = {process: [], step: [], emitter: [], visualization: [], other: []};
+        processes.forEach(function(p) {
+          var k = p.kind || 'other';
+          if (!byKind[k]) byKind[k] = [];
+          byKind[k].push(p);
+        });
 
-        // Populate sim-process picker if present.
+        // Render tabbed Registry browser (Registry page).
+        _renderRegistryGrid('registry-processes-container', byKind.process);
+        _renderRegistryGrid('registry-steps-container', byKind.step);
+        _renderRegistryGrid('registry-emitters-container', byKind.emitter);
+        _renderRegistryGrid('registry-visualizations-container', byKind.visualization);
+        _renderRegistryTypesGrid('registry-types-container', types);
+
+        // Per-tab counts + total.
+        var setCount = function(id, n) {
+          var el = document.getElementById(id);
+          if (el) el.textContent = n;
+        };
+        setCount('registry-process-count', byKind.process.length);
+        setCount('registry-step-count', byKind.step.length);
+        setCount('registry-emitter-count', byKind.emitter.length);
+        setCount('registry-visualization-count', byKind.visualization.length);
+        setCount('registry-type-count', types.length);
+        var total = document.getElementById('registry-total-count');
+        if (total) total.textContent = (processes.length + types.length) + ' total';
+
+        // Populate sim-process picker if present (Composite Explorer / setup forms).
         var picker = document.getElementById('sim-process-picker');
         if (picker) {
-          var procs = data.processes || [];
-          if (procs.length === 0) {
+          if (processes.length === 0) {
             picker.innerHTML = '<p class="muted">No processes registered yet.</p>';
           } else {
-            picker.innerHTML = procs.map(function(p) {
+            picker.innerHTML = processes.map(function(p) {
               return '<label style="display:inline-block; margin-right:12px">' +
                 '<input type="checkbox" name="processes" value="' + p.name + '"> ' + p.name +
                 '</label>';
@@ -537,19 +618,11 @@
           }
         }
 
-        // Populate emitter picker (Simulation Setup tab).
-        var emitters = (data.processes || []).filter(function(p) { return p.kind === 'emitter'; });
-        var emitterContainer = document.getElementById('emitter-picker-container');
-        if (emitterContainer) _renderKindPicker(emitters, emitterContainer, 'emitter');
-        var emitterCount = document.getElementById('emitter-count');
-        if (emitterCount) emitterCount.textContent = '(' + emitters.length + ')';
-
         // Populate visualization picker (Visualizations tab).
-        var visualizations = (data.processes || []).filter(function(p) { return p.kind === 'visualization'; });
         var vizContainer = document.getElementById('viz-picker-container');
-        if (vizContainer) _renderKindPicker(visualizations, vizContainer, 'visualization');
+        if (vizContainer) _renderKindPicker(byKind.visualization, vizContainer, 'visualization');
         var vizCount = document.getElementById('viz-count');
-        if (vizCount) vizCount.textContent = '(' + visualizations.length + ')';
+        if (vizCount) vizCount.textContent = '(' + byKind.visualization.length + ')';
       })
       .catch(function(err) {
         if (status) status.innerHTML = '<span style="color:#991b1b">Network error: ' + err + '</span>';
