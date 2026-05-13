@@ -31,83 +31,76 @@ bash scripts/serve.sh   # opens browser at http://localhost:<port>
 >
 > Re-run `uv pip install -e ".[dev]"` after the edit.
 
-## The 5 dashboard tabs
+## The dashboard tabs
 
-| Tab | What it's for | Key buttons |
+> The dashboard's tab set evolves as the platform grows. The list below
+> reflects the rail at the time this template was rendered; the source
+> of truth is the live UI you opened at `http://localhost:<port>/`.
+
+| Rail label | Hash route | What it's for |
 |---|---|---|
-| **Workspace inputs** | External resources you bring in | + Import · + Dataset · + Reference (PDF) · + Expert doc · **Install** (per import) |
-| **Simulation Setup** | What to track + how to run | + Add observable · + Add simulation |
-| **Visualizations** | How to render trajectories | + Add visualization (Plotly chart configs) |
-| **Registry** | Live `build_core()` introspection | Refresh registry — shows discoverable processes + types |
-| **Build Model** | Iterative phases of model development | + Add phase · Start phase · Evaluate gate (per phase) |
+| **Workspace inputs** | `#workspace-inputs` | External resources — datasets, references (PDFs auto-extract metadata), expert docs. Simulation modules live in the Registry tab. |
+| **Registry** | `#registry` | Browse the curated catalog (`scripts/_catalog/modules.json`), install pbg-* modules, and view live `build_core()` introspection of discovered Processes/Steps/Types. |
+| **Composites** | `#simulation-setup` | Browse and explore composites available in the workspace. Each composite packages a runnable simulation state with parameters you can configure. |
+| **Investigations** | `#investigations` | Declarative research recipes — pick a composite, declare simulations (single / sweep / seeds), name observables, choose visualizations. Run, save, compare. |
+| **Visualizations** | `#visualizations` | Charts rendered from observable trajectories. Configure a registered Visualization class with specific settings, or describe a chart in natural language and let `/pbg-viz` generate it. |
+| **GitHub Branches** | `#branches` | All `stage/*` branches in the workspace with one-click merge / PR / diff actions. Branches accumulate as the dashboard creates them on actions (Add observable, Install module, …); use this tab to land them on main. |
 
-A persistent **Branch timeline** below the tabs shows every stage branch
-the dashboard has produced. Each row has Copy gh / Copy git merge / Show diff
-buttons to land the change.
+(Note: the **Composites** tab still routes under `#simulation-setup` for
+backwards compatibility — the rail label was renamed but the URL fragment
+wasn't. Use the table above when bookmarking focused panels.)
 
 ## 1 — Workspace inputs (any time)
 
 Inputs aren't a sequential stage — load them whenever they're useful.
 
-- **Imports** — external `pbg-*` packages. Register via `+ Import`, then
-  click **Install** to `pip install -e <path>` into the workspace venv.
-  Once installed, `allocate_core()` auto-discovers their processes via
-  [bigraph-schema's discovery convention][discovery]. They appear in the
-  Registry tab.
 - **Datasets** — experimental data the model validates against. Drag-drop a file.
 - **References** — paper PDFs. Drop the file; pypdf extracts metadata; bibtex auto-generates.
 - **Expert docs** — lab notes, curated reviews, working drafts. Drag-drop a PDF.
 
-Each `+ Add` lands on a `stage/*` branch you can merge from the Branch timeline.
+Simulation modules (Python packages that contribute Processes/Steps) are
+installed from the **Registry** tab, not here.
 
-## 2 — Simulation Setup
+Each `+ Add` lands on a `stage/*` branch you can merge from the GitHub Branches tab.
 
-- **Observables** — paths in the composite document you'll track
-  (e.g. `chromosome.DnaA_count`).
-- **Simulations** — run configs: name, t_start, t_end, initial_state,
-  parameter_overrides, emitter_config, optionally scoped to specific phases
-  and to specific Processes from the Registry.
+## 2 — Registry
 
-## 3 — Visualizations
+Two coordinated views on one tab:
 
-Configs for charts that render observable trajectories. Each visualization
-can scope to specific phases and/or a specific simulation.
+- **Available modules** — the curated `pbg-*` catalog in `scripts/_catalog/modules.json`, regenerated from the `vivarium-collective` GitHub org by `scripts/_catalog/sync-catalog.py`. Click **Install** to `git submodule add` into `external/<name>/`, `pip install -e` it into the workspace venv, and append it to `pyproject.toml` deps + `workspace.yaml.imports`.
+- **Discovered processes / types** — live introspection of `build_core()`. Every Process/Step/Emitter/Visualization/Type that `allocate_core()` finds via [bigraph-schema's discovery convention][discovery]. Click **Refresh registry** after an Install to see new entries.
 
-## 4 — Registry
+Empty Discovered view usually means the venv isn't built (`uv pip install -e ".[dev]"`) or the import isn't installed.
 
-Live snapshot of `build_core()` — every Process and Type currently
-discoverable. After installing an import, click **Refresh registry** to
-see new processes appear. Empty registry usually means the venv isn't
-set up or the import isn't pip-installed.
+## 3 — Composites
 
-## 5 — Build Model (the phases)
+Composite documents — process-bigraph state trees — live here. Pick one, inspect its wiring (process tree, store paths, emitters), and run it from the **Composite Explorer** sub-page to confirm it produces sensible output before wiring it into an investigation. Composites you write directly into `{{ package_path }}/composites/` show up automatically.
 
-Each phase is a small unit of model development:
+## 4 — Investigations
 
-- An **objective** + a **Phase Gate** (acceptance criteria)
-- A cited **source artifact** (expert doc / dataset / reference)
-- New mechanisms wired into the composite (processes, wires, store paths)
-- **Acceptance tests** that exercise the new mechanism
-- A landed **PR** when the gate passes
+The research-recipe layer. An investigation pins a composite, names a set of observables to track, declares one or more simulation runs (single / parameter sweep / random seeds), and selects which visualizations to render. The Run button executes them, writes results, and snapshots the run for reproducibility.
 
-Click `+ Add phase` to create one. Each phase has its own panel below
-the tracker — clicking a pill scrolls to it. Action buttons:
+## 5 — Visualizations
 
-- **Start phase** (planned → in_progress) — branches and scaffolds
-- **Evaluate gate** (in_progress → complete or back to in_progress)
+Charts rendered from observable trajectories. Two creation paths:
 
-If you're using Claude Code, `/pbg-phase <n>` walks the phase iteratively:
-opens the phase panel, drives the implementation, runs the gate.
+- **Configure a registered class** — pick from the Visualization classes discovered in the Registry (subclasses of `pbg_superpowers.visualization.Visualization` in any installed pbg-* package), give it settings.
+- **Generate from natural language** — describe what you want; the dashboard writes a request file and prompts you to run `/pbg-viz <name>`, which scaffolds a new Visualization function into `{{ package_path }}/visualizations/` and commits it on a stage branch.
+
+## 6 — GitHub Branches
+
+Every dashboard action (install a module, add an observable, generate a viz, …) creates a `stage/*` branch and commits the change there. This tab is the landing UI:
+
+- **Copy gh** — `gh pr create` command for that branch.
+- **Copy git merge** — local merge command, no PR.
+- **Show diff** — preview without leaving the tab.
+
+When all your in-flight stage branches are merged, the rail badge clears.
 
 ## Two paths to the same workspace
 
-- **Browser dashboard** is the primary UI. Pure-CLI workflows are supported
-  via `python3 scripts/lint-workspace.py` + direct YAML edits, but the
-  buttons handle branch-creation and PR setup for you.
-- **Claude Code + [pbg-superpowers]** adds skills for the work that benefits
-  from Claude: `/pbg-phase <n>` (drive a phase), `/pbg-expert <tool>` (wrap
-  a new simulator), `/pbg-composer` (compose pbg-* wrappers). The dashboard
-  and the skills share the same `workspace.yaml`.
+- **Browser dashboard** is the primary UI. Pure-CLI workflows are supported via `python3 scripts/lint-workspace.py` + direct YAML edits, but the buttons handle branch-creation and PR setup for you.
+- **Claude Code + [pbg-superpowers]** adds skills that pair with the dashboard: `/pbg-viz` (generate a visualization), `/pbg-wrapper` / `/pbg-expert` (wrap a new simulator), `/pbg-composer` (compose multiple wrappers), `/pbg-report` (regenerate per-model reports). The dashboard and the skills share the same `workspace.yaml`.
 
 ## Config files to know
 
@@ -122,13 +115,15 @@ Open just one panel for a targeted interaction:
 
 | URL | What |
 |---|---|
-| `http://localhost:<port>/?focus=workspace-inputs` | Just datasets / references / expert docs |
-| `http://localhost:<port>/?focus=registry` | Just the module catalog + installed modules |
-| `http://localhost:<port>/?focus=simulation-setup` | Just observables + simulations |
-| `http://localhost:<port>/?focus=visualizations` | Just the viz lifecycle |
-| `http://localhost:<port>/?focus=build-model` | Just phases/tasks |
+| `http://localhost:<port>/?focus=workspace-inputs` | Datasets / references / expert docs |
+| `http://localhost:<port>/?focus=registry` | Module catalog + installed modules |
+| `http://localhost:<port>/?focus=simulation-setup` | Composites browser (legacy route name) |
+| `http://localhost:<port>/?focus=investigations` | Investigation specs + runs |
+| `http://localhost:<port>/?focus=visualizations` | Visualization lifecycle |
+| `http://localhost:<port>/?focus=branches` | GitHub Branches lander |
+| `http://localhost:<port>/?focus=composite-explore&id=<composite>` | A single composite's explorer |
 
-Skills in Claude Code can `open <url>` to surface a focused interaction without dumping users into the full 5-tab UI.
+Skills in Claude Code can `open <url>` to surface a focused interaction without dropping users into the full rail.
 
 ## When stuck
 
