@@ -846,6 +846,76 @@ def test_delete_comparison_succeeds_when_unreferenced(workspace_server):
     assert spec['comparisons'] == []
 
 
+# ---------------------------------------------------------------------------
+# Investigation create-from-composite endpoint (Task A5)
+# ---------------------------------------------------------------------------
+
+def test_post_create_from_composite_creates_v2_spec(workspace_server):
+    """Cloning a workspace-catalog composite produces a v2-shape spec with
+    baseline + variants[0] referencing the resolved source, plus a sidecar copy."""
+    pkg_composites = workspace_server.root / 'pbg_testws' / 'composites'
+    pkg_composites.mkdir(parents=True, exist_ok=True)
+    (pkg_composites / 'chromosome-partition.composite.yaml').write_text(yaml.safe_dump({
+        'name': 'chromosome-partition',
+        'state': {'chromosome': {'count': {'_type': 'integer', '_default': 100}}},
+    }))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-create-from-composite',
+        {'composite_name': 'chromosome-partition'},
+    )
+    assert code == 200, j
+    auto_name = j.get('name', '')
+    assert auto_name.startswith('study-chromosome-partition-'), (
+        f"expected auto-name to start with 'study-chromosome-partition-', got {auto_name!r}"
+    )
+    # 6-char hex uuid suffix
+    suffix = auto_name[len('study-chromosome-partition-'):]
+    assert len(suffix) == 6, f"expected 6-char suffix, got {suffix!r}"
+
+    inv_dir = workspace_server.root / 'investigations' / auto_name
+    spec_path = inv_dir / 'spec.yaml'
+    assert spec_path.is_file(), f"spec.yaml not found at {spec_path}"
+
+    spec = yaml.safe_load(spec_path.read_text())
+    assert spec['name'] == auto_name
+    assert spec['baseline'] == 'chromosome-partition'
+    assert isinstance(spec['variants'], list) and len(spec['variants']) == 1
+    v0 = spec['variants'][0]
+    assert v0['name'] == 'chromosome-partition'
+    assert v0['source'] == 'pbg_testws.composites.chromosome-partition'
+    assert v0['document'] == './composites/chromosome-partition.yaml'
+    # v2 shape fields all present
+    assert spec.get('comparisons') == []
+    assert spec.get('conclusions') == ''
+    assert spec.get('question') == ''
+    assert spec.get('hypothesis') == ''
+    assert spec.get('status') == 'draft'
+
+    sidecar = inv_dir / 'composites' / 'chromosome-partition.yaml'
+    assert sidecar.is_file(), f"sidecar composite not copied to {sidecar}"
+    sidecar_doc = yaml.safe_load(sidecar.read_text())
+    assert sidecar_doc['name'] == 'chromosome-partition'
+
+
+def test_post_create_from_composite_unknown_returns_404(workspace_server):
+    """Unknown composite_name yields a 404."""
+    code, j = _post(
+        workspace_server.url + '/api/investigation-create-from-composite',
+        {'composite_name': 'does-not-exist'},
+    )
+    assert code == 404, j
+
+
+def test_post_create_from_composite_blank_returns_400(workspace_server):
+    """Empty composite_name yields a 400."""
+    code, j = _post(
+        workspace_server.url + '/api/investigation-create-from-composite',
+        {'composite_name': ''},
+    )
+    assert code == 400, j
+
+
 def test_post_save_sidecar_writes_yaml_and_updates_spec(workspace_server):
     """Save-sidecar writes investigations/<inv>/composites/<name>.yaml and adds the entry to spec.yaml."""
     inv = workspace_server.root / 'investigations' / 'demo'

@@ -35,6 +35,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
@@ -615,6 +616,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-run-delete":  self._post_investigation_run_delete,
             "/api/investigation-runs-clear":  self._post_investigation_runs_clear,
             "/api/investigation-run-one":     self._post_investigation_run_one,
+            "/api/investigation-create-from-composite":  self._post_investigation_create_from_composite,
             "/api/investigation-composite-add":          self._post_investigation_composite_add,
             "/api/investigation-composite-perturb":      self._post_investigation_composite_perturb,
             "/api/investigation-composite-rebuild":      self._post_investigation_composite_rebuild,
@@ -3516,6 +3518,130 @@ if __name__ == "__main__":
                 return self._json({"ok": False, "run_id": run_id, "error": err}, 200)
         finally:
             conn.close()
+
+    def _post_investigation_create_from_composite(self, body: dict):
+        """POST /api/investigation-create-from-composite {composite_name}
+
+        Clone a workspace-catalog composite into a fresh investigation. The
+        catalog is the union of the workspace's own ``pbg_<slug>/composites/``
+        and every installed ``pbg-*`` package's ``composites/`` directory
+        (see :func:`scripts._lib.composite_lookup.discover_all_composites`).
+
+        ``composite_name`` is the friendly identifier surfaced by the
+        Composite Explorer — matched against the catalog record's ``name``
+        field first (the value in the composite YAML's top-level ``name:``),
+        and falling back to the dotted-id stem (the bit after
+        ``...composites.``) so URLs and slugs work too.
+
+        On success, creates ``investigations/<auto-name>/`` with a v2-shape
+        ``spec.yaml`` (name/baseline/variants/comparisons/conclusions/question/
+        hypothesis/status) and copies the resolved source YAML to
+        ``./composites/<composite_name>.yaml``. Returns ``{name: <auto-name>}``.
+        """
+        composite_name = (body.get("composite_name") or "").strip()
+        if not composite_name:
+            return self._json({"error": "composite_name required"}, 400)
+
+        _ws_add_to_sys_path()
+        try:
+            from scripts._lib.composite_lookup import discover_all_composites
+            from scripts._lib.investigation_migrate import _resolve_composite_source
+        except ImportError as e:
+            return self._json({"error": f"composite lookup unavailable: {e}"}, 500)
+
+        # Resolve composite_name → dotted source ref via the workspace catalog.
+        try:
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+        except Exception as e:
+            return self._json({"error": f"failed to read workspace.yaml: {e}"}, 500)
+        pkg = ws_data.get("package_path") or (
+            "pbg_" + (ws_data.get("name") or "").replace("-", "_")
+        )
+        try:
+            catalog = discover_all_composites(WORKSPACE, pkg)
+        except Exception as e:
+            return self._json({"error": f"catalog scan failed: {e}"}, 500)
+
+        # Match by YAML name first, then by id-stem (the bit after `.composites.`).
+        match_rec = None
+        for rec in catalog.values():
+            if rec.get("name") == composite_name:
+                match_rec = rec
+                break
+        if match_rec is None:
+            for rec_id, rec in catalog.items():
+                stem = rec_id.rsplit(".composites.", 1)[-1]
+                if stem == composite_name:
+                    match_rec = rec
+                    break
+        if match_rec is None:
+            return self._json(
+                {"error": f"composite {composite_name!r} not in workspace catalog"},
+                404,
+            )
+
+        source_ref = match_rec["id"]  # e.g. pbg_testws.composites.foo
+        try:
+            source_path, _stem = _resolve_composite_source(source_ref, WORKSPACE)
+        except (FileNotFoundError, ValueError) as e:
+            # Catalog has it but source file is gone (or installed package outside
+            # the workspace tree). Fall back to the catalog's recorded path.
+            recorded = match_rec.get("_path")
+            if recorded and Path(recorded).is_file():
+                source_path = Path(recorded)
+            else:
+                return self._json({"error": str(e)}, 404)
+
+        # Auto-name: study-<slug>-<6-char-hex>. Slugify: lowercase, replace
+        # any non-[a-z0-9_-] with '-', collapse repeats.
+        slug = re.sub(r"[^a-z0-9_-]+", "-", composite_name.lower()).strip("-") or "composite"
+        slug = re.sub(r"-+", "-", slug)
+        auto_name = f"study-{slug}-{uuid.uuid4().hex[:6]}"
+
+        inv_dir = WORKSPACE / "investigations" / auto_name
+        if inv_dir.exists():
+            # Collision is astronomically unlikely with 24 bits of entropy, but
+            # if it happens (e.g. a test seeds uuid), surface it rather than
+            # silently overwriting.
+            return self._json(
+                {"error": f"investigation {auto_name!r} already exists"}, 409
+            )
+
+        commit_msg = (
+            f"feat(investigations/{auto_name}): create from composite "
+            f"'{composite_name}'"
+        )
+
+        def do_action():
+            composites_dir = inv_dir / "composites"
+            composites_dir.mkdir(parents=True, exist_ok=True)
+            sidecar = composites_dir / f"{composite_name}.yaml"
+            shutil.copy2(source_path, sidecar)
+
+            spec = {
+                "name": auto_name,
+                "baseline": composite_name,
+                "variants": [{
+                    "name": composite_name,
+                    "source": source_ref,
+                    "document": f"./composites/{composite_name}.yaml",
+                }],
+                "comparisons": [],
+                "conclusions": "",
+                "question": "",
+                "hypothesis": "",
+                "status": "draft",
+            }
+            (inv_dir / "spec.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            resp, code = _commit_or_run(commit_msg, do_action)
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+        if code == 200:
+            return self._json({"name": auto_name}, 200)
+        return self._json(resp, code)
 
     def _post_investigation_composite_add(self, body: dict):
         """POST /api/investigation-composite-add {investigation, name, source}
