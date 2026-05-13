@@ -610,9 +610,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-run-delete":  self._post_investigation_run_delete,
             "/api/investigation-runs-clear":  self._post_investigation_runs_clear,
             "/api/investigation-run-one":     self._post_investigation_run_one,
-            "/api/investigation-composite-add":      self._post_investigation_composite_add,
-            "/api/investigation-composite-perturb":  self._post_investigation_composite_perturb,
-            "/api/investigation-composite-rebuild":  self._post_investigation_composite_rebuild,
+            "/api/investigation-composite-add":          self._post_investigation_composite_add,
+            "/api/investigation-composite-perturb":      self._post_investigation_composite_perturb,
+            "/api/investigation-composite-rebuild":      self._post_investigation_composite_rebuild,
+            "/api/investigation-composite-save-sidecar": self._post_investigation_composite_save_sidecar,
             "/api/investigation-set-observables":    self._post_investigation_set_observables,
         }
         handler_fn = route_map.get(self.path)
@@ -3596,6 +3597,61 @@ if __name__ == "__main__":
                 entry['parameter_overrides'] = body['parameter_overrides']
             if body.get('process_overrides'):
                 entry['process_overrides'] = body['process_overrides']
+            composites.append(entry)
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_investigation_composite_save_sidecar(self, body: dict):
+        """POST /api/investigation-composite-save-sidecar
+        Body: {investigation, name, document, source_ref?}
+        Writes the document as a new sidecar; appends entry to spec.composites[].
+        Used by the Composite Explorer's Save flow.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        comp_name = (body.get("name") or "").strip()
+        document = body.get("document")
+        source_ref = (body.get("source_ref") or "").strip()
+        if not (inv_name and comp_name and isinstance(document, dict)):
+            return self._json(
+                {"error": "investigation, name, and document required"}, 400
+            )
+        if not re.match(r"^[a-zA-Z0-9_-]+$", comp_name):
+            return self._json({"error": "name must match ^[a-zA-Z0-9_-]+$"}, 400)
+
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        composites_dir = inv_dir / "composites"
+        composites_dir.mkdir(parents=True, exist_ok=True)
+        sidecar = composites_dir / f"{comp_name}.yaml"
+        if sidecar.is_file():
+            return self._json({"error": f"composite {comp_name!r} already exists"}, 409)
+
+        # Validate that the document is well-formed (round-trips cleanly)
+        try:
+            text = yaml.safe_dump(document, sort_keys=False)
+            yaml.safe_load(text)
+        except Exception as e:
+            return self._json({"error": f"document not serialisable: {e}"}, 400)
+
+        commit_msg = f"feat(investigations/{inv_name}): save sidecar composite '{comp_name}'"
+
+        def do_action():
+            sidecar.write_text(text)
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+            composites = spec.setdefault("composites", [])
+            entry: dict = {
+                "name": comp_name,
+                "document": f"./composites/{comp_name}.yaml",
+            }
+            if source_ref:
+                entry["source"] = source_ref
             composites.append(entry)
             spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
 

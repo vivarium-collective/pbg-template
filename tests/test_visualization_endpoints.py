@@ -617,3 +617,77 @@ def test_post_set_observables_rejects_missing_investigation_dir(workspace_server
         {'investigation': 'nonexistent', 'paths': []},
     )
     assert code == 404
+
+
+def test_post_save_sidecar_writes_yaml_and_updates_spec(workspace_server):
+    """Save-sidecar writes investigations/<inv>/composites/<name>.yaml and adds the entry to spec.yaml."""
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [],
+    }, sort_keys=False))
+
+    doc = {
+        'name': 'tuned',
+        'state': {
+            'process': {'_type': 'process', 'address': 'local:Foo', 'config': {'rate': 5.0}},
+            'stores': {'count': {'_type': 'integer', '_default': 1}},
+            'emitter': {'_type': 'step', 'address': 'local:SQLiteEmitter',
+                         'config': {'emit': {'count': 'integer'}},
+                         'inputs': {'count': ['stores', 'count']}},
+        },
+    }
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-save-sidecar',
+        {'investigation': 'demo', 'name': 'tuned-baseline',
+         'document': doc, 'source_ref': 'pkg.composites.baseline'},
+    )
+    assert code in (200, 500), j
+
+    sidecar = inv / 'composites' / 'tuned-baseline.yaml'
+    assert sidecar.is_file()
+    written = yaml.safe_load(sidecar.read_text())
+    assert written['state']['process']['config']['rate'] == 5.0
+    assert 'emitter' in written['state']
+
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    names = [c['name'] for c in (spec.get('composites') or [])]
+    assert 'tuned-baseline' in names
+    entry = next(c for c in spec['composites'] if c['name'] == 'tuned-baseline')
+    assert entry['source'] == 'pkg.composites.baseline'
+    assert entry['document'] == './composites/tuned-baseline.yaml'
+
+
+def test_post_save_sidecar_rejects_duplicate_name(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'tuned.yaml').write_text('name: tuned\nstate: {}\n')
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [{'name': 'tuned', 'source': 'pkg.x',
+                         'document': './composites/tuned.yaml'}],
+        'runs': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-save-sidecar',
+        {'investigation': 'demo', 'name': 'tuned', 'document': {'state': {}}},
+    )
+    assert code == 409, j
+
+
+def test_post_save_sidecar_rejects_missing_investigation(workspace_server):
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-save-sidecar',
+        {'investigation': 'nonexistent', 'name': 'x', 'document': {'state': {}}},
+    )
+    assert code == 404, j
+
+
+def test_post_save_sidecar_rejects_missing_fields(workspace_server):
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-save-sidecar',
+        {'investigation': 'demo'},
+    )
+    assert code == 400, j
