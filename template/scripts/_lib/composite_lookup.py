@@ -117,18 +117,82 @@ def discover_installed_pbg_composites() -> dict[str, dict]:
     return out
 
 
+def _derive_module_from_spec_id(spec_id: str) -> str:
+    """Best-effort friendly module name from a spec id.
+
+    `pkg.composites.foo` -> `pkg.composites`, otherwise the bit before the
+    last dot (or the whole id if no dot).
+    """
+    if ".composites." in spec_id:
+        return spec_id.split(".composites.", 1)[0] + ".composites"
+    if "." in spec_id:
+        return spec_id.rsplit(".", 1)[0]
+    return spec_id
+
+
 def discover_all_composites(ws_root: Path, package_path: str) -> dict[str, dict]:
     """Discover composites from the workspace + every installed pbg-* package.
 
     If the workspace's package is also pip-installed (e.g., `pip install -e .`),
     the installed scan would re-find the same specs; the workspace scan runs
     first so workspace-relative `source` paths win.
+
+    Also merges in `@composite_generator`-decorated functions from installed
+    bigraph-schema-dependent packages via
+    :func:`pbg_superpowers.composite_discovery.discover_all`. Generator entries
+    carry ``kind: "generator"`` and a ``module`` field; spec entries are tagged
+    ``kind: "spec"`` and gain a derived ``module``. If pbg-superpowers is not
+    importable the function falls back to spec-only behavior.
     """
     out: dict[str, dict] = {}
     out.update(discover_workspace_composites(ws_root, package_path))
     for spec_id, rec in discover_installed_pbg_composites().items():
         if spec_id not in out:
             out[spec_id] = rec
+
+    # Tag every spec entry with kind + derived module (idempotent).
+    for spec_id, rec in out.items():
+        rec.setdefault("kind", "spec")
+        if not rec.get("module"):
+            rec["module"] = _derive_module_from_spec_id(spec_id)
+
+    # Merge generator entries from pbg-superpowers, if available.
+    try:
+        from pbg_superpowers.composite_discovery import discover_all as _ps_discover_all
+    except ImportError as e:
+        import warnings
+        warnings.warn(
+            f"composite_lookup: pbg-superpowers not importable, "
+            f"generator discovery disabled ({e})",
+            stacklevel=2,
+        )
+        return out
+
+    try:
+        merged = _ps_discover_all()
+    except Exception as e:  # noqa: BLE001 — be defensive; never break catalog
+        import warnings
+        warnings.warn(
+            f"composite_lookup: discover_all raised {type(e).__name__}: {e}",
+            stacklevel=2,
+        )
+        return out
+
+    for gid, entry in merged.items():
+        if entry.get("kind") != "generator":
+            continue
+        if gid in out:
+            continue
+        out[gid] = {
+            "id": gid,
+            "kind": "generator",
+            "name": entry.get("name") or gid.rsplit(".", 1)[-1],
+            "description": entry.get("description", ""),
+            "tags": [],
+            "parameters": entry.get("parameters") or {},
+            "requires": {},
+            "module": entry.get("module") or _derive_module_from_spec_id(gid),
+        }
     return out
 
 

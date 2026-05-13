@@ -534,6 +534,7 @@
   window._composites = [];
   window._compositesFilter = { search: '', tags: new Set() };
   window._compositesView = 'grid';
+  window._compositesSort = 'name';
 
   function _buildCompositeChips() {
     var chipsEl = document.getElementById('composite-tag-chips');
@@ -572,6 +573,12 @@
   }
   window._setCompositeView = _setCompositeView;
 
+  function _setCompositesSort(value) {
+    window._compositesSort = value || 'name';
+    _renderComposites();
+  }
+  window._setCompositesSort = _setCompositesSort;
+
   function _renderComposites() {
     var container = document.getElementById('composite-cards');
     if (!container) return;
@@ -580,7 +587,7 @@
     var activeTags = f.tags;
     var composites = window._composites.filter(function(c) {
       if (search) {
-        var haystack = (c.name + ' ' + (c.description || '') + ' ' + (c.tags || []).join(' ')).toLowerCase();
+        var haystack = (c.name + ' ' + (c.description || '') + ' ' + (c.tags || []).join(' ') + ' ' + (c.module || '')).toLowerCase();
         if (haystack.indexOf(search) === -1) return false;
       }
       if (activeTags.size > 0) {
@@ -592,10 +599,39 @@
       return true;
     });
 
+    // Apply sort toggle (Name / Module / Kind). Ties break on name.
+    var sorted = composites.slice();
+    if (window._compositesSort === 'module') {
+      sorted.sort(function(a, b) {
+        return (a.module || '').localeCompare(b.module || '')
+          || (a.name || '').localeCompare(b.name || '');
+      });
+    } else if (window._compositesSort === 'kind') {
+      sorted.sort(function(a, b) {
+        return (a.kind || '').localeCompare(b.kind || '')
+          || (a.name || '').localeCompare(b.name || '');
+      });
+    } else {
+      sorted.sort(function(a, b) {
+        return (a.name || '').localeCompare(b.name || '');
+      });
+    }
+    composites = sorted;
+
     if (!composites.length) {
       container.innerHTML = '<p class="empty-state">No composites match the current filter.</p>';
       container.className = '';
       return;
+    }
+
+    function _moduleLine(c) {
+      var mod = c.module || '';
+      var kind = c.kind || 'spec';
+      var kindBadge = (kind === 'generator')
+        ? ' <span class="kind-badge">generator</span>' : '';
+      if (!mod) return '';
+      return '<div class="composite-module"><small>Module:</small> ' +
+        '<code>' + _esc(mod) + '</code>' + kindBadge + '</div>';
     }
 
     if (window._compositesView === 'list') {
@@ -606,7 +642,9 @@
         }).join('');
         return '<div class="composite-list-row">' +
           '<span class="name">' + _esc(c.name) + '</span>' +
-          '<span class="desc">' + tagPills + ' ' + _esc(c.description || '(no description)') + '</span>' +
+          '<span class="desc">' + tagPills + ' ' + _esc(c.description || '(no description)') +
+            _moduleLine(c) +
+          '</span>' +
           '<span><button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button></span>' +
           '</div>';
       });
@@ -637,6 +675,7 @@
         return '<div class="module-card">' +
           '<div class="module-card-header"><strong>' + _esc(c.name) + '</strong></div>' +
           '<p class="module-desc">' + _esc(c.description || '(no description)') + '</p>' +
+          _moduleLine(c) +
           requires +
           tagSummary +
           paramSummary +
@@ -2376,6 +2415,19 @@
         document.getElementById('ce-name').textContent = data.name;
         document.getElementById('ce-description').textContent = data.description || '';
         document.getElementById('ce-id').textContent = data.id;
+        // Module + kind metadata (added in support of @composite_generator).
+        var moduleEl = document.getElementById('ce-module');
+        var kindEl = document.getElementById('ce-kind');
+        if (moduleEl) moduleEl.textContent = data.module || '(unknown)';
+        if (kindEl) {
+          if ((data.kind || 'spec') === 'generator') {
+            kindEl.textContent = 'generator';
+            kindEl.style.display = '';
+          } else {
+            kindEl.textContent = '';
+            kindEl.style.display = 'none';
+          }
+        }
         window._ceCurrent.parameters = data.parameters;
         // Send wiring state to loom-explore iframe via postMessage
         _loadCompositeExplorer(data.id, data.state, data.name);

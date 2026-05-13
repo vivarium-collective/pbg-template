@@ -3727,16 +3727,44 @@ if __name__ == "__main__":
             )
 
         source_ref = match_rec["id"]  # e.g. pbg_testws.composites.foo
-        try:
-            source_path, _stem = _resolve_composite_source(source_ref, WORKSPACE)
-        except (FileNotFoundError, ValueError) as e:
-            # Catalog has it but source file is gone (or installed package outside
-            # the workspace tree). Fall back to the catalog's recorded path.
-            recorded = match_rec.get("_path")
-            if recorded and Path(recorded).is_file():
-                source_path = Path(recorded)
-            else:
-                return self._json({"error": str(e)}, 404)
+        is_generator = match_rec.get("kind") == "generator"
+        generator_doc = None
+        source_path = None
+        if is_generator:
+            # Generator-kind: build the doc now and write it as a frozen YAML
+            # snapshot. The variant's `source` field still references the
+            # generator id (provenance); from the study's POV the sidecar is
+            # an ordinary spec.
+            try:
+                from pbg_superpowers.composite_generator import _REGISTRY, build_generator
+            except ImportError as e:
+                return self._json(
+                    {"error": f"pbg-superpowers unavailable for generator resolution: {e}"},
+                    500,
+                )
+            entry = _REGISTRY.get(source_ref)
+            if entry is None:
+                return self._json(
+                    {"error": f"generator {source_ref!r} not in registry — was it imported?"},
+                    404,
+                )
+            try:
+                generator_doc = build_generator(entry)
+            except Exception as e:  # noqa: BLE001
+                return self._json(
+                    {"error": f"generator build failed: {e}"}, 400,
+                )
+        else:
+            try:
+                source_path, _stem = _resolve_composite_source(source_ref, WORKSPACE)
+            except (FileNotFoundError, ValueError) as e:
+                # Catalog has it but source file is gone (or installed package outside
+                # the workspace tree). Fall back to the catalog's recorded path.
+                recorded = match_rec.get("_path")
+                if recorded and Path(recorded).is_file():
+                    source_path = Path(recorded)
+                else:
+                    return self._json({"error": str(e)}, 404)
 
         # Auto-name: study-<slug>-<6-char-hex>. Slugify: lowercase, replace
         # any non-[a-z0-9_-] with '-', collapse repeats.
@@ -3762,7 +3790,10 @@ if __name__ == "__main__":
             composites_dir = inv_dir / "composites"
             composites_dir.mkdir(parents=True, exist_ok=True)
             sidecar = composites_dir / f"{composite_name}.yaml"
-            shutil.copy2(source_path, sidecar)
+            if is_generator:
+                sidecar.write_text(yaml.safe_dump(generator_doc, sort_keys=False))
+            else:
+                shutil.copy2(source_path, sidecar)
 
             spec = {
                 "name": auto_name,
@@ -4493,7 +4524,12 @@ if __name__ == "__main__":
             return self._json({"error": f"workstream error: {e}"}, 500)
 
     def _get_composites(self):
-        """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package."""
+        """GET /api/composites — return composite specs from the workspace AND every installed pbg-* package.
+
+        Each record includes ``kind`` (``"spec"`` | ``"generator"``) and
+        ``module`` so dashboards can tell static specs from
+        ``@composite_generator`` functions.
+        """
         _ws_add_to_sys_path()
         try:
             from scripts._lib.composite_lookup import discover_all_composites
@@ -4506,7 +4542,10 @@ if __name__ == "__main__":
             specs = discover_all_composites(WORKSPACE, pkg)
             out = []
             for s in specs.values():
-                out.append({k: v for k, v in s.items() if not k.startswith("_")})
+                rec = {k: v for k, v in s.items() if not k.startswith("_")}
+                rec.setdefault("kind", "spec")
+                rec.setdefault("module", "")
+                out.append(rec)
             return self._json({"composites": out}, 200)
         except Exception as e:
             return self._json({"composites": [], "error": str(e)}, 200)
@@ -4515,6 +4554,9 @@ if __name__ == "__main__":
         """GET /api/composite-state?ref=<id-or-path>
         Returns: {state: <parsed composite YAML/JSON document>}
         Accepts either a dotted spec ID (pkg.composites.foo) or a workspace-relative file path.
+
+        For ``@composite_generator``-decorated entries (kind=generator), calls
+        ``build_generator`` with no overrides and returns the resulting document.
         """
         import urllib.parse
         qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
@@ -4523,6 +4565,20 @@ if __name__ == "__main__":
             return self._json({"error": "ref required"}, 400)
 
         _ws_add_to_sys_path()
+
+        # Generator-kind branch: resolve via pbg-superpowers' live registry.
+        try:
+            from pbg_superpowers.composite_generator import _REGISTRY, build_generator
+            entry = _REGISTRY.get(ref)
+            if entry is not None:
+                try:
+                    doc = build_generator(entry)
+                except Exception as e:  # noqa: BLE001
+                    return self._json({"error": f"generator build failed: {e}"}, 400)
+                return self._json({"state": doc, "kind": "generator",
+                                    "module": entry.module}, 200)
+        except ImportError:
+            pass
 
         path = None
         # Try to resolve as a dotted spec ID via composite_lookup.
@@ -4551,10 +4607,16 @@ if __name__ == "__main__":
         except Exception as e:
             return self._json({"error": f"parse failed: {e}"}, 500)
 
-        return self._json({"state": doc}, 200)
+        return self._json({"state": doc, "kind": "spec"}, 200)
 
     def _get_composite_resolve(self):
-        """GET /api/composite-resolve — resolve a composite spec with param overrides, return state + SVG."""
+        """GET /api/composite-resolve — resolve a composite spec with param overrides, return state + SVG.
+
+        Also resolves ``@composite_generator`` entries (kind=generator) by
+        calling ``build_generator`` with overrides — the returned payload
+        carries ``kind`` and ``module`` so the Composite Explorer page can
+        surface the source-module info.
+        """
         from urllib.parse import urlparse, parse_qs
         _ws_add_to_sys_path()
         from scripts._lib.composite_lookup import substitute_parameters, find_composite_path
@@ -4572,6 +4634,38 @@ if __name__ == "__main__":
 
         ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
         pkg = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+
+        # Generator-kind branch: resolve via pbg-superpowers' live registry.
+        try:
+            from pbg_superpowers.composite_generator import _REGISTRY, build_generator
+            entry = _REGISTRY.get(spec_id)
+        except ImportError:
+            entry = None
+        if entry is not None:
+            try:
+                doc = build_generator(entry, overrides=overrides)
+            except ValueError as e:
+                return self._json({"error": str(e)}, 400)
+            except Exception as e:  # noqa: BLE001
+                return self._json({"error": f"generator build failed: {e}"}, 400)
+            # build_generator may return {state: ..., schema: ...} or a bare
+            # state dict. Normalize to a state dict for the iframe / JSON view.
+            if isinstance(doc, dict) and "state" in doc and isinstance(doc["state"], dict):
+                state = doc["state"]
+            else:
+                state = doc
+            svg = _render_composite_svg(state, pkg)
+            return self._json({
+                "id": spec_id,
+                "name": entry.name,
+                "description": entry.description,
+                "parameters": entry.parameters,
+                "state": state,
+                "svg": svg,
+                "kind": "generator",
+                "module": entry.module,
+            }, 200)
+
         path = find_composite_path(WORKSPACE, pkg, spec_id)
         if path is None:
             return self._json({"error": f"spec file not found for id {spec_id}"}, 404)
@@ -4588,6 +4682,7 @@ if __name__ == "__main__":
         # Render the wiring diagram via bigraph-viz subprocess.
         svg = _render_composite_svg(state, pkg)
 
+        from scripts._lib.composite_lookup import _derive_module_from_spec_id
         return self._json({
             "id": spec_id,
             "name": spec.get("name", spec_id.rsplit(".composites.", 1)[-1]),
@@ -4595,6 +4690,8 @@ if __name__ == "__main__":
             "parameters": spec.get("parameters") or {},
             "state": state,
             "svg": svg,
+            "kind": "spec",
+            "module": _derive_module_from_spec_id(spec_id),
         }, 200)
 
     def _post_composite_test_run(self, body: dict):
