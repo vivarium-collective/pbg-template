@@ -656,6 +656,72 @@ def test_post_set_conclusions_rejects_oversize(workspace_server):
     assert '256' in j.get('error', '') or 'size' in j.get('error', '').lower() or 'limit' in j.get('error', '').lower()
 
 
+# ---------------------------------------------------------------------------
+# Investigation set-overview endpoint tests (Task A3.5)
+# ---------------------------------------------------------------------------
+
+def test_post_set_overview_updates_question(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-overview',
+        {'investigation': 'demo', 'fields': {'question': 'Does X drive Y?'}},
+    )
+    assert code in (200, 500), j
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['question'] == 'Does X drive Y?'
+
+
+def test_post_set_overview_rejects_invalid_status(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-overview',
+        {'investigation': 'demo', 'fields': {'status': 'bogus'}},
+    )
+    assert code == 400, j
+    err = j.get('error', '').lower()
+    # Error must mention valid statuses
+    assert 'status' in err
+    for valid in ('draft', 'in-progress', 'completed', 'archived'):
+        assert valid in j.get('error', ''), f"Expected {valid!r} in error: {j}"
+
+
+def test_post_set_overview_partial_update_preserves_other_fields(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-overview',
+        {'investigation': 'demo', 'fields': {
+            'question': 'Q1', 'hypothesis': 'H1', 'status': 'in-progress',
+        }},
+    )
+    assert code in (200, 500), j
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-overview',
+        {'investigation': 'demo', 'fields': {'status': 'completed'}},
+    )
+    assert code in (200, 500), j
+
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['question'] == 'Q1'
+    assert spec['hypothesis'] == 'H1'
+    assert spec['status'] == 'completed'
+
+
 def test_post_save_sidecar_writes_yaml_and_updates_spec(workspace_server):
     """Save-sidecar writes investigations/<inv>/composites/<name>.yaml and adds the entry to spec.yaml."""
     inv = workspace_server.root / 'investigations' / 'demo'

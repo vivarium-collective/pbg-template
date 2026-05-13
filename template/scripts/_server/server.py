@@ -49,6 +49,9 @@ import yaml
 _REGISTRY_CACHE: dict = {"data": None, "ts": 0.0}
 _REGISTRY_TTL = 30.0  # seconds
 
+# Canonical investigation Overview status values (see Task A3.5 / set-overview).
+_VALID_OVERVIEW_STATUSES = {"draft", "in-progress", "completed", "archived"}
+
 
 def _get_registry_data(bypass_cache: bool = False) -> dict:
     """Return registry data from build_core() subprocess, with 30s caching.
@@ -618,6 +621,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-composite-save-sidecar": self._post_investigation_composite_save_sidecar,
             "/api/investigation-set-observables":    self._post_investigation_set_observables,
             "/api/investigation-set-conclusions":    self._post_investigation_set_conclusions,
+            "/api/investigation-set-overview":       self._post_investigation_set_overview,
             "/api/composite-process-configs": self._post_composite_process_configs,
             "/api/composite-state-tree-doc":     self._post_composite_state_tree_doc,
             "/api/compose-doc-inject-emitter":   self._post_compose_doc_inject_emitter,
@@ -3879,6 +3883,43 @@ if __name__ == "__main__":
         def do_action():
             spec = yaml.safe_load(spec_path.read_text()) or {}
             spec['conclusions'] = markdown
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_investigation_set_overview(self, body: dict):
+        """POST /api/investigation-set-overview {investigation, fields: {question?, hypothesis?, status?}}
+        Selectively updates the three Overview metadata fields on spec.yaml.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        fields = body.get("fields") or {}
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if not isinstance(fields, dict):
+            return self._json({"error": "fields must be a mapping"}, 400)
+        if "status" in fields and fields["status"] not in _VALID_OVERVIEW_STATUSES:
+            return self._json(
+                {"error": f"status must be one of {sorted(_VALID_OVERVIEW_STATUSES)}"},
+                400,
+            )
+        for key in ("question", "hypothesis"):
+            if key in fields and not isinstance(fields[key], str):
+                return self._json({"error": f"{key} must be a string"}, 400)
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        commit_msg = f"feat(investigations/{inv_name}): set overview metadata"
+
+        def do_action():
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+            for key in ("question", "hypothesis", "status"):
+                if key in fields:
+                    spec[key] = fields[key]
             spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
 
         try:
