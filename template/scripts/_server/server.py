@@ -624,6 +624,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-set-overview":       self._post_investigation_set_overview,
             "/api/investigation-comparison-add":     self._post_investigation_comparison_add,
             "/api/investigation-comparison-update":  self._post_investigation_comparison_update,
+            "/api/investigation-group-add":          self._post_investigation_group_add,
+            "/api/investigation-group-update":       self._post_investigation_group_update,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -642,6 +644,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/visualization": self._delete_visualization,
             "/api/investigation-composite": self._delete_investigation_composite,
             "/api/investigation-comparison": self._delete_investigation_comparison,
+            "/api/investigation-group":      self._delete_investigation_group,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -4181,6 +4184,156 @@ if __name__ == "__main__":
             data = yaml.safe_load(spec_path.read_text()) or {}
             data["comparisons"] = [
                 c for c in (data.get("comparisons") or []) if c.get("name") != cmp_name
+            ]
+            spec_path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    # ------------------------------------------------------------------
+    # Investigation Groups (B7)
+    # ------------------------------------------------------------------
+
+    def _post_investigation_group_add(self, body: dict):
+        """POST /api/investigation-group-add {investigation, name, description?, variants[]}
+        Appends a group entry to spec.yaml.groups. 409 on duplicate name.
+        400 if any variants[] entry is not in spec.variants[].
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        grp_name = (body.get("name") or "").strip()
+        variants = body.get("variants") or []
+        description = body.get("description", "")
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if not grp_name:
+            return self._json({"error": "name required"}, 400)
+        if not isinstance(variants, list) or not variants:
+            return self._json({"error": "variants must be a non-empty list"}, 400)
+        if not isinstance(description, str):
+            return self._json({"error": "description must be a string"}, 400)
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        # Validate variant refs against declared variants up-front so the
+        # error code is 400 (bad input) rather than 500 from do_action.
+        spec_peek = yaml.safe_load(spec_path.read_text()) or {}
+        declared = {v.get("name") for v in (spec_peek.get("variants") or [])
+                    if isinstance(v, dict)}
+        unknown = [v for v in variants if v not in declared]
+        if unknown:
+            return self._json(
+                {"error": f"unknown variant(s): {unknown}; declared: {sorted(declared)}"},
+                400,
+            )
+
+        commit_msg = f"feat(investigations/{inv_name}): add group {grp_name}"
+
+        def do_action():
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+            grps = list(spec.get("groups") or [])
+            if any(g.get("name") == grp_name for g in grps):
+                raise ValueError(f"group {grp_name!r} already exists")
+            grps.append({
+                "name": grp_name,
+                "description": description,
+                "variants": list(variants),
+            })
+            spec["groups"] = grps
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except ValueError as e:
+            return self._json({"error": str(e)}, 409)
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_investigation_group_update(self, body: dict):
+        """POST /api/investigation-group-update {investigation, name, fields_to_update}
+        Replaces description/variants on a group entry. name is immutable.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        grp_name = (body.get("name") or "").strip()
+        fields = body.get("fields_to_update") or {}
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if not grp_name:
+            return self._json({"error": "name required"}, 400)
+        if not isinstance(fields, dict):
+            return self._json({"error": "fields_to_update must be a mapping"}, 400)
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        # If variants are being replaced, ensure each one references a declared
+        # variant so we can return 400 rather than 500 on bad input.
+        if "variants" in fields:
+            new_vars = fields["variants"]
+            if not isinstance(new_vars, list) or not new_vars:
+                return self._json(
+                    {"error": "variants must be a non-empty list"}, 400,
+                )
+            spec_peek = yaml.safe_load(spec_path.read_text()) or {}
+            declared = {v.get("name") for v in (spec_peek.get("variants") or [])
+                        if isinstance(v, dict)}
+            unknown = [v for v in new_vars if v not in declared]
+            if unknown:
+                return self._json(
+                    {"error": f"unknown variant(s): {unknown}; declared: {sorted(declared)}"},
+                    400,
+                )
+
+        commit_msg = f"feat(investigations/{inv_name}): update group {grp_name}"
+
+        def do_action():
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+            grps = spec.get("groups") or []
+            idx = next((i for i, g in enumerate(grps) if g.get("name") == grp_name), None)
+            if idx is None:
+                raise KeyError(f"group {grp_name!r} not found")
+            for key in ("description", "variants"):
+                if key in fields:
+                    grps[idx][key] = fields[key]
+            spec["groups"] = grps
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except KeyError as e:
+            return self._json({"error": str(e)}, 404)
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _delete_investigation_group(self, body: dict):
+        """DELETE /api/investigation-group {investigation, name}
+        Removes a group from spec.yaml.groups. 404 if not found.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        grp_name = (body.get("name") or "").strip()
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if not grp_name:
+            return self._json({"error": "name required"}, 400)
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+        spec_peek = yaml.safe_load(spec_path.read_text()) or {}
+        if not any(g.get("name") == grp_name
+                   for g in (spec_peek.get("groups") or [])):
+            return self._json({"error": f"group {grp_name!r} not found"}, 404)
+
+        commit_msg = f"feat(investigations/{inv_name}): delete group {grp_name}"
+
+        def do_action():
+            data = yaml.safe_load(spec_path.read_text()) or {}
+            data["groups"] = [
+                g for g in (data.get("groups") or []) if g.get("name") != grp_name
             ]
             spec_path.write_text(yaml.safe_dump(data, sort_keys=False))
 

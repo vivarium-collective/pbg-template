@@ -2909,7 +2909,10 @@
         '</div>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="groups">' +
-        '<div class="ws-groups-stub">Groups — coming in B7.</div>' +
+        '<section class="ws-groups" style="padding:10px">' +
+          '<button class="btn-mini" style="margin-bottom:8px" onclick="_openAddGroupModal()">+ Add group</button>' +
+          '<div id="ws-groups-list"></div>' +
+        '</section>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="interventions">' +
         '<div id="inv-interventions-host">' +
@@ -2985,6 +2988,8 @@
     }
     // Render the Comparisons sub-panel (Visualizations tab).
     _renderComparisonsTable(name, data);
+    // Render the Groups tab (B7).
+    _renderGroupsTab(name, data);
 
     // ── Conclusions-tab wiring (B6) ───────────────────────────────────────────
     _loadConclusionsIntoTextareas(spec.conclusions || '');
@@ -3354,6 +3359,238 @@
   }
   window._deleteComparison = _deleteComparison;
 
+  // ── Groups tab (B7) ──────────────────────────────────────────────────────
+
+  function _renderGroupsTab(invName, data) {
+    var listEl = document.getElementById('ws-groups-list');
+    if (!listEl) return;
+    var spec = (data && data.spec) || window._invSpecCache || {};
+    var groups = Array.isArray(spec.groups) ? spec.groups : [];
+    if (!groups.length) {
+      listEl.innerHTML = '<p class="empty-state">No groups yet. ' +
+        'Add a group to label your experimental conditions.</p>';
+      return;
+    }
+    listEl.innerHTML = groups.map(function(g) {
+      var gname = g && g.name ? String(g.name) : '';
+      var gvariants = Array.isArray(g.variants) ? g.variants.map(String) : [];
+      var vCsv = gvariants.join(', ');
+      var desc = (g && g.description) ? String(g.description) : '';
+      var nameAttr = gname.replace(/'/g, "\\'");
+      return (
+        '<div class="ws-group-row" data-name="' + _esc(gname) + '"' +
+            ' style="padding:6px;border-bottom:1px solid #eee">' +
+          '<strong>' + _esc(gname) + '</strong> ' +
+          '<small class="muted">' + gvariants.length + ' variant(s): ' +
+            _esc(vCsv || '—') + '</small>' +
+          '<div>' + _esc(desc) + '</div>' +
+          '<button class="btn-mini" onclick="_openEditGroupModal(\'' + _esc(nameAttr) + '\')">Edit</button> ' +
+          '<button class="btn-mini" style="color:#c00"' +
+            ' onclick="_deleteGroup(\'' + _esc(nameAttr) + '\')">Remove</button>' +
+        '</div>'
+      );
+    }).join('');
+  }
+  window._renderGroupsTab = _renderGroupsTab;
+
+  function _closeGroupModal() {
+    var el = document.getElementById('modal-group-edit');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+  window._closeGroupModal = _closeGroupModal;
+
+  function _openAddGroupModal() {
+    _openGroupModal(null);
+  }
+  window._openAddGroupModal = _openAddGroupModal;
+
+  function _openEditGroupModal(grpName) {
+    var spec = window._invSpecCache || {};
+    var groups = Array.isArray(spec.groups) ? spec.groups : [];
+    var existing = null;
+    for (var i = 0; i < groups.length; i++) {
+      if (groups[i] && groups[i].name === grpName) {
+        existing = groups[i];
+        break;
+      }
+    }
+    _openGroupModal(existing);
+  }
+  window._openEditGroupModal = _openEditGroupModal;
+
+  function _openGroupModal(existing) {
+    _closeGroupModal();
+    var spec = window._invSpecCache || {};
+    var variants = Array.isArray(spec.variants) ? spec.variants : [];
+    var isEdit = !!existing;
+    var initName = isEdit ? String(existing.name || '') : '';
+    var initDesc = isEdit ? String(existing.description || '') : '';
+    var pickedVariants = {};
+    (isEdit ? (existing.variants || []) : []).forEach(function(v) {
+      pickedVariants[String(v)] = true;
+    });
+
+    var variantBoxes = variants.length
+      ? variants.map(function(v, i) {
+          var vname = (v && v.name) ? String(v.name) : '';
+          var checked = pickedVariants[vname] ? ' checked' : '';
+          var id = 'grp-variant-' + i;
+          return (
+            '<label style="display:block;font-weight:normal">' +
+              '<input type="checkbox" class="grp-variant-cb" value="' + _esc(vname) +
+                '" id="' + _esc(id) + '"' + checked + '> ' +
+              _esc(vname) +
+            '</label>'
+          );
+        }).join('')
+      : '<p class="muted" style="margin:4px 0">No variants in the study yet.</p>';
+
+    var modal = document.createElement('div');
+    modal.id = 'modal-group-edit';
+    modal.className = 'modal-overlay';
+    modal.style.display = 'flex';
+    modal.innerHTML =
+      '<div class="modal-box">' +
+        '<button class="modal-close" onclick="_closeGroupModal()">&times;</button>' +
+        '<h3>' + (isEdit ? 'Edit group' : 'Add group') + '</h3>' +
+        '<label>Name' +
+          '<input type="text" id="grp-name" value="' + _esc(initName) + '"' +
+            (isEdit ? ' disabled' : ' required pattern="[a-zA-Z0-9_-]+"') + '>' +
+        '</label>' +
+        '<label>Description' +
+          '<input type="text" id="grp-description" value="' + _esc(initDesc) + '">' +
+        '</label>' +
+        '<label>Variants</label>' +
+        '<div id="grp-variants-list" style="max-height:160px;overflow:auto;padding:4px;border:1px solid #eee;margin-bottom:6px">' +
+          variantBoxes +
+        '</div>' +
+        '<div class="form-error" id="grp-form-error" style="color:#c00;min-height:1em"></div>' +
+        '<div style="margin-top:8px">' +
+          '<button type="button" class="action-btn" id="grp-save-btn"' +
+            (variants.length ? '' : ' disabled') + '>Save</button> ' +
+          '<button type="button" class="btn-mini" onclick="_closeGroupModal()">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+
+    var saveBtn = document.getElementById('grp-save-btn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', function() {
+        _submitGroupModal(isEdit, initName);
+      });
+    }
+  }
+
+  function _submitGroupModal(isEdit, lockedName) {
+    var errEl = document.getElementById('grp-form-error');
+    if (errEl) errEl.textContent = '';
+    var nameEl = document.getElementById('grp-name');
+    var descEl = document.getElementById('grp-description');
+    var grpName = isEdit ? lockedName : (nameEl ? nameEl.value.trim() : '');
+    if (!grpName) {
+      if (errEl) errEl.textContent = 'Name is required.';
+      return;
+    }
+    if (!isEdit && !/^[a-zA-Z0-9_-]+$/.test(grpName)) {
+      if (errEl) errEl.textContent = 'Name must match [a-zA-Z0-9_-]+';
+      return;
+    }
+    var variants = Array.prototype.map.call(
+      document.querySelectorAll('.grp-variant-cb:checked'),
+      function(cb) { return cb.value; }
+    );
+    if (!variants.length) {
+      if (errEl) errEl.textContent = 'Select at least one variant.';
+      return;
+    }
+    var description = descEl ? descEl.value : '';
+    _saveGroup(grpName, {
+      description: description,
+      variants: variants,
+    }, isEdit);
+  }
+
+  function _saveGroup(grpName, fields, isEdit) {
+    var invName = window._currentInvestigation;
+    if (!invName) {
+      var errEl0 = document.getElementById('grp-form-error');
+      if (errEl0) errEl0.textContent = 'No active investigation.';
+      return;
+    }
+    var url, body;
+    if (isEdit) {
+      url = '/api/investigation-group-update';
+      body = {
+        investigation: invName,
+        name: grpName,
+        fields_to_update: {
+          description: fields.description,
+          variants: fields.variants,
+        },
+      };
+    } else {
+      url = '/api/investigation-group-add';
+      body = {
+        investigation: invName,
+        name: grpName,
+        description: fields.description,
+        variants: fields.variants,
+      };
+    }
+    fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    })
+      .then(function(r) {
+        return r.json().then(function(j) { return {ok: r.ok, body: j}; });
+      })
+      .then(function(res) {
+        var errEl = document.getElementById('grp-form-error');
+        if (!res.ok) {
+          if (errEl) errEl.textContent = (res.body && res.body.error) || 'save failed';
+          return;
+        }
+        _closeGroupModal();
+        if (typeof _showToast === 'function') {
+          _showToast((isEdit ? 'Updated' : 'Added') + ' group "' + grpName + '"');
+        }
+        _openInvestigation(invName);  // re-fetch + re-render
+      })
+      .catch(function(err) {
+        var errEl = document.getElementById('grp-form-error');
+        if (errEl) errEl.textContent = 'Network error: ' + err;
+      });
+  }
+  window._saveGroup = _saveGroup;
+
+  function _deleteGroup(grpName) {
+    var invName = window._currentInvestigation;
+    if (!invName) return;
+    if (!confirm('Remove group "' + grpName + '"?')) return;
+    fetch('/api/investigation-group', {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({investigation: invName, name: grpName}),
+    })
+      .then(function(r) {
+        return r.json().then(function(j) { return {ok: r.ok, status: r.status, body: j}; });
+      })
+      .then(function(res) {
+        if (!res.ok) {
+          var msg = (res.body && res.body.error) || ('delete failed (' + res.status + ')');
+          alert(msg);
+          return;
+        }
+        if (typeof _showToast === 'function') {
+          _showToast('Removed group "' + grpName + '"');
+        }
+        _openInvestigation(invName);  // re-fetch + re-render
+      })
+      .catch(function(err) { alert('Network error: ' + err); });
+  }
+  window._deleteGroup = _deleteGroup;
+
   function _invDetailTab(tab) {
     document.querySelectorAll('.investigation-detail-tab').forEach(function(b) {
       b.classList.toggle('active', b.dataset.tab === tab);
@@ -3369,6 +3606,10 @@
     }
     if (tab === 'interventions' && window._currentInvestigation) {
       _loadInterventionsTab(window._currentInvestigation);
+    }
+    if (tab === 'groups' && window._currentInvestigation) {
+      // Re-render from the cached spec so no re-fetch is needed.
+      _renderGroupsTab(window._currentInvestigation, {spec: window._invSpecCache || {}});
     }
   }
   window._invDetailTab = _invDetailTab;

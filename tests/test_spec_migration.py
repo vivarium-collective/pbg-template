@@ -66,10 +66,29 @@ def test_migrate_initializes_blank_fields(tmp_path):
     migrate_study_to_v2_vocabulary(p)
     data = yaml.safe_load(p.read_text())
     assert data['comparisons'] == []
+    assert data['groups'] == []
     assert data['conclusions'] == ''
     assert data['question'] == ''
     assert data['hypothesis'] == ''
     assert data['status'] == 'draft'
+
+
+def test_migrate_initializes_groups_blank_on_v2_spec(tmp_path):
+    """A v2-shape spec missing only `groups:` gets it backfilled."""
+    p = _write(tmp_path, """
+        name: s
+        baseline: a
+        question: ""
+        hypothesis: ""
+        status: draft
+        variants:
+          - {name: a, source: pkg.a}
+        comparisons: []
+        conclusions: ""
+    """)
+    migrate_study_to_v2_vocabulary(p)
+    data = yaml.safe_load(p.read_text())
+    assert data['groups'] == []
 
 
 def test_migrate_idempotent(tmp_path):
@@ -82,6 +101,7 @@ def test_migrate_idempotent(tmp_path):
         variants:
           - {name: a, source: pkg.a}
         comparisons: []
+        groups: []
         conclusions: ""
     """)
     before = p.read_text()

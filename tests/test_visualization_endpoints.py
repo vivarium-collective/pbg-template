@@ -955,6 +955,134 @@ def test_delete_comparison_succeeds_when_unreferenced(workspace_server):
 
 
 # ---------------------------------------------------------------------------
+# Investigation group add/update/delete endpoints (Task B7)
+# ---------------------------------------------------------------------------
+
+def test_post_group_add_appends(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'variants': [
+            {'name': 'baseline', 'source': 'pkg.x'},
+            {'name': 'high-rate', 'extends': 'baseline'},
+        ],
+        'groups': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-group-add',
+        {'investigation': 'demo',
+         'name': 'control',
+         'description': 'Baseline condition.',
+         'variants': ['baseline']},
+    )
+    assert code in (200, 500), j
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['groups'][-1]['name'] == 'control'
+    assert spec['groups'][-1]['description'] == 'Baseline condition.'
+    assert spec['groups'][-1]['variants'] == ['baseline']
+
+
+def test_post_group_add_rejects_unknown_variant(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'variants': [{'name': 'baseline', 'source': 'pkg.x'}],
+        'groups': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-group-add',
+        {'investigation': 'demo',
+         'name': 'g1',
+         'description': '',
+         'variants': ['ghost']},
+    )
+    assert code == 400, j
+    assert 'ghost' in str(j).lower() or 'unknown' in str(j).lower(), j
+    # Spec unchanged
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['groups'] == []
+
+
+def test_post_group_update_replaces(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'variants': [
+            {'name': 'baseline', 'source': 'pkg.x'},
+            {'name': 'high-rate', 'extends': 'baseline'},
+        ],
+        'groups': [{
+            'name': 'control',
+            'description': 'original',
+            'variants': ['baseline'],
+        }],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-group-update',
+        {'investigation': 'demo',
+         'name': 'control',
+         'fields_to_update': {
+             'description': 'updated',
+             'variants': ['baseline', 'high-rate'],
+         }},
+    )
+    assert code in (200, 500), j
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['groups'][0]['description'] == 'updated'
+    assert spec['groups'][0]['variants'] == ['baseline', 'high-rate']
+    # Name is immutable
+    assert spec['groups'][0]['name'] == 'control'
+
+
+def test_delete_group_succeeds_and_404_on_missing(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'variants': [{'name': 'baseline', 'source': 'pkg.x'}],
+        'groups': [{
+            'name': 'control',
+            'description': 'x',
+            'variants': ['baseline'],
+        }],
+    }, sort_keys=False))
+
+    # Existing group → succeeds
+    req = urllib.request.Request(
+        workspace_server.url + '/api/investigation-group',
+        data=json.dumps({'investigation': 'demo', 'name': 'control'}).encode(),
+        method='DELETE', headers={'Content-Type': 'application/json'},
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            assert resp.status == 200
+    except urllib.error.HTTPError as e:
+        # 500 acceptable for bare-workspace git failures, but file changes happen eagerly
+        assert e.code == 500, f"expected 200 or 500, got {e.code}"
+
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['groups'] == []
+
+    # Re-delete → 404
+    req2 = urllib.request.Request(
+        workspace_server.url + '/api/investigation-group',
+        data=json.dumps({'investigation': 'demo', 'name': 'control'}).encode(),
+        method='DELETE', headers={'Content-Type': 'application/json'},
+    )
+    try:
+        urllib.request.urlopen(req2)
+        raise AssertionError('expected 404')
+    except urllib.error.HTTPError as e:
+        assert e.code == 404, f"expected 404, got {e.code}"
+
+
+# ---------------------------------------------------------------------------
 # Investigation create-from-composite endpoint (Task A5)
 # ---------------------------------------------------------------------------
 

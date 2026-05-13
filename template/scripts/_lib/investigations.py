@@ -151,6 +151,39 @@ def _validate_variants_list(spec: dict) -> None:
                 f"baseline {baseline!r} not in variants {declared_names}"
             )
 
+    # Validate groups[] if present. Groups are named experimental conditions
+    # that bundle 1+ variants; the values in each group's ``variants`` list
+    # must reference declared variant names.
+    groups = spec.get("groups")
+    if groups is not None:
+        if not isinstance(groups, list):
+            raise InvestigationSpecError("'groups' must be a list")
+        seen_group_names: list[str] = []
+        for gi, group in enumerate(groups):
+            if not isinstance(group, dict):
+                raise InvestigationSpecError(f"groups[{gi}] must be a mapping")
+            gname = group.get("name")
+            if not gname or not isinstance(gname, str):
+                raise InvestigationSpecError(
+                    f"groups[{gi}].name is required (non-empty string)"
+                )
+            if gname in seen_group_names:
+                raise InvestigationSpecError(
+                    f"duplicate group name: {gname!r} (groups[{gi}])"
+                )
+            seen_group_names.append(gname)
+            gvariants = group.get("variants")
+            if not isinstance(gvariants, list) or not gvariants:
+                raise InvestigationSpecError(
+                    f"groups[{gi}] ({gname!r}).variants must be a non-empty list"
+                )
+            for vref in gvariants:
+                if vref not in declared_names:
+                    raise InvestigationSpecError(
+                        f"groups[{gi}] ({gname!r}) references unknown variant "
+                        f"{vref!r}; declared variants: {declared_names}"
+                    )
+
     # Validate runs[] if present (post-migration the legacy ``runs:`` block
     # is preserved alongside variants; its ``composite`` field references a
     # declared variant name).

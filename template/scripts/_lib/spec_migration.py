@@ -15,6 +15,7 @@ def migrate_study_to_v2_vocabulary(spec_path: pathlib.Path) -> bool:
         # Ensure new top-level fields present for idempotency.
         defaults = {
             'comparisons': [],
+            'groups': [],
             'conclusions': '',
             'question': '',
             'hypothesis': '',
@@ -50,6 +51,7 @@ def migrate_study_to_v2_vocabulary(spec_path: pathlib.Path) -> bool:
     data['baseline'] = baseline_name or (variants[0]['name'] if variants else '')
     data['variants'] = variants
     data.setdefault('comparisons', [])
+    data.setdefault('groups', [])
     data.setdefault('conclusions', '')
     data.setdefault('question', '')
     data.setdefault('hypothesis', '')

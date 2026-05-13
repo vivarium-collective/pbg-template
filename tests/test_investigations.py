@@ -671,3 +671,60 @@ def test_load_spec_validates_baseline_references_a_variant(tmp_path):
     )
     with pytest.raises(InvestigationSpecError, match="baseline 'missing'"):
         load_spec(p)
+
+
+# ---------------------------------------------------------------------------
+# v2 groups: list validation (Task B7)
+# ---------------------------------------------------------------------------
+
+def test_load_spec_accepts_groups_list(tmp_path):
+    """A top-level `groups:` list with valid variant refs should load cleanly."""
+    p = tmp_path / 'spec.yaml'
+    p.write_text(
+        "name: s\n"
+        "baseline: a\n"
+        "variants:\n"
+        "  - {name: a, source: pkg.a}\n"
+        "  - {name: b, extends: a}\n"
+        "groups:\n"
+        "  - name: control\n"
+        "    description: Unmodified baseline.\n"
+        "    variants: [a]\n"
+        "  - name: treated\n"
+        "    description: Drug applied.\n"
+        "    variants: [b]\n"
+    )
+    spec = load_spec(p)
+    assert len(spec['groups']) == 2
+    assert spec['groups'][0]['name'] == 'control'
+    assert spec['groups'][0]['variants'] == ['a']
+    assert spec['groups'][1]['variants'] == ['b']
+
+
+def test_load_spec_rejects_group_with_unknown_variant(tmp_path):
+    p = tmp_path / 'spec.yaml'
+    p.write_text(
+        "name: s\n"
+        "baseline: a\n"
+        "variants:\n"
+        "  - {name: a, source: pkg.a}\n"
+        "groups:\n"
+        "  - {name: control, variants: [ghost]}\n"
+    )
+    with pytest.raises(InvestigationSpecError, match="ghost"):
+        load_spec(p)
+
+
+def test_load_spec_rejects_duplicate_group_names(tmp_path):
+    p = tmp_path / 'spec.yaml'
+    p.write_text(
+        "name: s\n"
+        "baseline: a\n"
+        "variants:\n"
+        "  - {name: a, source: pkg.a}\n"
+        "groups:\n"
+        "  - {name: control, variants: [a]}\n"
+        "  - {name: control, variants: [a]}\n"
+    )
+    with pytest.raises(InvestigationSpecError, match="duplicate group name"):
+        load_spec(p)
