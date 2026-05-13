@@ -2940,7 +2940,27 @@
           '<button class="action-btn" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>') +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="conclusions">' +
-        '<div class="ws-conclusions-stub">Conclusions — coming in B6.</div>' +
+        '<div class="ws-conclusions" style="padding:10px">' +
+          '<label style="display:block;margin-bottom:8px">' +
+            '<strong>Claims</strong>' +
+            '<textarea id="cn-claims" rows="6" style="width:100%;font-family:monospace"></textarea>' +
+          '</label>' +
+          '<label style="display:block;margin-bottom:8px">' +
+            '<strong>Evidence</strong>' +
+            '<textarea id="cn-evidence" rows="6" style="width:100%;font-family:monospace"></textarea>' +
+          '</label>' +
+          '<label style="display:block;margin-bottom:8px">' +
+            '<strong>Limitations</strong>' +
+            '<textarea id="cn-limitations" rows="6" style="width:100%;font-family:monospace"></textarea>' +
+          '</label>' +
+          '<label style="display:block;margin-bottom:8px">' +
+            '<strong>Next steps</strong>' +
+            '<textarea id="cn-next-steps" rows="6" style="width:100%;font-family:monospace"></textarea>' +
+          '</label>' +
+          '<button class="btn-primary" onclick="_saveConclusions()">Save</button>' +
+          '<h4 style="margin-top:16px">Raw markdown (combined)</h4>' +
+          '<pre id="conclusions-preview" style="background:#f5f5f5;padding:10px;white-space:pre-wrap;font-family:monospace"></pre>' +
+        '</div>' +
       '</div>';
 
     // ── Overview-tab auto-save wiring (B2) ────────────────────────────────────
@@ -2965,6 +2985,13 @@
     }
     // Render the Comparisons sub-panel (Visualizations tab).
     _renderComparisonsTable(name, data);
+
+    // ── Conclusions-tab wiring (B6) ───────────────────────────────────────────
+    _loadConclusionsIntoTextareas(spec.conclusions || '');
+    for (var k = 0; k < _CONCL_IDS.length; k++) {
+      var ta = document.getElementById(_CONCL_IDS[k]);
+      if (ta) ta.addEventListener('input', _updateConclusionsPreview);
+    }
   }
 
   function _saveOverviewField(invName, key, value) {
@@ -2984,6 +3011,61 @@
       .catch(function(e) { alert('Network error: ' + e); });
   }
   window._saveOverviewField = _saveOverviewField;
+
+  // ── Conclusions tab (B6): 4-section textareas + Save ─────────────────────
+
+  var _CONCL_SECTIONS = ['Claims', 'Evidence', 'Limitations', 'Next steps'];
+  var _CONCL_IDS      = ['cn-claims', 'cn-evidence', 'cn-limitations', 'cn-next-steps'];
+
+  function _loadConclusionsIntoTextareas(blob) {
+    var map = { Claims: '', Evidence: '', Limitations: '', 'Next steps': '' };
+    var current = 'Claims';   // free-form fallback
+    var lines = (blob || '').split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var m = line.match(/^##\s+(Claims|Evidence|Limitations|Next steps)\s*$/i);
+      if (m) {
+        var canon = _CONCL_SECTIONS.find(function(s) { return s.toLowerCase() === m[1].toLowerCase(); });
+        current = canon || 'Claims';
+        continue;
+      }
+      map[current] += line + '\n';
+    }
+    for (var j = 0; j < _CONCL_SECTIONS.length; j++) {
+      var el = document.getElementById(_CONCL_IDS[j]);
+      if (el) el.value = (map[_CONCL_SECTIONS[j]] || '').replace(/\s+$/, '');
+    }
+    _updateConclusionsPreview();
+  }
+
+  function _emitConclusionsBlob() {
+    return _CONCL_SECTIONS.map(function(s, i) {
+      var body = (document.getElementById(_CONCL_IDS[i]) || {}).value || '';
+      return '## ' + s + '\n\n' + body.trim();
+    }).join('\n\n');
+  }
+
+  function _updateConclusionsPreview() {
+    var pre = document.getElementById('conclusions-preview');
+    if (pre) pre.textContent = _emitConclusionsBlob();
+  }
+
+  function _saveConclusions() {
+    var invName = window._currentInvestigation;
+    if (!invName) return;
+    var blob = _emitConclusionsBlob();
+    fetch('/api/investigation-set-conclusions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({investigation: invName, markdown: blob}),
+    })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(j) { alert(j.error || 'save failed'); });
+        if (typeof _showToast === 'function') _showToast('Saved conclusions');
+      })
+      .catch(function(e) { alert('Network error: ' + e); });
+  }
+  window._saveConclusions = _saveConclusions;
 
   // ── Comparisons sub-panel (Visualizations tab, Task B5) ──────────────────
 
