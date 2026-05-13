@@ -44,8 +44,13 @@ def _env(template_dir: Path) -> Environment:
 def _copy_assets(target_dir: Path) -> None:
     src = _ws_root() / "scripts" / "_templates" / "_assets"
     target_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("style.css", "render-helpers.js"):
-        shutil.copy2(src / name, target_dir / name)
+    # Copy every file at the top level of _assets/ (css, js, images, etc.).
+    # Skip dotfiles and any nested directories — assets are flat by convention.
+    if src.is_dir():
+        for path in src.iterdir():
+            if not path.is_file() or path.name.startswith("."):
+                continue
+            shutil.copy2(path, target_dir / path.name)
     walkthrough = _ws_root() / "scripts" / "_server" / "walkthrough.js"
     if walkthrough.exists():
         shutil.copy2(walkthrough, target_dir / "walkthrough.js")
