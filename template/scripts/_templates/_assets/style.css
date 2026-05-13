@@ -406,6 +406,27 @@ body.focus-mode::before{
   font-size:0.72em; margin-right:3px;
 }
 
+/* Module-source line + kind badge for composite cards/rows (Sim Setup) */
+.composite-list-row .composite-module,
+.module-card .composite-module{
+  font-size:0.84em; color:#4b5563;
+  margin-top:4px;
+}
+.composite-module code{
+  background:#f3f4f6; padding:1px 6px; border-radius:4px; font-size:0.95em;
+}
+.kind-badge{
+  background:#dbeafe; color:#1e40af;
+  padding:1px 6px; border-radius:4px;
+  font-size:0.78em; font-weight:600;
+  margin-left:6px;
+}
+.composites-sort-select{
+  padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px;
+  background:#fff; font-size:0.85em; color:#374151;
+  margin-left:6px; cursor:pointer;
+}
+
 /* ── Investigations page (v0.5.0) ───────────────────────────────────── */
 #investigations-grid{
   display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
@@ -538,12 +559,18 @@ body.focus-mode::before{
   border-bottom:1px solid #ececec;
 }
 .viv-rail-logo{
-  width:28px; height:28px; flex:0 0 28px;
+  width:36px; height:36px; flex:0 0 36px;
   border-radius:6px;
-  background:linear-gradient(135deg,#3b82f6,#7c3aed);
-  color:#fff; font-weight:700; font-size:0.78em;
+  display:block;
+  object-fit:contain;
+  background:#fff;
+}
+.viv-rail-logo[role="presentation"]{
+  /* Fallback emoji rendering when no img is provided */
   display:flex; align-items:center; justify-content:center;
-  letter-spacing:0.04em;
+  font-size:1.4em;
+  background:linear-gradient(135deg,#3b82f6,#7c3aed);
+  color:#fff;
 }
 .viv-rail-brand{
   display:flex; flex-direction:column; min-width:0;
