@@ -475,31 +475,12 @@
 
   <!-- Section 2: Installed modules -->
   <section class="panel">
-    <h3>Installed modules</h3>
-    <p class="panel-lead">Modules currently active in this workspace. Each contributes Processes/Steps and Types to <code>build_core()</code>.</p>
-    {% if imports %}
-    <table>
-      <thead><tr><th>Name</th><th>Source</th><th>Path</th><th>Status</th></tr></thead>
-      <tbody>
-      {% for name, imp in imports.items() %}
-      <tr>
-        <td><code>{{ name }}</code></td>
-        <td><code>{{ imp.source }}</code> @ <code>{{ imp.ref }}</code></td>
-        <td><code>{{ imp.path }}</code></td>
-        <td>
-          {% if imp.installed %}
-            <span class="status-pill installed">installed</span>
-          {% else %}
-            <span class="status-pill not_installed">not installed</span>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="empty-state">No modules installed yet. Pick one from Available modules above.</p>
-    {% endif %}
+    <h3>Installed modules <span id="installed-modules-count" class="count-badge muted"></span></h3>
+    <p class="panel-lead">Modules currently active in this workspace. Each contributes Processes/Steps and Types to <code>build_core()</code>. Uninstall removes from this workspace's <code>pyproject.toml</code> + <code>workspace.yaml</code> (Available modules above remains in the catalog).</p>
+    <div id="installed-modules-list">
+      <p class="empty-state">Loading&hellip;</p>
+    </div>
+    <div id="installed-modules-sync-warning" style="display:none"></div>
   </section>
 
   <!-- Section 3: Discovered registry (tabbed browser, lazy-loaded) -->

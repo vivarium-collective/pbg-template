@@ -593,6 +593,35 @@ def _pending_entries() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Catalog sync check
+# ---------------------------------------------------------------------------
+
+def _check_installed_module_sync(pkg_name: str, install_path: str | None) -> str | None:
+    """Return None if the module is consistently installed; else a one-line reason.
+
+    Best-effort, fast: verifies the Python package is importable from the
+    workspace venv. Surfaces drift between workspace.yaml.imports and the
+    actual venv state (e.g., user pip-uninstalled a package without touching
+    workspace.yaml).
+    """
+    venv_py = WORKSPACE / ".venv" / "bin" / "python3"
+    if not venv_py.is_file():
+        return None  # no venv to introspect; treat as consistent
+    try:
+        result = subprocess.run(
+            [str(venv_py), "-c", f"import {pkg_name}"],
+            cwd=WORKSPACE, capture_output=True, text=True, timeout=3,
+        )
+        if result.returncode != 0:
+            return f"Python import of '{pkg_name}' failed (was the venv updated?)"
+    except subprocess.TimeoutExpired:
+        return f"Python import of '{pkg_name}' timed out"
+    except Exception as e:
+        return f"Python import check errored: {e}"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
 
@@ -5068,7 +5097,12 @@ if __name__ == "__main__":
             conn.close()
 
     def _get_catalog(self):
-        """GET /api/catalog — return the curated module catalog with installed annotations."""
+        """GET /api/catalog — return the curated module catalog with installed annotations.
+
+        Each installed module is additionally checked for venv-vs-workspace.yaml
+        drift: if the declared Python package is not importable in the workspace
+        venv, the module is flagged ``out_of_sync: true`` with a short reason.
+        """
         catalog_path = WORKSPACE / "scripts" / "_catalog" / "modules.json"
         if not catalog_path.exists():
             return self._json({"modules": [], "error": "catalog not found"}, 200)
@@ -5076,9 +5110,25 @@ if __name__ == "__main__":
             modules = json.loads(catalog_path.read_text())
             # Annotate with installed status from workspace.yaml imports.
             ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text())
-            installed = ws_data.get("imports", {}) or {}
+            imports = ws_data.get("imports", {}) or {}
             for m in modules:
-                m["installed"] = m["name"] in installed
+                m["installed"] = m["name"] in imports
+                if m["installed"]:
+                    # Merge live workspace.yaml entry fields (source/ref/path/install_path/package)
+                    # into the catalog item so the UI has authoritative install metadata.
+                    imp = imports.get(m["name"], {}) or {}
+                    for k in ("source", "ref", "path", "install_path", "package"):
+                        v = imp.get(k)
+                        if v is not None:
+                            m[k] = v
+                    # Sync check: is the Python package actually importable?
+                    pkg_name = m.get("package") or m["name"].replace("-", "_")
+                    sync_reason = _check_installed_module_sync(
+                        pkg_name, m.get("install_path")
+                    )
+                    if sync_reason:
+                        m["out_of_sync"] = True
+                        m["out_of_sync_reason"] = sync_reason
             return self._json({"modules": modules}, 200)
         except Exception as e:
             return self._json({"modules": [], "error": str(e)}, 500)

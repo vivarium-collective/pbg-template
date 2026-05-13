@@ -1754,3 +1754,101 @@ def test_investigation_run_one_returns_viz_html_for_inlined_viz(workspace_server
     assert first_key in listed, (
         f"GET /api/investigation-viz-html missing {first_key!r}; listed={listed}"
     )
+
+
+# ---------------------------------------------------------------------------
+# /api/catalog — Installed-modules sync (out-of-sync drift detection)
+# ---------------------------------------------------------------------------
+
+def test_get_catalog_marks_out_of_sync_when_import_fails(workspace_server, monkeypatch):
+    """If workspace.yaml.imports lists a module whose Python package is NOT
+    importable in the workspace venv, /api/catalog should flag it
+    out_of_sync=true with a non-empty reason."""
+    # Seed a tiny catalog with one entry ``foo``.
+    catalog_dir = workspace_server.root / "scripts" / "_catalog"
+    catalog_dir.mkdir(parents=True, exist_ok=True)
+    (catalog_dir / "modules.json").write_text(json.dumps([
+        {
+            "name": "foo",
+            "description": "Fake module for sync test",
+            "source": "https://example.invalid/foo.git",
+            "ref": "main",
+            "package": "foo_pkg_that_does_not_exist_xyz",
+            "tags": [],
+        }
+    ]))
+
+    # Mark `foo` as installed in workspace.yaml.imports.
+    ws_path = workspace_server.root / "workspace.yaml"
+    ws = yaml.safe_load(ws_path.read_text()) or {}
+    ws.setdefault("imports", {})["foo"] = {
+        "source": "https://example.invalid/foo.git",
+        "ref": "main",
+        "mode": "reference",
+        "path": "external/foo",
+        "description": "Fake module for sync test",
+        "installed": True,
+        "install_path": str(workspace_server.root / "external" / "foo"),
+        "package": "foo_pkg_that_does_not_exist_xyz",
+    }
+    ws_path.write_text(yaml.safe_dump(ws, sort_keys=False))
+
+    # Force the sync helper to think a venv exists and report an import failure.
+    # We patch _check_installed_module_sync directly so the test is hermetic
+    # regardless of whether a real .venv is present in tmp_path.
+    import scripts._server.server as srv
+    monkeypatch.setattr(
+        srv,
+        "_check_installed_module_sync",
+        lambda pkg_name, install_path: f"Python import of '{pkg_name}' failed (was the venv updated?)",
+    )
+
+    code, body = _get(workspace_server.url + "/api/catalog")
+    assert code == 200, body
+    rows = {m["name"]: m for m in body.get("modules", [])}
+    assert "foo" in rows, body
+    foo = rows["foo"]
+    assert foo["installed"] is True, foo
+    assert foo.get("out_of_sync") is True, foo
+    assert foo.get("out_of_sync_reason"), foo
+
+
+def test_get_catalog_no_drift_when_sync_helper_returns_none(workspace_server, monkeypatch):
+    """When the sync helper reports no drift, /api/catalog must NOT set
+    out_of_sync flags on installed modules."""
+    catalog_dir = workspace_server.root / "scripts" / "_catalog"
+    catalog_dir.mkdir(parents=True, exist_ok=True)
+    (catalog_dir / "modules.json").write_text(json.dumps([
+        {
+            "name": "bar",
+            "description": "Fake module no-drift",
+            "source": "https://example.invalid/bar.git",
+            "ref": "main",
+            "package": "bar_pkg",
+            "tags": [],
+        }
+    ]))
+
+    ws_path = workspace_server.root / "workspace.yaml"
+    ws = yaml.safe_load(ws_path.read_text()) or {}
+    ws.setdefault("imports", {})["bar"] = {
+        "source": "https://example.invalid/bar.git",
+        "ref": "main",
+        "mode": "reference",
+        "path": "external/bar",
+        "installed": True,
+        "install_path": str(workspace_server.root / "external" / "bar"),
+        "package": "bar_pkg",
+    }
+    ws_path.write_text(yaml.safe_dump(ws, sort_keys=False))
+
+    import scripts._server.server as srv
+    monkeypatch.setattr(srv, "_check_installed_module_sync", lambda p, i: None)
+
+    code, body = _get(workspace_server.url + "/api/catalog")
+    assert code == 200, body
+    rows = {m["name"]: m for m in body.get("modules", [])}
+    assert "bar" in rows, body
+    bar = rows["bar"]
+    assert bar["installed"] is True, bar
+    assert bar.get("out_of_sync") is not True, bar

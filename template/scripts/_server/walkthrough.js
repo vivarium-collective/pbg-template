@@ -1076,6 +1076,87 @@
   }
   window._renderCatalog = _renderCatalog;
 
+  // -------------------------------------------------------------------------
+  // Installed modules: dynamic render from /api/catalog (single source of truth)
+  // -------------------------------------------------------------------------
+
+  function _renderInstalledModules(modules) {
+    var container = document.getElementById('installed-modules-list');
+    if (!container) return;
+    var installed = (modules || []).filter(function(m) { return m.installed === true; });
+    var countEl = document.getElementById('installed-modules-count');
+    if (countEl) countEl.textContent = installed.length ? String(installed.length) : '';
+
+    if (!installed.length) {
+      container.innerHTML = '<p class="empty-state">No modules installed yet. Pick one from Available modules above.</p>';
+      return;
+    }
+
+    var rows = installed.map(function(m) {
+      var name = _esc(m.name);
+      var source = _esc(m.source || '');
+      var ref = _esc(m.ref || 'main');
+      var path = _esc(m.install_path || m.path || '—');
+      var pkg = _esc(m.package || m.name);
+      return '<tr>' +
+        '<td><code>' + name + '</code><br><small style="color:#6b7280">' + pkg + '</small></td>' +
+        '<td><code>' + source + '</code> @ <code>' + ref + '</code></td>' +
+        '<td><code>' + path + '</code></td>' +
+        '<td><span class="status-pill installed">installed</span></td>' +
+        '<td><button class="action-btn action-btn--secondary" onclick="_uninstallFromInstalled(\'' + name + '\')">Uninstall</button></td>' +
+        '</tr>';
+    }).join('');
+
+    container.innerHTML =
+      '<table>' +
+      '<thead><tr><th>Name</th><th>Source</th><th>Path</th><th>Status</th><th>Actions</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody>' +
+      '</table>';
+  }
+  window._renderInstalledModules = _renderInstalledModules;
+
+  function _checkInstalledModulesSync(modules) {
+    var warningEl = document.getElementById('installed-modules-sync-warning');
+    if (!warningEl) return;
+    var drifted = (modules || []).filter(function(m) { return m.installed && m.out_of_sync; });
+    if (!drifted.length) { warningEl.style.display = 'none'; return; }
+    warningEl.style.cssText = 'display:block;background:#fef3c7;border:1px solid #fcd34d;border-radius:4px;padding:10px;margin-top:12px;font-size:0.9em;color:#92400e';
+    warningEl.innerHTML =
+      '<strong>⚠ Modules out of sync:</strong> ' +
+      drifted.map(function(m) {
+        return '<code>' + _esc(m.name) + '</code> — ' + _esc(m.out_of_sync_reason || 'state mismatch');
+      }).join('; ') +
+      '. The Installed list above reflects <code>workspace.yaml</code>, but the workspace venv disagrees. ' +
+      'Try uninstalling + reinstalling, or restart the workspace.';
+  }
+  window._checkInstalledModulesSync = _checkInstalledModulesSync;
+
+  function _uninstallFromInstalled(name) {
+    if (!confirm('Uninstall ' + name + '? This removes it from this workspace\'s dependencies.')) return;
+    fetch('/api/catalog-uninstall', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name: name}),
+    })
+      .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, json: j}; }); })
+      .then(function(p) {
+        if (!p.ok) {
+          alert('Uninstall failed: ' + (p.json.error || 'unknown'));
+          return;
+        }
+        var msg = p.json.already_uninstalled ? 'Already uninstalled.' : 'Uninstalled ' + name + '.';
+        if (typeof _showToast === 'function') _showToast(msg);
+        else alert(msg);
+        // Refresh catalog (which now also refreshes the Installed list via _renderInstalledModules)
+        if (typeof _loadCatalog === 'function') _loadCatalog();
+        if (typeof _loadRegistry === 'function') _loadRegistry(true);
+      })
+      .catch(function(err) {
+        alert('Network error: ' + err);
+      });
+  }
+  window._uninstallFromInstalled = _uninstallFromInstalled;
+
   function _loadCatalog() {
     fetch('/api/catalog')
       .then(function(r) { return r.json(); })
@@ -1084,6 +1165,9 @@
         if (!grid) return;
         if (!data.modules || data.modules.length === 0) {
           grid.innerHTML = '<p class="empty-state">Catalog empty.</p>';
+          // Still refresh Installed list (will show empty-state).
+          _renderInstalledModules([]);
+          _checkInstalledModulesSync([]);
           return;
         }
         window._catalogModules = data.modules;
@@ -1108,6 +1192,8 @@
         });
         _buildCatalogChips();
         _renderCatalog();
+        _renderInstalledModules(data.modules);
+        _checkInstalledModulesSync(data.modules);
       })
       .catch(function(err) {
         var grid = document.getElementById('catalog-modules-grid');
