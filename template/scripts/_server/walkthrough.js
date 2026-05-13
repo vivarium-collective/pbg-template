@@ -2805,6 +2805,7 @@
     var ovStatus     = spec.status || 'draft';
     var variants     = Array.isArray(spec.variants) ? spec.variants : [];
     var baseline     = spec.baseline || '';
+    window._invBaselineCache = baseline;
     var baselineEntry = null;
     for (var bi = 0; bi < variants.length; bi++) {
       if (variants[bi] && variants[bi].name === baseline) { baselineEntry = variants[bi]; break; }
@@ -2898,6 +2899,7 @@
                     ' title="Composite wiring"' +
                     ' style="width:100%;height:520px;border:1px solid #ddd;background:#fff;display:none">' +
             '</iframe>' +
+            '<div id="inv-composite-intervention" style="margin-top:12px;padding:10px;border:1px solid #eee;border-radius:4px;display:none"></div>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -2988,10 +2990,13 @@
         var sidebar = document.getElementById('inv-composites-sidebar');
         if (!sidebar) return;
         var entries = data.composites || [];
+        window._invCompositesCache = entries;
         if (entries.length === 0) {
           sidebar.innerHTML = '<p class="empty-state">No composites yet — click + Add composite.</p>';
           var frame = document.getElementById('inv-composite-explore-frame');
           if (frame) frame.style.display = 'none';
+          var panel0 = document.getElementById('inv-composite-intervention');
+          if (panel0) panel0.style.display = 'none';
           return;
         }
         sidebar.innerHTML = entries.map(function(c) {
@@ -3019,6 +3024,7 @@
   window._loadInvComposites = _loadInvComposites;
 
   function _loadInvCompositeDetail(invName, compName) {
+    _renderInvCompositeIntervention(compName);
     fetch('/api/investigation-composite-doc?investigation=' + encodeURIComponent(invName) +
           '&composite=' + encodeURIComponent(compName))
       .then(function(r) { return r.json(); })
@@ -3055,6 +3061,51 @@
       .catch(function(err) { console.error('inv composite load failed:', err); });
   }
   window._loadInvCompositeDetail = _loadInvCompositeDetail;
+
+  function _renderInvCompositeIntervention(compName) {
+    var panel = document.getElementById('inv-composite-intervention');
+    if (!panel) return;
+    var entries = window._invCompositesCache || [];
+    var entry = null;
+    for (var ei = 0; ei < entries.length; ei++) {
+      if (entries[ei] && entries[ei].name === compName) { entry = entries[ei]; break; }
+    }
+    var baseline = window._invBaselineCache || '';
+    panel.style.display = '';
+    if (compName === baseline) {
+      panel.innerHTML = '<strong>Intervention:</strong> <em>(none — this is the baseline)</em>';
+      return;
+    }
+    var iv = entry && entry.intervention;
+    if (!iv) {
+      panel.innerHTML = '<strong>Intervention:</strong> <em>(no intervention recipe stored)</em>';
+      return;
+    }
+    var rows = [];
+    rows.push('<strong>Intervention:</strong> ' +
+      (iv.description ? '"' + _esc(iv.description) + '"' : '<em>(no description)</em>'));
+    var params = iv.parameter_overrides || {};
+    var paramKeys = Object.keys(params);
+    if (paramKeys.length) {
+      rows.push('<div style="margin-left:12px"><em>parameter_overrides:</em><br>' +
+        paramKeys.map(function(k) {
+          return '&nbsp;&nbsp;<code>' + _esc(k) + '</code>: ' + _esc(JSON.stringify(params[k]));
+        }).join('<br>') + '</div>');
+    }
+    var procs = iv.process_overrides || {};
+    var procKeys = Object.keys(procs);
+    if (procKeys.length) {
+      rows.push('<div style="margin-left:12px"><em>process_overrides:</em><br>' +
+        procKeys.map(function(k) {
+          var v = procs[k] === null ? '<em>(remove)</em>' : _esc(JSON.stringify(procs[k]));
+          return '&nbsp;&nbsp;<code>' + _esc(k) + '</code>: ' + v;
+        }).join('<br>') + '</div>');
+    }
+    rows.push('<div style="margin-top:8px"><button class="btn-mini" onclick="window._interventionsJumpTo=\'' +
+      _esc(compName) + '\'; _invDetailTab(\'interventions\');">Edit in Interventions tab →</button></div>');
+    panel.innerHTML = rows.join('<br>');
+  }
+  window._renderInvCompositeIntervention = _renderInvCompositeIntervention;
 
   // ── Investigation Observables tab handlers ────────────────────────────────
 
