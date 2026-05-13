@@ -2811,29 +2811,15 @@
         '</div>' +
       '</div>' +
       '<div class="investigation-detail-tabs">' +
-        '<button class="investigation-detail-tab active" data-tab="spec" onclick="_invDetailTab(\'spec\')">Spec</button>' +
+        '<button class="investigation-detail-tab active" data-tab="overview" onclick="_invDetailTab(\'overview\')">Overview</button>' +
+        '<button class="investigation-detail-tab" data-tab="composites" onclick="_invDetailTab(\'composites\')">Composites</button>' +
+        '<button class="investigation-detail-tab" data-tab="interventions" onclick="_invDetailTab(\'interventions\')">Interventions</button>' +
         '<button class="investigation-detail-tab" data-tab="runs" onclick="_invDetailTab(\'runs\')">Runs (' + runs.length + ')</button>' +
         '<button class="investigation-detail-tab" data-tab="viz" onclick="_invDetailTab(\'viz\')">Visualizations (' + vizFiles.length + ')</button>' +
-        '<button class="investigation-detail-tab" data-tab="composites" onclick="_invDetailTab(\'composites\')">Composites</button>' +
-        '<button class="investigation-detail-tab" data-tab="observables" onclick="_invDetailTab(\'observables\')">Observables</button>' +
+        '<button class="investigation-detail-tab" data-tab="conclusions" onclick="_invDetailTab(\'conclusions\')">Conclusions</button>' +
       '</div>' +
-      '<div class="investigation-detail-panel active" data-tab="spec">' +
-        '<pre class="spec-yaml-pre">' + _esc(JSON.stringify(spec, null, 2)) + '</pre>' +
-      '</div>' +
-      '<div class="investigation-detail-panel" data-tab="runs">' +
-        (runs.length ? _renderInvestigationRunsTable(runs, name) : '<p class="empty-state">No runs yet — click Run to generate them.</p>') +
-      '</div>' +
-      '<div class="investigation-detail-panel" data-tab="viz">' +
-        (vizFiles.length ?
-          '<button class="btn-mini" style="margin-bottom:8px" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>' +
-          vizFiles.map(function(v) {
-            return '<h4 style="margin-bottom:4px">' + _esc(v.name) + '</h4>' +
-                   '<iframe class="viz-frame" src="/' + _esc(v.path) + '?ts=' + Date.now() + '"></iframe>';
-          }).join('') :
-          '<p class="empty-state">No visualizations declared in <code>spec.yaml</code> yet. ' +
-            'Click <em>Add visualization</em> to scaffold one, or edit ' +
-            '<code>investigations/' + _esc(name) + '/spec.yaml</code> directly and click <em>Run</em>.</p>' +
-          '<button class="action-btn" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>') +
+      '<div class="investigation-detail-panel active" data-tab="overview">' +
+        '<div class="ws-overview-stub">Overview — coming in B2.</div>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="composites">' +
         '<div style="margin-bottom:8px">' +
@@ -2850,16 +2836,26 @@
           '</div>' +
         '</div>' +
       '</div>' +
-      '<div class="investigation-detail-panel" data-tab="observables">' +
-        '<p class="panel-lead">Tick which state paths the simulation should record. Paths missing in' +
-          ' a given composite are skipped for that run with a warning.</p>' +
-        '<label style="display:block;margin-bottom:10px">' +
-          '<input type="checkbox" id="inv-emit-all" onchange="_setEmitAll(this.checked)">' +
-          ' Emit entire state (root)' +
-        '</label>' +
-        '<div id="inv-observables-tree" style="font-family:monospace;font-size:0.9em"></div>' +
-        '<button class="action-btn" onclick="_saveObservables()">Save observables</button>' +
-        '<div id="inv-observables-status" style="margin-top:8px;font-size:0.9em;color:#555"></div>' +
+      '<div class="investigation-detail-panel" data-tab="interventions">' +
+        '<div class="ws-interventions-stub">Interventions — coming in B4.</div>' +
+      '</div>' +
+      '<div class="investigation-detail-panel" data-tab="runs">' +
+        (runs.length ? _renderInvestigationRunsTable(runs, name) : '<p class="empty-state">No runs yet — click Run to generate them.</p>') +
+      '</div>' +
+      '<div class="investigation-detail-panel" data-tab="viz">' +
+        (vizFiles.length ?
+          '<button class="btn-mini" style="margin-bottom:8px" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>' +
+          vizFiles.map(function(v) {
+            return '<h4 style="margin-bottom:4px">' + _esc(v.name) + '</h4>' +
+                   '<iframe class="viz-frame" src="/' + _esc(v.path) + '?ts=' + Date.now() + '"></iframe>';
+          }).join('') :
+          '<p class="empty-state">No visualizations declared in <code>spec.yaml</code> yet. ' +
+            'Click <em>Add visualization</em> to scaffold one, or edit ' +
+            '<code>investigations/' + _esc(name) + '/spec.yaml</code> directly and click <em>Run</em>.</p>' +
+          '<button class="action-btn" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>') +
+      '</div>' +
+      '<div class="investigation-detail-panel" data-tab="conclusions">' +
+        '<div class="ws-conclusions-stub">Conclusions — coming in B6.</div>' +
       '</div>';
   }
 
