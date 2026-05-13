@@ -2883,7 +2883,7 @@ if __name__ == "__main__":
                     from process_bigraph.emitter import SQLiteEmitter
                     core = build_core()
                     core.register_link('SQLiteEmitter', SQLiteEmitter)
-                    composite = Composite({{'state': {json.dumps(_state_to_run)}}}, core=core)
+                    composite = Composite({{'state': {json.dumps(_state_to_run, default=_json_default)}}}, core=core)
                     composite.run({steps})
                     print('@@@OK@@@')
                 except Exception as e:
@@ -3669,7 +3669,7 @@ if __name__ == "__main__":
                 from process_bigraph.emitter import SQLiteEmitter
                 core = build_core()
                 core.register_link('SQLiteEmitter', SQLiteEmitter)
-                composite = Composite({{'state': {json.dumps(state)}}}, core=core)
+                composite = Composite({{'state': {json.dumps(state, default=_json_default)}}}, core=core)
                 composite.run({steps})
                 print('@@@OK@@@')
             except Exception:
@@ -4773,7 +4773,7 @@ if __name__ == "__main__":
                 from process_bigraph.emitter import SQLiteEmitter
                 core = build_core()
                 core.register_link('SQLiteEmitter', SQLiteEmitter)
-                composite = Composite({{'state': {json.dumps(state)}}}, core=core)
+                composite = Composite({{'state': {json.dumps(state, default=_json_default)}}}, core=core)
                 composite.run({steps})
                 results = gather_emitter_results(composite)
                 # Flatten tuple keys to JSON-friendly dotted strings
@@ -5322,7 +5322,7 @@ def _render_composite_svg(state: dict, package_name: str) -> str:
                 sys.exit(0)
 
             core = build_core()
-            state = {json.dumps(state)}
+            state = {json.dumps(state, default=_json_default)}
             # bigraph-viz's plot_bigraph expects the state dict directly, NOT
             # composite.composition (which is a string in this version). Pass
             # the resolved state with core so node types resolve properly.
