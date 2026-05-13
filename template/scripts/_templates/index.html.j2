@@ -104,23 +104,78 @@
 </style>
 </head><body>
 
-<header class="top-header">
-  <h1>{{ workspace_name }} dashboard</h1>
-  <p class="subtitle">{% if workspace_description %}{{ workspace_description }}{% else %}Workspace dashboard &middot; regenerated {{ generated_at }}{% endif %}</p>
-</header>
+<div class="viv-layout">
 
-<nav class="top-menu" role="tablist">
-  <a href="#workspace-inputs" class="menu-link" data-page="workspace-inputs">Workspace inputs</a>
-  <a href="#registry" class="menu-link" data-page="registry">Registry</a>
-  <a href="#simulation-setup" class="menu-link" data-page="simulation-setup">Simulation Setup</a>
-  <a href="#visualizations" class="menu-link" data-page="visualizations">Visualizations</a>
-  <a href="#investigations" class="menu-link" data-page="investigations">Investigations</a>
-  <a href="#branches" class="menu-link" data-page="branches">Branches</a>
-</nav>
+  <!-- LEFT RAIL -->
+  <aside id="viv-rail" class="viv-rail">
 
-<div id="workstream-strip" class="workstream-strip"></div>
+    <!-- Brand + workspace switcher -->
+    <div class="viv-rail-header">
+      <div class="viv-rail-logo">🧬</div>
+      <div class="viv-rail-brand">
+        <strong>Vivarium</strong>
+        <small>Workspace</small>
+      </div>
+    </div>
 
-<main class="pages" style="padding:20px;max-width:1200px;margin:0 auto">
+    <div class="viv-workspace-switcher viv-tooltip" data-tooltip="Other workspaces coming soon">
+      <strong>{{ workspace_name }}</strong> <span class="viv-arrow">▾</span>
+    </div>
+
+    <!-- Primary nav -->
+    <nav class="viv-rail-section" role="tablist">
+      <div class="viv-rail-section-label">Workspace</div>
+      <a href="#workspace-inputs"  class="viv-rail-link menu-link" data-page="workspace-inputs"><span class="viv-rail-link-icon">📋</span><span class="viv-rail-link-label">Workspace inputs</span></a>
+      <a href="#registry"          class="viv-rail-link menu-link" data-page="registry"><span class="viv-rail-link-icon">📚</span><span class="viv-rail-link-label">Registry</span></a>
+      <a href="#simulation-setup"  class="viv-rail-link menu-link" data-page="simulation-setup"><span class="viv-rail-link-icon">⚙️</span><span class="viv-rail-link-label">Simulation Setup</span></a>
+      <a href="#investigations"    class="viv-rail-link menu-link" data-page="investigations"><span class="viv-rail-link-icon">🧪</span><span class="viv-rail-link-label">Investigations</span></a>
+      <a href="#visualizations"    class="viv-rail-link menu-link" data-page="visualizations"><span class="viv-rail-link-icon">📊</span><span class="viv-rail-link-label">Visualizations</span></a>
+      <a href="#branches"          class="viv-rail-link menu-link" data-page="branches"><span class="viv-rail-link-icon">🌿</span><span class="viv-rail-link-label">GitHub Branches</span></a>
+    </nav>
+
+    <!-- Investigations grouped list -->
+    <div class="viv-rail-section">
+      <div class="viv-rail-section-label">Investigations</div>
+      <div id="viv-rail-investigations">
+        <p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>
+      </div>
+    </div>
+
+    <!-- Footer: user identity + collapse toggle -->
+    <div class="viv-rail-footer">
+      <div class="viv-avatar viv-avatar-rail">{{ owner_initials or '—' }}</div>
+      <div class="viv-rail-footer-text">
+        <strong>{{ owner_name or 'Workspace owner' }}</strong>
+        <small>{{ owner_email or '' }}</small>
+      </div>
+    </div>
+
+    <button class="viv-rail-toggle" id="viv-rail-toggle" type="button" aria-label="Collapse rail" onclick="_vivToggleRail()">«</button>
+
+  </aside>
+
+  <!-- MAIN: topbar + content -->
+  <div class="viv-main">
+
+    <header class="viv-topbar">
+      <nav class="viv-topbar-breadcrumbs" id="viv-breadcrumbs">
+        <span>{{ workspace_name }} dashboard</span>
+      </nav>
+      <div class="viv-topbar-actions" id="viv-topbar-actions">
+        <!-- Branch chip + dirty pill + work-status buttons populated by JS (V4) -->
+        <span class="viv-branch-chip" id="viv-branch-chip">…</span>
+        {% if github_url %}<a class="viv-icon-btn" href="{{ github_url }}" target="_blank" rel="noopener" title="Open on GitHub">↗</a>{% endif %}
+        <span class="viv-btn viv-tooltip" data-tooltip="Coming soon — share workspace link">Share</span>
+        <span class="viv-kebab viv-tooltip" data-tooltip="Workspace settings — coming soon">⋯</span>
+        <span class="viv-avatar viv-avatar-topbar" title="{{ owner_email or '' }}">{{ owner_initials or '—' }}</span>
+      </div>
+    </header>
+
+    <!-- Workstream strip is now driven by viv-topbar-actions; this hidden node
+         preserves the existing _renderWorkStrip JS contract until V4 lifts it. -->
+    <div id="workstream-strip" class="workstream-strip" style="display:none"></div>
+
+    <main class="viv-content pages" id="viv-content">
 
 <!-- ===== PAGE: WORKSPACE INPUTS ===== -->
 <section id="page-workspace-inputs" class="page" data-page="workspace-inputs">
@@ -689,6 +744,9 @@
 </section>
 
 </main>
+
+  </div> <!-- /.viv-main -->
+</div> <!-- /.viv-layout -->
 
 <!-- ============================================================ -->
 <!-- MODALS -->
