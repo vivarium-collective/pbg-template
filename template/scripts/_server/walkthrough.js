@@ -3643,6 +3643,14 @@
           var subtitle = c.extends
             ? '<small>extends <code>' + _esc(c.extends) + '</code></small>'
             : '<small>' + _esc(c.source || '') + '</small>';
+          var isBaseline = (c.name === (window._invBaselineCache || ''));
+          var alreadyPromoted = c.promoted === true;
+          var promoteBtn = (!isBaseline && !alreadyPromoted)
+            ? '<button class="btn-mini" onclick="event.stopPropagation();_openPromoteModal(\'' +
+                _esc(invName) + '\',\'' + _esc(c.name) + '\')">Promote</button>'
+            : (alreadyPromoted
+                ? '<span class="badge" style="color:#080;margin-left:4px">&#10003; Promoted</span>'
+                : '');
           return '<div class="inv-composite-row" style="padding:6px;border-bottom:1px solid #eee;cursor:pointer"' +
                  ' onclick="_loadInvCompositeDetail(\'' + _esc(invName) + '\',\'' + _esc(c.name) + '\')">' +
                  '<strong>' + _esc(c.name) + '</strong><br>' + subtitle +
@@ -3653,6 +3661,7 @@
                    ? '<button class="btn-mini" onclick="event.stopPropagation();_rebuildComposite(\'' +
                      _esc(invName) + '\',\'' + _esc(c.name) + '\')">Rebuild</button>'
                    : '') +
+                 promoteBtn +
                  '<button class="btn-mini" style="color:#c00" onclick="event.stopPropagation();_removeComposite(\'' +
                    _esc(invName) + '\',\'' + _esc(c.name) + '\')">Remove</button>' +
                  '</div></div>';
@@ -4236,6 +4245,104 @@
       });
   }
   window._removeComposite = _removeComposite;
+
+  // ── Promote-to-catalog modal (C1) ─────────────────────────────────────────
+
+  function _closePromoteModal() {
+    var el = document.getElementById('modal-promote-edit');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+  window._closePromoteModal = _closePromoteModal;
+
+  function _openPromoteModal(invName, variantName) {
+    _closePromoteModal();
+    window._promoteModalCtx = {investigation: invName, variant: variantName};
+    var defaultTarget = String(variantName || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'composite';
+    var modal = document.createElement('div');
+    modal.id = 'modal-promote-edit';
+    modal.className = 'modal-overlay';
+    modal.style.display = 'flex';
+    modal.innerHTML =
+      '<div class="modal-box">' +
+        '<button class="modal-close" onclick="_closePromoteModal()">&times;</button>' +
+        '<h3>Promote variant to workspace catalog</h3>' +
+        '<p class="muted" style="margin:4px 0">Promoting <code>' + _esc(variantName) +
+          '</code> from investigation <code>' + _esc(invName) +
+          '</code> into the workspace composite catalog.</p>' +
+        '<label>Target name' +
+          '<input type="text" id="promote-target-name" value="' + _esc(defaultTarget) +
+            '" pattern="[a-z0-9_-]+" required>' +
+        '</label>' +
+        '<label>Description' +
+          '<input type="text" id="promote-description" placeholder="Short description (optional)">' +
+        '</label>' +
+        '<div class="form-error" id="promote-error" style="color:#c00;min-height:1em"></div>' +
+        '<div style="margin-top:8px">' +
+          '<button type="button" class="action-btn" id="promote-save-btn">Promote</button> ' +
+          '<button type="button" class="btn-mini" onclick="_closePromoteModal()">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+    var saveBtn = document.getElementById('promote-save-btn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', function() { _submitPromoteModal(); });
+    }
+  }
+  window._openPromoteModal = _openPromoteModal;
+
+  function _submitPromoteModal() {
+    var ctx = window._promoteModalCtx || {};
+    var invName = ctx.investigation;
+    var variant = ctx.variant;
+    var targetEl = document.getElementById('promote-target-name');
+    var descEl = document.getElementById('promote-description');
+    var errEl = document.getElementById('promote-error');
+    if (errEl) errEl.textContent = '';
+    var target = targetEl ? targetEl.value.trim() : '';
+    var desc = descEl ? descEl.value.trim() : '';
+    if (!target) {
+      if (errEl) errEl.textContent = 'Target name required';
+      return;
+    }
+    if (!/^[a-z0-9_-]+$/.test(target)) {
+      if (errEl) errEl.textContent = 'Target name must match [a-z0-9_-]+';
+      return;
+    }
+    fetch('/api/composite-promote-to-catalog', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        investigation: invName,
+        variant: variant,
+        target_name: target,
+        description: desc,
+      }),
+    })
+      .then(function(r) {
+        return r.json().then(function(j) { return {status: r.status, body: j}; });
+      })
+      .then(function(res) {
+        if (res.status === 200) {
+          _closePromoteModal();
+          if (typeof _showToast === 'function') {
+            _showToast('Promoted ' + variant + ' as ' + (res.body && res.body.name || target));
+          }
+          _loadInvComposites(invName);
+        } else {
+          if (errEl) {
+            errEl.textContent = (res.body && res.body.error) ||
+              ('Promote failed (' + res.status + ')');
+          }
+        }
+      })
+      .catch(function(err) {
+        if (errEl) errEl.textContent = 'Network error: ' + err;
+      });
+  }
+  window._submitPromoteModal = _submitPromoteModal;
 
   // ── End Investigation Composites tab handlers ─────────────────────────────
 
