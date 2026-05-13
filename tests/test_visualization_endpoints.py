@@ -1254,3 +1254,52 @@ def test_promote_to_catalog_404_when_variant_missing(workspace_server):
         {'investigation': 'demo', 'variant': 'no-such-variant'},
     )
     assert code == 404, j
+
+
+# ---------------------------------------------------------------------------
+# Task E1: /api/investigations exposes v2 summary stats
+# ---------------------------------------------------------------------------
+
+def test_get_investigations_includes_v2_summary_fields(workspace_server):
+    """The list endpoint must surface baseline + variant/group/comparison counts
+    (Task E1) so the dashboard index can render the v2 study vocabulary."""
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'description': 'v2 summary fixture',
+        'baseline': 'base',
+        'variants': [
+            {'name': 'base', 'source': 'pkg.x'},
+            {'name': 'hi', 'extends': 'base'},
+            {'name': 'lo', 'extends': 'base'},
+        ],
+        'groups': [
+            {'name': 'control', 'variants': ['base']},
+            {'name': 'treated', 'variants': ['hi', 'lo']},
+        ],
+        'comparisons': [
+            {'name': 'hi_vs_base', 'baseline': 'base', 'variants': ['hi']},
+        ],
+        'runs': [
+            {'composite': 'base', 'params': {}, 'steps': 5},
+            {'composite': 'hi', 'params': {}, 'steps': 5},
+        ],
+    }, sort_keys=False))
+
+    with urllib.request.urlopen(workspace_server.url + '/api/investigations') as resp:
+        body = json.loads(resp.read())
+
+    rows = [r for r in body['investigations'] if r['name'] == 'demo']
+    assert len(rows) == 1
+    row = rows[0]
+    assert row['baseline'] == 'base'
+    assert row['n_variants'] == 3
+    assert row['n_groups'] == 2
+    assert row['n_comparisons'] == 1
+    # Backward-compat fields still present
+    assert 'composite' in row
+    assert 'composites' in row
+    assert 'n_simulations' in row
+    # n_runs mirrors n_simulations (alias for v2 consumers)
+    assert row['n_runs'] == row['n_simulations']

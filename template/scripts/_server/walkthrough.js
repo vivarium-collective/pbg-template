@@ -2379,14 +2379,39 @@
                         complete:'complete', failed:'gate_pending',
                         invalid:'gate_pending'})[status] || 'planned';
     var lastRun = inv.last_run ? new Date(inv.last_run + 'Z').toLocaleString() : '—';
+
+    // v2 summary stats (Task E1). When the server is a legacy build that does
+    // not surface the new fields, fall back to the old `composite` summary.
+    var hasV2 = (inv.n_variants !== undefined) || (inv.baseline !== undefined);
+    var baselineCell;
+    if (inv.baseline) {
+      baselineCell = '<code>' + _esc(inv.baseline) + '</code>';
+    } else if (!hasV2 && inv.composite) {
+      // Legacy server: surface the composite summary in place of baseline.
+      baselineCell = '<code>' + _esc(inv.composite) + '</code>';
+    } else {
+      baselineCell = '<em>none</em>';
+    }
+
+    var nVariants = (inv.n_variants !== undefined) ? inv.n_variants : null;
+    var nGroups = (inv.n_groups !== undefined) ? inv.n_groups : null;
+    var nRuns = (inv.n_runs !== undefined) ? inv.n_runs
+              : (inv.n_simulations !== undefined ? inv.n_simulations : 0);
+
+    var metaParts = ['<span class="status-pill ' + statusClass + '">' + _esc(status) + '</span>'];
+    if (nVariants !== null) {
+      metaParts.push('<span>' + nVariants + ' variant' + (nVariants === 1 ? '' : 's') + '</span>');
+    }
+    if (nGroups !== null) {
+      metaParts.push('<span>' + nGroups + ' group' + (nGroups === 1 ? '' : 's') + '</span>');
+    }
+    metaParts.push('<span>' + nRuns + ' run' + (nRuns === 1 ? '' : 's') + '</span>');
+    metaParts.push('<span>last run: ' + _esc(lastRun) + '</span>');
+
     return '<div class="investigation-card" onclick="_openInvestigation(\'' + _esc(inv.name) + '\')">' +
       '<div class="name">' + _esc(inv.name) + '</div>' +
-      '<div class="composite"><code>' + _esc(inv.composite || '?') + '</code></div>' +
-      '<div class="meta">' +
-        '<span class="status-pill ' + statusClass + '">' + _esc(status) + '</span>' +
-        '<span>' + (inv.n_simulations || 0) + ' sim' + ((inv.n_simulations || 0) === 1 ? '' : 's') + '</span>' +
-        '<span>last run: ' + _esc(lastRun) + '</span>' +
-      '</div>' +
+      '<div class="baseline-line"><small>Baseline: ' + baselineCell + '</small></div>' +
+      '<div class="meta">' + metaParts.join('') + '</div>' +
     '</div>';
   }
 

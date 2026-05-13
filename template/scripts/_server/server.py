@@ -2522,6 +2522,12 @@ if __name__ == "__main__":
                     "status": spec.get("status", "planned"),
                     "last_run": spec.get("last_run"),
                     "n_simulations": n_runs,
+                    # v2 study vocabulary (Task E1)
+                    "baseline": spec.get("baseline", ""),
+                    "n_variants": len(spec.get("variants") or []),
+                    "n_groups": len(spec.get("groups") or []),
+                    "n_comparisons": len(spec.get("comparisons") or []),
+                    "n_runs": n_runs,
                 })
             except InvestigationSpecError as e:
                 out.append({
