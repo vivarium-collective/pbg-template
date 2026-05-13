@@ -43,6 +43,33 @@ from threading import Lock
 import yaml
 
 
+def _json_default(o):
+    """JSON serialization fallback for objects json.dumps can't handle natively.
+
+    Handles numpy arrays (which @composite_generator state docs often contain
+    for spatial / field-based composites), numpy scalars, Path objects, sets,
+    and anything with .tolist(). Falls back to repr() so a bad object still
+    surfaces a string rather than killing the whole response.
+    """
+    # numpy duck-typing without importing numpy (cheaper boot)
+    tolist = getattr(o, "tolist", None)
+    if callable(tolist):
+        try:
+            return tolist()
+        except Exception:
+            pass
+    if hasattr(o, "item") and callable(o.item):
+        try:
+            return o.item()  # numpy scalar → python scalar
+        except Exception:
+            pass
+    if isinstance(o, (set, frozenset)):
+        return sorted(o, key=str)
+    if isinstance(o, Path):
+        return str(o)
+    return repr(o)
+
+
 # ---------------------------------------------------------------------------
 # Registry cache (module-level, shared across requests)
 # ---------------------------------------------------------------------------
@@ -5257,7 +5284,7 @@ if __name__ == "__main__":
             return
 
     def _json(self, data: dict, code: int):
-        body = json.dumps(data).encode()
+        body = json.dumps(data, default=_json_default).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
