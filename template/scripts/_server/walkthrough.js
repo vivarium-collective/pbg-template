@@ -2923,7 +2923,14 @@
         (runs.length ? _renderInvestigationRunsTable(runs, name) : '<p class="empty-state">No runs yet — click Run to generate them.</p>') +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="observables">' +
-        '<div class="ws-observables-stub">Observables — coming in B8.</div>' +
+        '<p class="panel-lead">Tick which state paths the simulation should record. Paths missing in a given composite are skipped for that run with a warning.</p>' +
+        '<label style="display:block;margin-bottom:10px">' +
+          '<input type="checkbox" id="inv-emit-all" onchange="_setEmitAll(this.checked)">' +
+          ' Emit entire state (root)' +
+        '</label>' +
+        '<div id="inv-observables-tree" style="font-family:monospace;font-size:0.9em"></div>' +
+        '<button class="action-btn" onclick="_saveObservables()">Save observables</button>' +
+        '<div id="inv-observables-status" style="margin-top:8px;font-size:0.9em;color:#555"></div>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="viz">' +
         '<section class="ws-comparisons" style="margin-bottom:16px;padding:10px;border:1px solid #eee">' +
