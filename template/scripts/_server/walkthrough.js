@@ -61,7 +61,16 @@
       alert('No composite loaded in this view yet — open a composite first.');
       return;
     }
-    var w = window.open('/loom-explore/index.html', '_blank',
+    // Include id in the URL so the popup can call /api/composite-test-run
+    // even before the parent has a chance to postMessage. The composite:load
+    // message we re-send after explore:ready still wins for metadata, but the
+    // URL gives the popup a synchronous bootstrap value.
+    var meta = snapshot.metadata || {};
+    var url = '/loom-explore/index.html';
+    if (meta.id) {
+      url += '?id=' + encodeURIComponent(meta.id);
+    }
+    var w = window.open(url, '_blank',
       'width=1200,height=800,menubar=no,toolbar=no,location=no,resizable=yes,scrollbars=yes');
     if (!w) {
       alert('Popup blocked. Allow popups from this site to pop out the wiring view.');
@@ -2545,9 +2554,11 @@
         _loadCompositeExplorer(data.id, data.state, data.name);
         // Render parameter editor
         _ceRenderParameters(data.parameters);
-        // Render state JSON
-        document.getElementById('ce-state-json').textContent =
-          JSON.stringify(data.state, null, 2);
+        // Render state JSON (Document tab now lives inside the iframe — this
+        // outer #ce-state-json element was removed when the outer tab strip
+        // was retired. Null-guard for resilience if it's ever reintroduced.)
+        var stateJsonEl = document.getElementById('ce-state-json');
+        if (stateJsonEl) stateJsonEl.textContent = JSON.stringify(data.state, null, 2);
       })
       .catch(function(err) {
         document.getElementById('ce-loading').innerHTML =
@@ -2595,7 +2606,7 @@
       var payload = {
         type: 'composite:load',
         state: state,
-        metadata: { name: name || ref },
+        metadata: { name: name || ref, id: ref },
       };
       window._loomLastState = window._loomLastState || {};
       window._loomLastState[iframe.id] = payload;
@@ -4057,7 +4068,7 @@
         var payload = {
           type: 'composite:load',
           state: data.state,
-          metadata: { name: compName, context: 'investigation:' + invName },
+          metadata: { name: compName, id: compName, context: 'investigation:' + invName },
         };
         window._loomLastState = window._loomLastState || {};
         window._loomLastState[iframe.id] = payload;

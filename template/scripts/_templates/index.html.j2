@@ -650,11 +650,8 @@
 
 <!-- ===== PAGE: COMPOSITE EXPLORER ===== -->
 <section id="page-composite-explore" class="page" data-page="composite-explore">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-    <h2 class="page-title" style="margin:0">Composite explorer</h2>
-    <button class="btn-mini" onclick="_ceOpenPopout()" title="Open this composite in its own window">Pop out</button>
-  </div>
-  <p class="page-lead">Inspect a composite's wiring, run it, and browse run history. To configure parameters, design variants, and capture conclusions, start a <strong>Composite Study</strong>.</p>
+  <h2 class="page-title">Composite Explorer</h2>
+  <p class="page-lead">Inspect a composite's wiring, run it, and view results. To configure parameters, design variants, and capture conclusions, start a <strong>Composite Study</strong>.</p>
 
   <div id="ce-loading" class="empty-state">Loading composite&hellip;</div>
 
@@ -664,71 +661,28 @@
     <div id="ce-begin-study-bar" class="panel" style="display:flex;align-items:center;gap:12px;background:#f0f9ff;border:1px solid #bae6fd">
       <div style="flex:1">
         <strong>Ready to investigate?</strong>
-        <span class="muted">Start a Composite Study from this composite to design variants, run simulations, and capture conclusions.</span>
+        <span class="muted">Start a Composite Study to design variants, run simulations, and capture conclusions.</span>
       </div>
       <button class="action-btn" id="ce-begin-study-btn" onclick="_beginStudyFromComposite()">Begin Study</button>
     </div>
 
-    <!-- In-page tab strip -->
-    <div class="ce-tab-strip" role="tablist">
-      <button class="ce-tab active" data-tab="view"     onclick="_ceSwitchTab('view')">View</button>
-      <button class="ce-tab"        data-tab="document" onclick="_ceSwitchTab('document')">Document</button>
-      <button class="ce-tab"        data-tab="results"  onclick="_ceSwitchTab('results')">Results <span class="ce-tab-badge" id="ce-results-count"></span></button>
+    <!-- Metadata header -->
+    <div class="panel">
+      <h3 id="ce-name"></h3>
+      <p id="ce-description" class="muted"></p>
+      <p><strong>ID:</strong> <code id="ce-id"></code></p>
+      <p><strong>Module:</strong> <code id="ce-module"></code> <span id="ce-kind" class="kind-badge"></span></p>
     </div>
 
-    <!-- TAB: View -->
-    <div class="ce-tab-panel active" data-tab="view">
-      <div class="panel">
-        <h3 id="ce-name"></h3>
-        <p id="ce-description" class="muted"></p>
-        <p><strong>ID:</strong> <code id="ce-id"></code></p>
-        <p><strong>Module:</strong> <code id="ce-module"></code> <span id="ce-kind" class="kind-badge"></span></p>
+    <!-- Loom-explore iframe — internal View/Run/Document tabs live inside -->
+    <div class="panel">
+      <div class="loom-frame-toolbar" style="display:flex;justify-content:flex-end;margin-bottom:6px">
+        <button class="btn-mini" onclick="_popoutLoom('composite-explore-frame')" title="Open in separate window">Pop out &#8599;</button>
       </div>
-      <div class="panel">
-        <h3>Wiring diagram <button class="btn-mini" onclick="_ceUpdateDiagram()">Update diagram</button></h3>
-        <div class="loom-frame-toolbar" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <div class="ce-run-controls" style="display:flex;align-items:center;gap:8px">
-            <label style="margin:0">Steps <input type="number" id="ce-steps" value="5" min="1" max="100" style="width:80px;margin-left:4px"></label>
-            <button class="action-btn" style="margin:0" onclick="_ceTestRun()">Run</button>
-          </div>
-          <button class="btn-mini" onclick="_popoutLoom('composite-explore-frame')" title="Open this wiring view in a separate window">Pop out ↗</button>
-        </div>
-        <iframe id="composite-explore-frame" src="/loom-explore/index.html" title="Composite wiring"
-                style="width:100%;height:640px;border:1px solid #ddd;background:#fff"></iframe>
-        <div id="composite-explore-svg-legacy" style="display:none;width:100%;min-height:400px;border:1px solid #ddd;background:#fff;overflow:auto;padding:8px"></div>
-        <div id="ce-test-results" style="margin-top:12px"></div>
-      </div>
-    </div>
-
-    <!-- TAB: Document -->
-    <div class="ce-tab-panel" data-tab="document">
-      <div class="panel">
-        <h3>Resolved composite document</h3>
-        <p class="panel-lead">The composite's parameters baked in. This is the JSON the runtime sees.</p>
-        <pre id="ce-state-json" style="background:#f8f8f8;padding:10px;border-radius:4px;overflow:auto;font-size:0.82em;max-height:640px"></pre>
-      </div>
-    </div>
-
-    <!-- TAB: Results -->
-    <div class="ce-tab-panel" data-tab="results">
-      <div class="panel">
-        <h3>Run history <span class="ce-tab-badge" id="ce-history-count"></span></h3>
-        <p class="panel-lead">Past runs of this composite (newest first). Check 2+ to compare.</p>
-        <div id="ce-history-body"><p class="empty-state">No runs yet — click <em>Run</em> on the View tab.</p></div>
-      </div>
-      <div class="panel" id="ce-compare-panel" style="display:none">
-        <h3>Compare runs <button class="btn-mini" onclick="_ceClearCompareSelection()">Clear selection</button></h3>
-        <div id="ce-compare-body"><p class="empty-state">Pick 2+ runs above.</p></div>
-      </div>
-      <div class="panel" id="ce-state-panel" style="display:none">
-        <h3>State at step <span id="ce-state-step-label">0</span></h3>
-        <div id="ce-state-controls"><p class="empty-state">Select a run from the history above.</p></div>
-        <div id="ce-state-tree" class="ce-state-tree" style="margin-top:12px"></div>
-        <div id="ce-state-actions" style="display:none;margin-top:12px">
-          <button class="action-btn" onclick="_ceSnapshotToInitial()">Use this state as initial values</button>
-          <div id="ce-snapshot-report" style="margin-top:8px;font-size:0.85em"></div>
-        </div>
-      </div>
+      <iframe id="composite-explore-frame"
+              src="/loom-explore/index.html"
+              title="Composite Explorer"
+              style="width:100%;height:720px;border:1px solid #ddd;background:#fff"></iframe>
     </div>
 
   </div>
