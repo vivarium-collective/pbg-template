@@ -173,7 +173,7 @@ def test_inject_emitter_for_paths_leaf():
     em = out["user_emitter"]
     assert em["_type"] == "step"
     assert em["address"] == "local:RAMEmitter"
-    assert em["config"]["emit"] == {"stores_level": "any"}
+    assert em["config"]["emit"] == {"stores_level": "node"}
     assert em["inputs"] == {"stores_level": ["stores", "level"]}
 
 
@@ -184,8 +184,8 @@ def test_inject_emitter_for_paths_subtree_cascades():
     em = out["user_emitter"]
     # Two leaves: stores/level and stores/fields/glucose
     assert em["config"]["emit"] == {
-        "stores_fields_glucose": "any",
-        "stores_level": "any",
+        "stores_fields_glucose": "node",
+        "stores_level": "node",
     }
     assert em["inputs"] == {
         "stores_fields_glucose": ["stores", "fields", "glucose"],
@@ -204,7 +204,7 @@ def test_inject_emitter_for_paths_skips_processes():
     }
     out = inject_emitter_for_paths(state, ["root"])
     em = out["user_emitter"]
-    assert em["config"]["emit"] == {"root_store": "any"}
+    assert em["config"]["emit"] == {"root_store": "node"}
     assert em["inputs"] == {"root_store": ["root", "store"]}
 
 

@@ -240,7 +240,10 @@ def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:
     for path_parts in sorted(leaves, key=lambda p: tuple(p)):
         # Slug-safe port name from the path
         key = "_".join(path_parts) if path_parts else "root"
-        emit_schema[key] = "any"
+        # process-bigraph's emitter convention uses "node" as the permissive
+        # leaf type (see emitter.anyize_paths). "any" trips a bigraph-schema
+        # bug in append_link_path that assumes the schema is a dict.
+        emit_schema[key] = "node"
         inputs[key] = list(path_parts)
 
     new_state = dict(state)
