@@ -22,7 +22,34 @@
       "lammps",
       "molecular-dynamics",
       "polymers"
-    ]
+    ],
+    "system_dependencies": {
+      "checks": [
+        {
+          "name": "open-mpi-4",
+          "description": "OpenMPI 4.x runtime — the lammps PyPI wheel was built against libmpi.12 (OpenMPI 4 ABI)",
+          "import_check": "from ctypes import CDLL; CDLL('libmpi.12.dylib')",
+          "install": {
+            "darwin": {
+              "manager": "brew",
+              "commands": ["brew install open-mpi@4"],
+              "notes": "Default open-mpi 5.x is ABI-incompatible with the lammps wheel; the @4 formula provides libmpi.12"
+            },
+            "linux": {
+              "manager": "apt",
+              "commands": ["sudo apt install -y libopenmpi3"]
+            }
+          }
+        },
+        {
+          "name": "lammps-importable",
+          "description": "Validate that the lammps Python wheel can dlopen its native library",
+          "import_check": "from lammps import lammps; l=lammps(cmdargs=['-screen','none','-log','none','-nocite']); l.close()",
+          "install": null,
+          "notes": "If this fails after open-mpi-4 is installed, the lammps wheel may need rebuilding from source: pip install --no-binary lammps lammps"
+        }
+      ]
+    }
   },
   {
     "name": "pbg-cellpack",
