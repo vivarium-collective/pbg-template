@@ -227,12 +227,12 @@
 <!-- ===== PAGE: SIMULATION SETUP ===== -->
 <section id="page-simulation-setup" class="page" data-page="simulation-setup">
   <h2 class="page-title">Simulation Setup</h2>
-  <p class="page-lead">Define how you&rsquo;ll run the model. Set up <strong>simulations</strong> (run configs: time interval, parameters, initial state) and the <strong>observables</strong> they record. Visualizations live in their own tab.</p>
+  <p class="page-lead">Define how you&rsquo;ll run the model. Pick a composite to explore, configure <strong>simulations</strong> (run configs: time interval, parameters, initial state), and choose emitters. Observables are managed inside Composite Explorer. Visualizations live in their own tab.</p>
 
   <!-- Available Composites (workspace-local discovery) -->
   <div class="panel">
     <h3>Available Composites <span id="composite-count" class="count-badge"></span></h3>
-    <p class="panel-lead">Discoverable composite documents from <code>pbg_&lt;slug&gt;/composites/*.composite.{yaml,json}</code>. Each one packages a runnable simulation state with parameters you can configure. Click <strong>Use</strong> to create a simulation from it.</p>
+    <p class="panel-lead">Discoverable composite documents from <code>pbg_&lt;slug&gt;/composites/*.composite.{yaml,json}</code>. Each one packages a runnable simulation state with parameters you can configure. Click <strong>Explore</strong> to open it in Composite Explorer.</p>
     <div class="card-browse-toolbar" id="composite-toolbar">
       <input type="search" class="card-browse-search" id="composite-search" placeholder="Filter composites…">
       <div class="card-browse-chips" id="composite-tag-chips"></div>
@@ -253,27 +253,6 @@
     <div id="emitter-picker-container">
       <p class="empty-state">Loading from Registry&hellip;</p>
     </div>
-  </div>
-
-  <!-- Observables panel -->
-  <div class="panel">
-    <h3>Observables</h3>
-    <p class="panel-lead">State variables to track during a run. Each observable is a dotted path into the composite document (e.g. <code>chromosome.DnaA_count</code>).</p>
-    {% if observables %}
-    <table><thead><tr><th>Name</th><th>Store path</th><th>Units</th><th>Description</th></tr></thead><tbody>
-    {% for obs in observables %}
-    <tr>
-      <td><strong>{{ obs.name }}</strong></td>
-      <td><code>{{ obs.store_path }}</code></td>
-      <td>{{ obs.units or '' }}</td>
-      <td>{{ obs.description or '' }}</td>
-    </tr>
-    {% endfor %}
-    </tbody></table>
-    {% else %}
-    <p style="color:#888;font-style:italic">No observables defined yet.</p>
-    {% endif %}
-    <button class="action-btn" onclick="openModal('modal-observable')">+ Add observable</button>
   </div>
 
   <!-- Simulations panel (NEW) -->

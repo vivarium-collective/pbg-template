@@ -607,7 +607,7 @@
         return '<div class="composite-list-row">' +
           '<span class="name">' + _esc(c.name) + '</span>' +
           '<span class="desc">' + tagPills + ' ' + _esc(c.description || '(no description)') + '</span>' +
-          '<span><button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Use</button></span>' +
+          '<span><button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button></span>' +
           '</div>';
       });
       container.innerHTML = rows.join('');
@@ -641,7 +641,7 @@
           tagSummary +
           paramSummary +
           '<div class="module-action">' +
-            '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Use</button>' +
+            '<button class="action-btn" onclick="_openCompositeExplorer(\'' + _esc(c.id) + '\')">Explore</button>' +
           '</div>' +
         '</div>';
       });
