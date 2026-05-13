@@ -458,3 +458,357 @@ body.focus-mode::before{
   padding:10px 14px; font-family:"SF Mono",Menlo,monospace; font-size:0.82em;
   overflow:auto; max-height:480px;
 }
+
+/* ============================================================================
+ * Vivarium chrome — left rail + topbar (V2 of vivarium-chrome-design)
+ * Activated when <body> wraps content in .viv-layout. Old top-banner styles
+ * stay intact for fallback / partial rollout.
+ * ============================================================================ */
+
+/* Layout shell -------------------------------------------------------------- */
+.viv-layout{
+  display:flex; height:100vh; width:100%; overflow:hidden;
+  font-family:-apple-system,"Segoe UI",sans-serif; color:#1f2937;
+}
+
+/* Left rail ----------------------------------------------------------------- */
+.viv-rail{
+  width:240px; flex:0 0 240px;
+  display:flex; flex-direction:column;
+  background:#fafafa; border-right:1px solid #e5e7eb;
+  padding:16px 0 8px;
+  transition:width 0.18s ease, flex-basis 0.18s ease;
+  position:relative;
+  overflow:hidden;
+}
+.viv-rail-header{
+  display:flex; align-items:center; gap:10px;
+  padding:0 16px 14px;
+  border-bottom:1px solid #ececec;
+}
+.viv-rail-logo{
+  width:28px; height:28px; flex:0 0 28px;
+  border-radius:6px;
+  background:linear-gradient(135deg,#3b82f6,#7c3aed);
+  color:#fff; font-weight:700; font-size:0.78em;
+  display:flex; align-items:center; justify-content:center;
+  letter-spacing:0.04em;
+}
+.viv-rail-brand{
+  display:flex; flex-direction:column; min-width:0;
+}
+.viv-rail-brand-title{
+  font-size:0.95em; font-weight:600; color:#111827; line-height:1.2;
+}
+.viv-rail-brand-sub{
+  font-size:0.74em; color:#6b7280; line-height:1.2;
+}
+
+.viv-workspace-switcher{
+  margin:12px 12px 4px;
+  padding:8px 10px;
+  background:#fff; border:1px solid #e5e7eb; border-radius:6px;
+  font-size:0.86em; color:#1f2937;
+  display:flex; align-items:center; justify-content:space-between;
+  cursor:pointer; user-select:none;
+}
+.viv-workspace-switcher:hover{ background:#f3f4f6 }
+.viv-workspace-switcher .viv-ws-name{
+  font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.viv-workspace-switcher .viv-ws-caret{ color:#9ca3af; font-size:0.78em }
+
+.viv-rail-scroll{
+  flex:1 1 auto; overflow-y:auto; overflow-x:hidden;
+  padding:8px 0 4px;
+}
+
+.viv-rail-section{
+  padding:10px 0 6px;
+}
+.viv-rail-section + .viv-rail-section{
+  border-top:1px solid #ececec; margin-top:4px;
+}
+.viv-rail-section-label{
+  padding:0 16px 6px;
+  font-size:0.68em; font-weight:600; letter-spacing:0.08em;
+  text-transform:uppercase; color:#9ca3af;
+}
+.viv-rail-link{
+  display:flex; align-items:center; gap:12px;
+  padding:8px 16px;
+  text-decoration:none; color:#374151;
+  font-size:0.92em;
+  border-left:3px solid transparent;
+  cursor:pointer;
+  transition:background 0.1s, color 0.1s;
+}
+.viv-rail-link:hover{ background:#f3f4f6; color:#111827 }
+.viv-rail-link.active{
+  background:#e0e7ff; color:#1e40af; font-weight:600;
+  border-left-color:#3b82f6;
+}
+.viv-rail-link.active .viv-rail-link-icon{ color:#1e40af }
+.viv-rail-link-icon{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:18px; height:18px; flex:0 0 18px;
+  font-size:0.95em; color:#6b7280;
+}
+.viv-rail-link-label{
+  flex:1 1 auto; min-width:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.viv-rail-link-badge{
+  background:#e5e7eb; color:#4b5563;
+  font-size:0.72em; padding:1px 7px; border-radius:9999px;
+  flex:0 0 auto;
+}
+.viv-rail-link.active .viv-rail-link-badge{ background:#c7d2fe; color:#1e3a8a }
+
+/* Investigations group block ----------------------------------------------- */
+.viv-rail-investigations-group{
+  margin:2px 0 4px;
+}
+.viv-rail-investigations-group-header{
+  display:flex; align-items:center; gap:8px;
+  padding:6px 16px;
+  font-size:0.84em; color:#374151; font-weight:500;
+  cursor:pointer; user-select:none;
+}
+.viv-rail-investigations-group-header:hover{ background:#f3f4f6 }
+.viv-rail-investigations-group-arrow{
+  display:inline-block; width:10px; color:#9ca3af; font-size:0.78em;
+  transition:transform 0.15s ease;
+}
+.viv-rail-investigations-group.collapsed .viv-rail-investigations-group-arrow{
+  transform:rotate(-90deg);
+}
+.viv-rail-investigations-group-name{
+  flex:1 1 auto; min-width:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.viv-rail-investigations-group-count{
+  background:#e5e7eb; color:#4b5563;
+  font-size:0.7em; padding:1px 7px; border-radius:9999px;
+}
+.viv-rail-investigations-group-items{
+  display:flex; flex-direction:column;
+  padding:2px 0 4px;
+}
+.viv-rail-investigations-group.collapsed .viv-rail-investigations-group-items{
+  display:none;
+}
+.viv-rail-investigations-group-items .viv-rail-link{
+  padding:5px 16px 5px 36px;
+  font-size:0.86em; color:#4b5563;
+}
+.viv-rail-investigations-group-items .viv-rail-link.active{
+  background:#e0e7ff; color:#1e40af;
+}
+.viv-rail-investigations-group-items .viv-rail-link-sub{
+  display:block; font-size:0.74em; color:#9ca3af;
+  margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+
+/* Rail footer (user identity) ---------------------------------------------- */
+.viv-rail-footer{
+  display:flex; align-items:center; gap:10px;
+  padding:10px 16px;
+  border-top:1px solid #ececec;
+  margin-top:auto;
+}
+.viv-rail-footer-avatar{
+  width:30px; height:30px; flex:0 0 30px;
+  border-radius:50%;
+  background:#c7d2fe; color:#1e3a8a;
+  display:flex; align-items:center; justify-content:center;
+  font-size:0.78em; font-weight:600;
+}
+.viv-rail-footer-name{
+  font-size:0.86em; font-weight:600; color:#1f2937; line-height:1.2;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.viv-rail-footer-email{
+  font-size:0.74em; color:#6b7280; line-height:1.2;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.viv-rail-footer-text{
+  display:flex; flex-direction:column; min-width:0; flex:1 1 auto;
+}
+
+/* Rail collapse toggle ----------------------------------------------------- */
+.viv-rail-toggle{
+  position:absolute; left:8px; bottom:8px;
+  width:28px; height:28px;
+  border:1px solid #e5e7eb; background:#fff;
+  border-radius:6px;
+  cursor:pointer; color:#6b7280;
+  display:flex; align-items:center; justify-content:center;
+  font-size:0.9em; line-height:1;
+  z-index:2;
+}
+.viv-rail-toggle:hover{ background:#f3f4f6; color:#1f2937 }
+
+/* Collapsed-rail state ----------------------------------------------------- */
+.viv-rail.viv-rail-collapsed{
+  width:56px; flex-basis:56px;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-header{
+  padding:0 8px 14px; justify-content:center;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-brand{ display:none }
+.viv-rail.viv-rail-collapsed .viv-workspace-switcher{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-section-label{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-link{
+  padding:8px 0; justify-content:center; gap:0;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-link-label{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-link-badge{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-investigations-group-header{
+  justify-content:center; padding:6px 0;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-investigations-group-name{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-investigations-group-count{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-investigations-group-items{ display:none }
+.viv-rail.viv-rail-collapsed .viv-rail-footer{
+  padding:10px 8px; justify-content:center;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-footer-text{ display:none }
+
+/* Main column -------------------------------------------------------------- */
+.viv-main{
+  flex:1 1 auto;
+  display:flex; flex-direction:column;
+  min-width:0;
+  background:var(--bg);
+  overflow:hidden;
+}
+
+/* Slim topbar -------------------------------------------------------------- */
+.viv-topbar{
+  height:56px; flex:0 0 56px;
+  padding:0 24px;
+  background:#fff; border-bottom:1px solid #e5e7eb;
+  display:flex; align-items:center; justify-content:space-between;
+  gap:16px;
+}
+.viv-topbar-breadcrumbs{
+  display:flex; align-items:center; gap:8px;
+  font-size:0.92em; color:#374151;
+  min-width:0; overflow:hidden;
+}
+.viv-topbar-breadcrumbs .viv-crumb{
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  color:#6b7280; text-decoration:none;
+}
+.viv-topbar-breadcrumbs .viv-crumb:hover{ color:#1f2937 }
+.viv-topbar-breadcrumbs .viv-crumb.viv-crumb-current{
+  color:#1f2937; font-weight:600;
+}
+.viv-topbar-breadcrumbs .viv-crumb-sep{
+  color:#9ca3af; font-size:0.95em;
+}
+.viv-topbar-breadcrumbs .viv-crumb-sep::before{ content:"\203a"; }
+
+.viv-topbar-actions{
+  display:flex; align-items:center; gap:8px;
+  flex:0 0 auto;
+}
+
+/* Branch chip --------------------------------------------------------------- */
+.viv-branch-chip{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:4px 10px;
+  background:#f3f4f6; color:#1f2937;
+  border:1px solid #e5e7eb; border-radius:9999px;
+  font-family:ui-monospace,Menlo,monospace; font-size:0.82em;
+  cursor:pointer; user-select:none;
+}
+.viv-branch-chip:hover{ background:#e5e7eb }
+.viv-branch-chip .viv-branch-icon{ color:#6b7280; font-size:0.95em }
+.viv-branch-chip .viv-branch-name{
+  max-width:200px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.viv-branch-chip .viv-branch-caret{ color:#9ca3af; font-size:0.72em }
+.viv-branch-chip .viv-branch-dirty-pill{
+  background:#fef3c7; color:#92400e;
+  padding:1px 7px; border-radius:9999px;
+  font-size:0.74em; font-weight:600;
+  font-family:-apple-system,"Segoe UI",sans-serif;
+}
+
+/* Topbar buttons ----------------------------------------------------------- */
+.viv-icon-btn{
+  width:32px; height:32px;
+  display:inline-flex; align-items:center; justify-content:center;
+  background:#fff; border:1px solid #e5e7eb; border-radius:6px;
+  color:#4b5563; cursor:pointer;
+  font-size:1em; line-height:1;
+  text-decoration:none;
+}
+.viv-icon-btn:hover{ background:#f3f4f6; color:#1f2937 }
+
+.viv-btn{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:5px 12px;
+  background:#fff; border:1px solid #e5e7eb; border-radius:6px;
+  color:#1f2937; cursor:pointer;
+  font-size:0.86em; font-weight:500;
+  text-decoration:none;
+}
+.viv-btn:hover{ background:#f3f4f6 }
+.viv-btn.viv-btn-primary{
+  background:#3b82f6; border-color:#3b82f6; color:#fff;
+}
+.viv-btn.viv-btn-primary:hover{ background:#2563eb; border-color:#2563eb }
+.viv-btn.viv-btn-success{
+  background:#d1fae5; border-color:#a7f3d0; color:#065f46;
+}
+.viv-btn.viv-btn-success:hover{ background:#a7f3d0 }
+.viv-btn:disabled,
+.viv-btn.viv-btn-disabled{
+  opacity:0.6; cursor:default;
+}
+
+.viv-kebab{
+  width:32px; height:32px;
+  display:inline-flex; align-items:center; justify-content:center;
+  background:transparent; border:1px solid transparent; border-radius:6px;
+  color:#6b7280; cursor:pointer;
+  font-size:1.1em; line-height:1;
+}
+.viv-kebab:hover{ background:#f3f4f6; color:#1f2937 }
+
+.viv-avatar{
+  width:32px; height:32px; flex:0 0 32px;
+  border-radius:50%;
+  background:#c7d2fe; color:#1e3a8a;
+  display:flex; align-items:center; justify-content:center;
+  font-size:0.78em; font-weight:600;
+  cursor:pointer; user-select:none;
+}
+.viv-avatar:hover{ background:#a5b4fc }
+
+/* Content area ------------------------------------------------------------- */
+.viv-content{
+  flex:1 1 auto;
+  overflow-y:auto; overflow-x:hidden;
+  padding:24px;
+  background:var(--bg);
+}
+.viv-content > .page{ max-width:1200px; margin:0 auto }
+
+/* Tooltip for decoration-only controls ------------------------------------- */
+.viv-tooltip{
+  position:relative;
+}
+.viv-tooltip[data-tooltip]:hover::after{
+  content:attr(data-tooltip);
+  position:absolute; top:calc(100% + 6px); right:0;
+  background:#1f2937; color:#fff;
+  padding:4px 8px; border-radius:4px;
+  font-size:0.78em; white-space:nowrap;
+  z-index:60;
+}
+
