@@ -550,9 +550,13 @@ body.focus-mode::before{
 }
 .viv-rail-link.active .viv-rail-link-icon{ color:#1e40af }
 .viv-rail-link-icon{
-  display:inline-flex; align-items:center; justify-content:center;
-  width:18px; height:18px; flex:0 0 18px;
-  font-size:0.95em; color:#6b7280;
+  display:flex; align-items:center; justify-content:center;
+  width:20px; height:20px; flex:0 0 20px;
+  color:#6b7280;
+}
+.viv-rail-link-svg{
+  width:18px; height:18px;
+  display:block;
 }
 .viv-rail-link-label{
   flex:1 1 auto; min-width:0;
@@ -638,16 +642,31 @@ body.focus-mode::before{
 
 /* Rail collapse toggle ----------------------------------------------------- */
 .viv-rail-toggle{
-  position:absolute; left:8px; bottom:8px;
+  position:absolute; top:14px; right:8px;
   width:28px; height:28px;
-  border:1px solid #e5e7eb; background:#fff;
+  border:1px solid transparent; background:transparent;
   border-radius:6px;
   cursor:pointer; color:#6b7280;
   display:flex; align-items:center; justify-content:center;
-  font-size:0.9em; line-height:1;
+  padding:0;
+  transition:background 0.15s, color 0.15s, border-color 0.15s;
   z-index:2;
 }
-.viv-rail-toggle:hover{ background:#f3f4f6; color:#1f2937 }
+.viv-rail-toggle:hover{
+  background:#f3f4f6; color:#1f2937; border-color:#e5e7eb;
+}
+.viv-rail-toggle-svg{
+  width:16px; height:16px;
+  display:block;
+  transition:transform 0.2s;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-toggle{
+  /* Center the button when rail is narrow */
+  top:14px; right:14px;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-toggle-svg{
+  transform:rotate(180deg);
+}
 
 /* Collapsed-rail state ----------------------------------------------------- */
 .viv-rail.viv-rail-collapsed{

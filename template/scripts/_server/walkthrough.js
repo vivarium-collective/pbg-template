@@ -1596,8 +1596,6 @@
     if (!rail) return;
     var collapsed = rail.classList.toggle('viv-rail-collapsed');
     try { localStorage.setItem('vivarium.rail-collapsed', collapsed ? '1' : '0'); } catch (e) {}
-    var btn = document.getElementById('viv-rail-toggle');
-    if (btn) btn.textContent = collapsed ? '»' : '«';
   }
   window._vivToggleRail = _vivToggleRail;
 
@@ -1606,9 +1604,7 @@
     try { stored = localStorage.getItem('vivarium.rail-collapsed'); } catch (e) {}
     if (stored === '1') {
       var rail = document.getElementById('viv-rail');
-      var btn = document.getElementById('viv-rail-toggle');
       if (rail) rail.classList.add('viv-rail-collapsed');
-      if (btn) btn.textContent = '»';
     }
   }
   window._vivRestoreRailState = _vivRestoreRailState;
