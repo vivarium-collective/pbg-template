@@ -1165,3 +1165,107 @@ def test_get_visualization_class_inputs(workspace_server):
     except urllib.error.HTTPError as e:
         # If pbg-superpowers isn't installed, the class won't be found → 404 acceptable
         assert e.code == 404
+
+
+# ---------------------------------------------------------------------------
+# Composite promote-to-catalog endpoint tests (Task A6)
+# ---------------------------------------------------------------------------
+
+def test_promote_to_catalog_writes_new_composite_yaml(workspace_server):
+    """Promote copies an investigation variant's sidecar into the workspace catalog
+    as <pkg>/composites/<target_name>.composite.yaml, sets the YAML name field,
+    and marks the variant as promoted in spec.yaml."""
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'tuned-baseline.yaml').write_text(yaml.safe_dump({
+        'name': 'tuned-baseline',
+        'state': {'chromosome': {'count': {'_type': 'integer', '_default': 200}}},
+    }, sort_keys=False))
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'baseline': 'tuned-baseline',
+        'variants': [{
+            'name': 'tuned-baseline',
+            'source': 'pbg_testws.composites.baseline',
+            'document': './composites/tuned-baseline.yaml',
+        }],
+        'comparisons': [],
+        'conclusions': '',
+        'question': '', 'hypothesis': '', 'status': 'draft',
+    }, sort_keys=False))
+
+    # Ensure catalog dir exists (the endpoint should create it if missing, but
+    # the workspace fixture already created pbg_testws/).
+    code, j = _post(
+        workspace_server.url + '/api/composite-promote-to-catalog',
+        {'investigation': 'demo', 'variant': 'tuned-baseline',
+         'target_name': 'promoted-thing',
+         'description': 'A promoted composite'},
+    )
+    assert code == 200, j
+
+    target_path = (
+        workspace_server.root / 'pbg_testws' / 'composites'
+        / 'promoted-thing.composite.yaml'
+    )
+    assert target_path.is_file(), f"expected catalog entry at {target_path}"
+
+    doc = yaml.safe_load(target_path.read_text())
+    assert doc['name'] == 'promoted-thing'
+    assert doc.get('description') == 'A promoted composite'
+    # State copied over from the sidecar
+    assert doc['state']['chromosome']['count']['_default'] == 200
+
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    variant = next(v for v in spec['variants'] if v['name'] == 'tuned-baseline')
+    assert variant.get('promoted') is True
+
+
+def test_promote_to_catalog_409_when_target_already_exists(workspace_server):
+    """If the target catalog entry already exists, the endpoint returns 409
+    rather than silently overwriting."""
+    pkg_composites = workspace_server.root / 'pbg_testws' / 'composites'
+    pkg_composites.mkdir(parents=True, exist_ok=True)
+    (pkg_composites / 'thing.composite.yaml').write_text(yaml.safe_dump({
+        'name': 'thing', 'state': {},
+    }, sort_keys=False))
+
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'src.yaml').write_text(yaml.safe_dump({
+        'name': 'src', 'state': {'a': 1},
+    }, sort_keys=False))
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'baseline': 'src',
+        'variants': [{
+            'name': 'src',
+            'source': 'pbg_testws.composites.foo',
+            'document': './composites/src.yaml',
+        }],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/composite-promote-to-catalog',
+        {'investigation': 'demo', 'variant': 'src', 'target_name': 'thing'},
+    )
+    assert code == 409, j
+
+
+def test_promote_to_catalog_404_when_variant_missing(workspace_server):
+    """Unknown variant in an existing investigation yields a 404."""
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'baseline': '',
+        'variants': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/composite-promote-to-catalog',
+        {'investigation': 'demo', 'variant': 'no-such-variant'},
+    )
+    assert code == 404, j

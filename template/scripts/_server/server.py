@@ -621,6 +621,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-composite-perturb":      self._post_investigation_composite_perturb,
             "/api/investigation-composite-rebuild":      self._post_investigation_composite_rebuild,
             "/api/investigation-composite-save-sidecar": self._post_investigation_composite_save_sidecar,
+            "/api/composite-promote-to-catalog":         self._post_composite_promote_to_catalog,
             "/api/investigation-set-observables":    self._post_investigation_set_observables,
             "/api/investigation-set-conclusions":    self._post_investigation_set_conclusions,
             "/api/investigation-set-overview":       self._post_investigation_set_overview,
@@ -3805,6 +3806,98 @@ if __name__ == "__main__":
             return self._json(*_commit_or_run(commit_msg, do_action))
         except Exception as e:
             return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_composite_promote_to_catalog(self, body: dict):
+        """POST /api/composite-promote-to-catalog
+        Body: {investigation, variant, target_name?, description?}
+
+        Promote an investigation variant's sidecar composite into the
+        workspace-level composite catalog as a new
+        ``<pkg>/composites/<target_name>.composite.yaml`` file. The catalog is
+        YAML-based (see :mod:`scripts._lib.composite_lookup`), so the promoted
+        entry is a YAML file — **not** a Python module.
+
+        Steps:
+          1. Read sidecar at ``investigations/<inv>/composites/<variant>.yaml``.
+          2. Write it as ``<pkg>/composites/<target_name>.composite.yaml`` with
+             the document's ``name`` set to ``target_name`` and, if provided,
+             ``description`` set.
+          3. Mark the variant entry as ``promoted: true`` in spec.yaml.
+
+        Refuses with 409 if the catalog already contains
+        ``<target_name>.composite.yaml`` — promotion is non-destructive.
+        Returns ``{"name": "<target_name>", "path": "<relative path>"}``.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        variant_name = (body.get("variant") or "").strip()
+        target_name = (body.get("target_name") or variant_name).strip()
+        description = body.get("description")
+        if not (inv_name and variant_name):
+            return self._json(
+                {"error": "investigation, variant required"}, 400,
+            )
+
+        # Resolve workspace package path using the same pattern as other
+        # handlers (e.g. _post_investigation_create_from_composite).
+        try:
+            ws_data = yaml.safe_load((WORKSPACE / "workspace.yaml").read_text()) or {}
+        except Exception as e:
+            return self._json({"error": f"failed to read workspace.yaml: {e}"}, 500)
+        pkg = ws_data.get("package_path") or (
+            "pbg_" + (ws_data.get("name") or "").replace("-", "_")
+        )
+        catalog_dir = WORKSPACE / pkg / "composites"
+
+        # Source paths
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": f"investigation {inv_name!r} not found"}, 404)
+        sidecar = inv_dir / "composites" / f"{variant_name}.yaml"
+        if not sidecar.is_file():
+            return self._json(
+                {"error": f"variant {variant_name!r} sidecar not found"}, 404,
+            )
+
+        # Refuse if catalog already has this target
+        target_path = catalog_dir / f"{target_name}.composite.yaml"
+        if target_path.exists():
+            return self._json(
+                {"error": f"catalog entry {target_name!r} already exists"}, 409,
+            )
+
+        rel_path = str(target_path.relative_to(WORKSPACE))
+        commit_msg = (
+            f"feat(catalog): promote {variant_name!r} from "
+            f"investigations/{inv_name} as {target_name!r}"
+        )
+
+        def do_action():
+            catalog_dir.mkdir(parents=True, exist_ok=True)
+            doc = yaml.safe_load(sidecar.read_text()) or {}
+            doc['name'] = target_name
+            if description is not None:
+                doc['description'] = description
+            target_path.write_text(yaml.safe_dump(doc, sort_keys=False))
+            # Mark variant promoted in spec.yaml
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+            for v in (spec.get('variants') or []):
+                if v.get('name') == variant_name:
+                    v['promoted'] = True
+                    break
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            resp, code = _commit_or_run(commit_msg, do_action)
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+        if code == 200:
+            resp = dict(resp)
+            resp["name"] = target_name
+            resp["path"] = rel_path
+            return self._json(resp, 200)
+        return self._json(resp, code)
 
     def _post_composite_process_configs(self, body: dict):
         """POST /api/composite-process-configs {document}
