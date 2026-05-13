@@ -45,6 +45,9 @@
       console.log('[loom-explore inspect]', ev.data);
       // TODO: cross-panel highlighting (out of scope for this task)
     }
+    if (ev.data && ev.data.type === 'explore:emit-changed') {
+      window._explorerEmitPaths = ev.data.paths || [];
+    }
   });
 
   // Pop the current loom-explore iframe contents into a separate window.
@@ -2596,6 +2599,8 @@
       };
       window._loomLastState = window._loomLastState || {};
       window._loomLastState[iframe.id] = payload;
+      // New composite → reset any emit-toggle selections from the previous one.
+      window._explorerEmitPaths = [];
       var post = function() {
         iframe.contentWindow.postMessage(payload, '*');
       };
@@ -2697,7 +2702,12 @@
     fetch('/api/composite-test-run', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({id: window._ceCurrent.id, overrides: overrides, steps: steps}),
+      body: JSON.stringify({
+        id: window._ceCurrent.id,
+        overrides: overrides,
+        steps: steps,
+        emit_paths: window._explorerEmitPaths || [],
+      }),
     })
       .then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
       .then(function(parts) {
@@ -2712,21 +2722,38 @@
           resultsEl.innerHTML = msg;
           return;
         }
-        // Show first few entries per emitter
-        var resultsHtml = '<p><strong>Completed ' + json.steps + ' steps.</strong></p>';
-        var keys = Object.keys(json.results || {});
+        // Summary table: one row per observable, with final value preview.
+        var results = json.results || {};
+        var keys = Object.keys(results);
+        var resultsHtml;
         if (!keys.length) {
-          resultsHtml += '<p class="muted">(No emitters produced output.)</p>';
+          resultsHtml = '<p class="muted">Run complete (' + json.steps +
+            ' steps) — no observables emitted. Select stores in the wiring ' +
+            'view to mark them for emit.</p>';
         } else {
-          resultsHtml += keys.map(function(k) {
-            var entries = json.results[k];
-            var rows = entries.slice(0, 10).map(function(e, i) {
-              return '<tr><td>' + i + '</td><td><code>' + _esc(JSON.stringify(e)) + '</code></td></tr>';
-            }).join('');
-            return '<h4>' + _esc(k) + ' (' + entries.length + ' entries)</h4>' +
-              '<table style="font-size:0.85em"><thead><tr><th>Step</th><th>Value</th></tr></thead><tbody>' +
-              rows + '</tbody></table>';
-          }).join('');
+          resultsHtml = '<div class="ce-run-results"><h4>Run results (' +
+            json.steps + ' steps)</h4>' +
+            '<table style="font-size:0.86em">' +
+            '<thead><tr><th>Observable</th><th>Steps</th><th>Final value</th></tr></thead>' +
+            '<tbody>';
+          keys.sort().forEach(function(k) {
+            var entries = results[k] || [];
+            var lastEntry = entries[entries.length - 1] || {};
+            var preview = '';
+            if (lastEntry && typeof lastEntry === 'object') {
+              Object.keys(lastEntry).forEach(function(field) {
+                if (field === 'time' || field.charAt(0) === '_') return;
+                if (!preview) preview = JSON.stringify(lastEntry[field]);
+              });
+              if (!preview) preview = JSON.stringify(lastEntry);
+            } else {
+              preview = JSON.stringify(lastEntry);
+            }
+            resultsHtml += '<tr><td><code>' + _esc(k) + '</code></td>' +
+              '<td>' + entries.length + '</td>' +
+              '<td><code>' + _esc(preview) + '</code></td></tr>';
+          });
+          resultsHtml += '</tbody></table></div>';
         }
         resultsEl.innerHTML = resultsHtml;
         // Persist + refresh history

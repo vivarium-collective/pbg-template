@@ -1,7 +1,7 @@
 """Unit tests for scripts._lib.composite_runs."""
 from scripts._lib.composite_runs import (
     connect, save_metadata, complete_metadata, query_runs, query_run,
-    inject_sqlite_emitter, auto_label,
+    inject_sqlite_emitter, auto_label, inject_emitter_for_paths,
 )
 
 
@@ -161,3 +161,56 @@ def test_auto_label_truncated_to_80():
     overrides = {f"k{i}": i for i in range(50)}
     out = auto_label(overrides)
     assert len(out) <= 80
+
+
+# -- inject_emitter_for_paths ------------------------------------------------
+
+def test_inject_emitter_for_paths_leaf():
+    """Single-leaf path: user_emitter wires that leaf via a slug port."""
+    state = {"stores": {"level": 1.0}}
+    out = inject_emitter_for_paths(state, ["stores/level"])
+    assert "user_emitter" in out
+    em = out["user_emitter"]
+    assert em["_type"] == "step"
+    assert em["address"] == "local:RAMEmitter"
+    assert em["config"]["emit"] == {"stores_level": "any"}
+    assert em["inputs"] == {"stores_level": ["stores", "level"]}
+
+
+def test_inject_emitter_for_paths_subtree_cascades():
+    """Subtree path: every leaf under the subtree becomes its own port."""
+    state = {"stores": {"level": 1.0, "fields": {"glucose": 5.0}}}
+    out = inject_emitter_for_paths(state, ["stores"])
+    em = out["user_emitter"]
+    # Two leaves: stores/level and stores/fields/glucose
+    assert em["config"]["emit"] == {
+        "stores_fields_glucose": "any",
+        "stores_level": "any",
+    }
+    assert em["inputs"] == {
+        "stores_fields_glucose": ["stores", "fields", "glucose"],
+        "stores_level": ["stores", "level"],
+    }
+
+
+def test_inject_emitter_for_paths_skips_processes():
+    """Walk should skip process/step nodes so only stores are emitted."""
+    state = {
+        "root": {
+            "proc": {"_type": "process", "address": "local:Foo",
+                      "outputs": {}, "interval": 1.0},
+            "store": 1.0,
+        },
+    }
+    out = inject_emitter_for_paths(state, ["root"])
+    em = out["user_emitter"]
+    assert em["config"]["emit"] == {"root_store": "any"}
+    assert em["inputs"] == {"root_store": ["root", "store"]}
+
+
+def test_inject_emitter_for_paths_empty_list_noop():
+    """Empty path list returns state unchanged."""
+    state = {"stores": {"level": 1.0}}
+    out = inject_emitter_for_paths(state, [])
+    assert out is state
+    assert "user_emitter" not in out

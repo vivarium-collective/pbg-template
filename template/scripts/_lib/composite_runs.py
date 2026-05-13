@@ -210,3 +210,99 @@ def inject_sqlite_emitter(state: dict, *, run_id: str,
         "inputs": inputs,
     }
     return new_state
+
+
+def inject_emitter_for_paths(state: dict, explicit_paths: list[str]) -> dict:
+    """Inject a RAMEmitter step that captures the user-selected store paths.
+
+    ``explicit_paths`` is a list of '/'-joined path strings (e.g.
+    ``['stores/level', 'stores/fields']``). For each explicit path, this
+    function walks the state tree under that path and collects every
+    leaf-ish store node (anything that isn't a dict with
+    ``_type='process'`` or ``_type='step'``). The resulting set is used to
+    build the emitter's ``config.emit`` schema and ``inputs`` wiring.
+
+    The injected emitter is named ``user_emitter``; idempotent on re-call —
+    a second call with the same path set is a no-op.
+
+    Subsequent ``inject_sqlite_emitter()`` will then copy this emitter's
+    schema + inputs onto the SQLiteEmitter for persistence.
+    """
+    if not explicit_paths:
+        return state
+
+    leaves = _collect_emit_leaves(state, explicit_paths)
+    if not leaves:
+        return state
+
+    emit_schema: dict = {}
+    inputs: dict = {}
+    for path_parts in sorted(leaves, key=lambda p: tuple(p)):
+        # Slug-safe port name from the path
+        key = "_".join(path_parts) if path_parts else "root"
+        emit_schema[key] = "any"
+        inputs[key] = list(path_parts)
+
+    new_state = dict(state)
+    new_state["user_emitter"] = {
+        "_type": "step",
+        "address": "local:RAMEmitter",
+        "config": {"emit": emit_schema},
+        "inputs": inputs,
+    }
+    return new_state
+
+
+def _collect_emit_leaves(state: dict,
+                          explicit_paths: list[str]) -> list[list[str]]:
+    """For each explicit_path (slash-joined), walk the state tree and return
+    every leaf store path (path that doesn't lead to a dict with
+    ``_type`` of ``process``/``step``).
+
+    A path resolves into the state tree by indexing top-level keys
+    recursively. If the path points to a leaf (non-dict or dict without
+    ``_type``), the path itself is a leaf. If the path points to a
+    subtree, walk it.
+    """
+    leaves: list[list[str]] = []
+    for raw in explicit_paths:
+        parts = [p for p in raw.split("/") if p]
+        node = _resolve_path(state, parts)
+        if node is None:
+            continue
+        _walk_collect(node, parts, leaves)
+    # Dedup while preserving order
+    seen: set[tuple[str, ...]] = set()
+    out: list[list[str]] = []
+    for p in leaves:
+        t = tuple(p)
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append(p)
+    return out
+
+
+def _resolve_path(state: dict, parts: list[str]):
+    node = state
+    for p in parts:
+        if not isinstance(node, dict) or p not in node:
+            return None
+        node = node[p]
+    return node
+
+
+def _walk_collect(node, path: list[str], out: list[list[str]]) -> None:
+    # If node is a process or step, skip — we only emit store values.
+    if isinstance(node, dict) and node.get("_type") in ("process", "step"):
+        return
+    # If node is a dict, treat its non-meta keys as child store paths and
+    # recurse into each. Each key becomes its own leaf or sub-walk.
+    if isinstance(node, dict):
+        children = {k: v for k, v in node.items() if not k.startswith("_")}
+        if children:
+            for k, v in children.items():
+                _walk_collect(v, path + [k], out)
+            return
+    # Otherwise it's a leaf store
+    out.append(path)

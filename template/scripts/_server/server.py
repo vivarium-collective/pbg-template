@@ -4742,6 +4742,9 @@ if __name__ == "__main__":
         overrides = body.get("overrides") or {}
         steps = int(body.get("steps") or 5)
         label = (body.get("label") or "").strip() or auto_label(overrides)
+        emit_paths = body.get("emit_paths") or []
+        if not isinstance(emit_paths, list):
+            emit_paths = []
 
         if not spec_id:
             return self._json({"error": "missing id"}, 400)
@@ -4780,9 +4783,52 @@ if __name__ == "__main__":
                                            spec.get("parameters") or {},
                                            overrides)
 
+        # User-selected emit paths from the Composite Explorer wiring view.
+        if emit_paths:
+            state = cr.inject_emitter_for_paths(state, emit_paths)
+
         # Persistence wiring
         db_file = str(WORKSPACE / ".pbg" / "composite-runs.db")
         run_id = cr.generate_run_id(spec_id, overrides)
+
+        # Single-run scratchpad mode: the Composite Explorer keeps only the
+        # latest run per composite. Clear prior rows for this spec_id from
+        # both runs_meta (composite_runs) and history (SQLiteEmitter) before
+        # persisting the new one. Best-effort; never blocks the run.
+        try:
+            db_path = WORKSPACE / ".pbg" / "composite-runs.db"
+            if db_path.is_file():
+                _cleanup_conn = sqlite3.connect(str(db_path))
+                try:
+                    prior_run_ids = [
+                        r[0] for r in _cleanup_conn.execute(
+                            "SELECT run_id FROM runs_meta WHERE spec_id = ?",
+                            (spec_id,),
+                        ).fetchall()
+                    ]
+                    if prior_run_ids:
+                        has_history = _cleanup_conn.execute(
+                            "SELECT name FROM sqlite_master "
+                            "WHERE type='table' AND name='history'"
+                        ).fetchone()
+                        if has_history:
+                            placeholders = ",".join("?" * len(prior_run_ids))
+                            _cleanup_conn.execute(
+                                "DELETE FROM history WHERE simulation_id IN "
+                                "(" + placeholders + ")",
+                                prior_run_ids,
+                            )
+                    _cleanup_conn.execute(
+                        "DELETE FROM runs_meta WHERE spec_id = ?",
+                        (spec_id,),
+                    )
+                    _cleanup_conn.commit()
+                finally:
+                    _cleanup_conn.close()
+        except Exception:
+            # Best-effort cleanup; don't fail the run if a table is missing.
+            pass
+
         state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
 
         # Subprocess-style run. Match existing pattern: composite.run(steps) + flatten tuple keys.
