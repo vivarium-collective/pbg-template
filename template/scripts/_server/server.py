@@ -3678,7 +3678,7 @@ if __name__ == "__main__":
         # at create time). Legacy specs use a single top-level `composite` key
         # and resolve via the workspace registry.
         composite_name = None
-        composite_doc = None  # raw {state, parameters, ...} dict
+        composite_doc = None  # raw {state, parameters, ...} dict OR a flat state dict
         inv_dir = WORKSPACE / "investigations" / inv
         if "variants" in spec:
             # v2 study shape: prefer baseline; if absent, the first declared variant.
@@ -3714,9 +3714,22 @@ if __name__ == "__main__":
                 400,
             )
 
-        state = substitute_parameters(composite_doc.get("state") or {},
-                                       composite_doc.get("parameters") or {},
-                                       overrides)
+        # Two sidecar shapes coexist in the wild:
+        #   1. `{state: {...}, parameters: {...}}`  — file-spec composites
+        #   2. `{...}`  — flat state dict from @composite_generator outputs
+        # composite-test-run handles both (see line ~4775); mirror that here.
+        if isinstance(composite_doc, dict) and "state" in composite_doc \
+                and isinstance(composite_doc["state"], dict):
+            state = substitute_parameters(composite_doc.get("state") or {},
+                                           composite_doc.get("parameters") or {},
+                                           overrides)
+        else:
+            # Flat state dict: no parameter substitution layer to apply,
+            # overrides are best-effort applied at the top level only.
+            state = dict(composite_doc) if isinstance(composite_doc, dict) else {}
+            for k, v in (overrides or {}).items():
+                if k in state:
+                    state[k] = v
         db_file = str(WORKSPACE / "investigations" / inv / "runs.db")
         run_id = cr.generate_run_id(composite_name, overrides)
         state = cr.inject_sqlite_emitter(state, run_id=run_id, db_file=db_file)
