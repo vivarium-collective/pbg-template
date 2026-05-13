@@ -619,6 +619,43 @@ def test_post_set_observables_rejects_missing_investigation_dir(workspace_server
     assert code == 404
 
 
+# ---------------------------------------------------------------------------
+# Investigation set-conclusions endpoint tests (Task A3)
+# ---------------------------------------------------------------------------
+
+def test_post_set_conclusions_writes_markdown(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
+    }, sort_keys=False))
+
+    md = "# Conclusions\n\nThe DnaA threshold is approximately 50 molecules.\n"
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-conclusions',
+        {'investigation': 'demo', 'markdown': md},
+    )
+    assert code in (200, 500), j
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['conclusions'] == md
+
+
+def test_post_set_conclusions_rejects_oversize(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
+    }, sort_keys=False))
+
+    oversize = 'x' * (256 * 1024 + 1)  # 256KB + 1 byte
+    code, j = _post(
+        workspace_server.url + '/api/investigation-set-conclusions',
+        {'investigation': 'demo', 'markdown': oversize},
+    )
+    assert code == 400, j
+    assert '256' in j.get('error', '') or 'size' in j.get('error', '').lower() or 'limit' in j.get('error', '').lower()
+
+
 def test_post_save_sidecar_writes_yaml_and_updates_spec(workspace_server):
     """Save-sidecar writes investigations/<inv>/composites/<name>.yaml and adds the entry to spec.yaml."""
     inv = workspace_server.root / 'investigations' / 'demo'

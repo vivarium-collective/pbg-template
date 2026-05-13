@@ -617,6 +617,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-composite-rebuild":      self._post_investigation_composite_rebuild,
             "/api/investigation-composite-save-sidecar": self._post_investigation_composite_save_sidecar,
             "/api/investigation-set-observables":    self._post_investigation_set_observables,
+            "/api/investigation-set-conclusions":    self._post_investigation_set_conclusions,
             "/api/composite-process-configs": self._post_composite_process_configs,
             "/api/composite-state-tree-doc":     self._post_composite_state_tree_doc,
             "/api/compose-doc-inject-emitter":   self._post_compose_doc_inject_emitter,
@@ -3849,6 +3850,35 @@ if __name__ == "__main__":
                 spec['observables'] = [{'path': []}]
             else:
                 spec['observables'] = [{'path': list(p)} for p in paths if p]
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_investigation_set_conclusions(self, body: dict):
+        """POST /api/investigation-set-conclusions {investigation, markdown}
+        Writes spec.yaml.conclusions. Rejects bodies over 256KB.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        markdown = body.get("markdown", "")
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if not isinstance(markdown, str):
+            return self._json({"error": "markdown must be a string"}, 400)
+        if len(markdown.encode("utf-8")) > 256 * 1024:
+            return self._json({"error": "conclusions exceed 256KB limit"}, 400)
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        commit_msg = f"feat(investigations/{inv_name}): set conclusions"
+
+        def do_action():
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec['conclusions'] = markdown
             spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
 
         try:
