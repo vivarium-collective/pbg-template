@@ -349,16 +349,19 @@ def test_post_composite_perturb_renders_derived_with_parameter_override(workspac
         'state': {'replication': {'_type': 'process', 'address': 'local:Foo',
                                     'config': {'rate': 1.0}}},
     }))
+    # v2 spec shape: variants list, intervention nested
     (inv / 'spec.yaml').write_text(yaml.safe_dump({
         'name': 'demo',
-        'composites': [{'name': 'baseline', 'source': 'pkg.x',
-                         'document': './composites/baseline.yaml'}],
+        'baseline': 'baseline',
+        'variants': [{'name': 'baseline', 'source': 'pkg.x',
+                       'document': './composites/baseline.yaml'}],
         'runs': [],
     }, sort_keys=False))
 
     code, j = _post(
         workspace_server.url + '/api/investigation-composite-perturb',
         {'investigation': 'demo', 'name': 'high-rate', 'extends': 'baseline',
+         'description': 'Doubled replication rate',
          'parameter_overrides': {'state.replication.config.rate': 2.0}},
     )
     assert code in (200, 500), j
@@ -371,11 +374,19 @@ def test_post_composite_perturb_renders_derived_with_parameter_override(workspac
     parent = yaml.safe_load((composites / 'baseline.yaml').read_text())
     assert parent['state']['replication']['config']['rate'] == 1.0
 
-    # spec.yaml gets the derived entry with recipe preserved
+    # spec.yaml gets the derived entry with the recipe nested under `intervention:`
     spec = yaml.safe_load((inv / 'spec.yaml').read_text())
-    entry = next(c for c in spec['composites'] if c['name'] == 'high-rate')
+    assert 'variants' in spec, 'perturb should write v2 shape (variants:)'
+    assert 'composites' not in spec, 'perturb must not regress to legacy composites: key'
+    entry = next(c for c in spec['variants'] if c['name'] == 'high-rate')
     assert entry['extends'] == 'baseline'
-    assert entry['parameter_overrides']['state.replication.config.rate'] == 2.0
+    assert entry['document'] == './composites/high-rate.yaml'
+    iv = entry['intervention']
+    assert iv['description'] == 'Doubled replication rate'
+    assert iv['parameter_overrides']['state.replication.config.rate'] == 2.0
+    # Flat overrides MUST NOT live at the top of the variant entry anymore.
+    assert 'parameter_overrides' not in entry
+    assert 'process_overrides' not in entry
 
 
 def test_post_composite_perturb_with_process_override(workspace_server):
@@ -389,8 +400,9 @@ def test_post_composite_perturb_with_process_override(workspace_server):
     }))
     (inv / 'spec.yaml').write_text(yaml.safe_dump({
         'name': 'demo',
-        'composites': [{'name': 'baseline', 'source': 'pkg.x',
-                         'document': './composites/baseline.yaml'}],
+        'baseline': 'baseline',
+        'variants': [{'name': 'baseline', 'source': 'pkg.x',
+                       'document': './composites/baseline.yaml'}],
         'runs': [],
     }, sort_keys=False))
 
@@ -403,6 +415,11 @@ def test_post_composite_perturb_with_process_override(workspace_server):
     doc = yaml.safe_load((composites / 'no-repl.yaml').read_text())
     assert 'replication' not in doc.get('state', {})
 
+    # Verify v2 shape: variants[].intervention.process_overrides
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    entry = next(c for c in spec['variants'] if c['name'] == 'no-repl')
+    assert entry['intervention']['process_overrides'] == {'replication': None}
+
 
 def test_post_composite_perturb_invalid_path_rejected(workspace_server):
     inv = workspace_server.root / 'investigations' / 'demo'
@@ -413,8 +430,9 @@ def test_post_composite_perturb_invalid_path_rejected(workspace_server):
     }))
     (inv / 'spec.yaml').write_text(yaml.safe_dump({
         'name': 'demo',
-        'composites': [{'name': 'baseline', 'source': 'pkg.x',
-                         'document': './composites/baseline.yaml'}],
+        'baseline': 'baseline',
+        'variants': [{'name': 'baseline', 'source': 'pkg.x',
+                       'document': './composites/baseline.yaml'}],
         'runs': [],
     }, sort_keys=False))
     code, j = _post(
@@ -423,6 +441,96 @@ def test_post_composite_perturb_invalid_path_rejected(workspace_server):
          'parameter_overrides': {'state.nonexistent.field': 1}},
     )
     assert code == 400, j
+
+
+def test_post_composite_perturb_writes_v2_intervention_shape(workspace_server):
+    """Test 1: Verify perturb writes variants:[].intervention:{...} v2 shape."""
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'baseline.yaml').write_text(yaml.safe_dump({
+        'name': 'b',
+        'state': {'replication': {'_type': 'process', 'address': 'local:Foo',
+                                    'config': {'rate': 1.0}}},
+    }))
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'baseline': 'baseline',
+        'variants': [{'name': 'baseline', 'source': 'pkg.x',
+                       'document': './composites/baseline.yaml'}],
+        'runs': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-composite-perturb',
+        {'investigation': 'demo', 'name': 'fast', 'extends': 'baseline',
+         'description': 'Faster replication',
+         'parameter_overrides': {'state.replication.config.rate': 5.0}},
+    )
+    assert code in (200, 500), j
+
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert 'variants' in spec
+    assert 'composites' not in spec
+    variants = spec['variants']
+    assert len(variants) == 2  # baseline + fast
+    fast = next(v for v in variants if v['name'] == 'fast')
+    assert fast['extends'] == 'baseline'
+    assert fast['document'] == './composites/fast.yaml'
+    assert fast['intervention']['description'] == 'Faster replication'
+    assert fast['intervention']['parameter_overrides'] == {
+        'state.replication.config.rate': 5.0,
+    }
+
+
+def test_post_composite_perturb_replaces_existing_variant(workspace_server):
+    """Test 2: Second perturb call with the same name REPLACES the prior variant
+    (no duplicate entry), and the intervention reflects the latest values.
+    Supports the Interventions-tab Save-edit flow."""
+    inv = workspace_server.root / 'investigations' / 'demo'
+    composites = inv / 'composites'
+    composites.mkdir(parents=True)
+    (composites / 'baseline.yaml').write_text(yaml.safe_dump({
+        'name': 'b',
+        'state': {'replication': {'_type': 'process', 'address': 'local:Foo',
+                                    'config': {'rate': 1.0}}},
+    }))
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'baseline': 'baseline',
+        'variants': [{'name': 'baseline', 'source': 'pkg.x',
+                       'document': './composites/baseline.yaml'}],
+        'runs': [],
+    }, sort_keys=False))
+
+    # First perturb — creates the variant.
+    code1, _ = _post(
+        workspace_server.url + '/api/investigation-composite-perturb',
+        {'investigation': 'demo', 'name': 'edit-me', 'extends': 'baseline',
+         'description': 'first version',
+         'parameter_overrides': {'state.replication.config.rate': 2.0}},
+    )
+    assert code1 in (200, 500)
+
+    # Second perturb with the SAME name — should REPLACE, not duplicate.
+    code2, _ = _post(
+        workspace_server.url + '/api/investigation-composite-perturb',
+        {'investigation': 'demo', 'name': 'edit-me', 'extends': 'baseline',
+         'description': 'updated description',
+         'parameter_overrides': {'state.replication.config.rate': 3.0}},
+    )
+    assert code2 in (200, 500)
+
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    variants = spec['variants']
+    matches = [v for v in variants if v['name'] == 'edit-me']
+    assert len(matches) == 1, f"expected exactly one 'edit-me' variant, got {len(matches)}"
+    iv = matches[0]['intervention']
+    assert iv['description'] == 'updated description'
+    assert iv['parameter_overrides']['state.replication.config.rate'] == 3.0
+    # And the sidecar reflects the latest override
+    derived_doc = yaml.safe_load((composites / 'edit-me.yaml').read_text())
+    assert derived_doc['state']['replication']['config']['rate'] == 3.0
 
 
 # ---------------------------------------------------------------------------

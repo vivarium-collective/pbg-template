@@ -3684,8 +3684,17 @@ if __name__ == "__main__":
 
     def _post_investigation_composite_perturb(self, body: dict):
         """POST /api/investigation-composite-perturb {investigation, name, extends,
-        parameter_overrides?, process_overrides?}
-        Derive a new composite from an existing one by applying overrides.
+        description?, parameter_overrides?, process_overrides?}
+
+        Derive a new composite from an existing one by applying overrides, and
+        register it as a variant in the study's ``spec.yaml``.
+
+        Writes v2 shape: a ``variants:`` list with the intervention recipe
+        nested under ``intervention: {description, parameter_overrides?,
+        process_overrides?}``. If a variant with ``name`` already exists, it is
+        REPLACED in-place (the sidecar composite document and the variant
+        entry are both overwritten) — this supports the Interventions tab's
+        Save-edit flow without a separate endpoint.
         """
         inv_name = (body.get("investigation") or "").strip()
         comp_name = (body.get("name") or "").strip()
@@ -3705,8 +3714,8 @@ if __name__ == "__main__":
 
         composites_dir = inv_dir / "composites"
         derived = composites_dir / f"{comp_name}.yaml"
-        if derived.is_file():
-            return self._json({"error": f"composite {comp_name!r} already exists"}, 409)
+        # NB: do NOT 409 on existing — perturb of an existing variant means
+        # "edit this intervention", which overwrites the sidecar in-place.
 
         from scripts._lib.composite_recipes import (
             apply_parameter_overrides, apply_process_overrides,
@@ -3729,14 +3738,29 @@ if __name__ == "__main__":
         def do_action():
             derived.write_text(yaml.safe_dump(derived_doc, sort_keys=False))
             spec = yaml.safe_load(spec_path.read_text()) or {}
-            composites = spec.setdefault('composites', [])
+            variants = spec.setdefault('variants', [])
             entry = {'name': comp_name, 'extends': extends,
                      'document': f'./composites/{comp_name}.yaml'}
+            intervention = {
+                'description': body.get('description') if body.get('description') is not None else '',
+            }
             if body.get('parameter_overrides'):
-                entry['parameter_overrides'] = body['parameter_overrides']
+                intervention['parameter_overrides'] = body['parameter_overrides']
             if body.get('process_overrides'):
-                entry['process_overrides'] = body['process_overrides']
-            composites.append(entry)
+                intervention['process_overrides'] = body['process_overrides']
+            # Only attach the intervention block if at least one override was
+            # supplied; description-only on a derived variant would otherwise
+            # carry an empty recipe.
+            if intervention.get('parameter_overrides') or intervention.get('process_overrides'):
+                entry['intervention'] = intervention
+            existing_idx = next(
+                (i for i, v in enumerate(variants) if v.get('name') == comp_name),
+                None,
+            )
+            if existing_idx is not None:
+                variants[existing_idx] = entry  # full replace
+            else:
+                variants.append(entry)
             spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
 
         try:

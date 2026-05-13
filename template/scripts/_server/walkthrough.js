@@ -2904,7 +2904,9 @@
         '</div>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="interventions">' +
-        '<div class="ws-interventions-stub">Interventions — coming in B4.</div>' +
+        '<div id="inv-interventions-host">' +
+          '<p class="empty-state">Loading interventions…</p>' +
+        '</div>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="runs">' +
         (runs.length ? _renderInvestigationRunsTable(runs, name) : '<p class="empty-state">No runs yet — click Run to generate them.</p>') +
@@ -2977,6 +2979,9 @@
     }
     if (tab === 'observables' && window._currentInvestigation) {
       _loadInvObservables(window._currentInvestigation);
+    }
+    if (tab === 'interventions' && window._currentInvestigation) {
+      _loadInterventionsTab(window._currentInvestigation);
     }
   }
   window._invDetailTab = _invDetailTab;
@@ -3106,6 +3111,245 @@
     panel.innerHTML = rows.join('<br>');
   }
   window._renderInvCompositeIntervention = _renderInvCompositeIntervention;
+
+  // ── Interventions tab (B4) ────────────────────────────────────────────────
+  // Reads from `window._invCompositesCache` (populated by `_loadInvComposites`)
+  // and `window._invBaselineCache` to know which variant is baseline.
+  // Renders a table of non-baseline variants; row click expands an inline
+  // editor; Save POSTs to `/api/investigation-composite-perturb` which
+  // replaces the existing variant in v2 spec shape.
+
+  function _loadInterventionsTab(invName) {
+    var entries = window._invCompositesCache || null;
+    if (entries && entries.length) {
+      _renderInterventionsTab(invName, entries);
+      return;
+    }
+    // Cache miss — fetch and then render.
+    fetch('/api/investigation-composites?investigation=' + encodeURIComponent(invName))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var list = (data && data.composites) || [];
+        window._invCompositesCache = list;
+        _renderInterventionsTab(invName, list);
+      })
+      .catch(function(err) {
+        var host = document.getElementById('inv-interventions-host');
+        if (host) host.innerHTML = '<p style="color:#c00">Failed to load: ' + _esc(err) + '</p>';
+      });
+  }
+  window._loadInterventionsTab = _loadInterventionsTab;
+
+  function _renderInterventionsTab(invName, entries) {
+    var host = document.getElementById('inv-interventions-host');
+    if (!host) return;
+    var baseline = window._invBaselineCache || '';
+    var nonBaseline = entries.filter(function(e) {
+      return e && e.name && e.name !== baseline;
+    });
+    if (nonBaseline.length === 0) {
+      host.innerHTML =
+        '<p class="empty-state">No interventions yet. ' +
+        'Add a variant by clicking <em>Perturb</em> on the baseline in the Composites tab.</p>';
+      return;
+    }
+    var rows = nonBaseline.map(function(v) {
+      var iv = v.intervention || {};
+      var pCount = Object.keys(iv.parameter_overrides || {}).length;
+      var prCount = Object.keys(iv.process_overrides || {}).length;
+      var nameJs = _esc(v.name).replace(/'/g, '&#39;');
+      return (
+        '<tr class="inv-iv-row" data-name="' + _esc(v.name) + '" style="cursor:pointer">' +
+          '<td><strong>' + _esc(v.name) + '</strong></td>' +
+          '<td><code>' + _esc(v.extends || '—') + '</code></td>' +
+          '<td>' + (iv.description ? _esc(iv.description) : '<em class="muted">—</em>') + '</td>' +
+          '<td>' + (pCount ? (pCount + ' key' + (pCount === 1 ? '' : 's')) : '<em class="muted">—</em>') + '</td>' +
+          '<td>' + (prCount ? (prCount + ' key' + (prCount === 1 ? '' : 's')) : '<em class="muted">—</em>') + '</td>' +
+        '</tr>' +
+        '<tr class="inv-iv-edit" data-name="' + _esc(v.name) + '" style="display:none">' +
+          '<td colspan="5" id="inv-iv-edit-' + _esc(v.name) + '"></td>' +
+        '</tr>'
+      );
+    }).join('');
+    host.innerHTML =
+      '<table class="inv-interventions" style="width:100%;border-collapse:collapse">' +
+        '<thead>' +
+          '<tr style="border-bottom:1px solid #ccc;text-align:left">' +
+            '<th style="padding:6px">Variant</th>' +
+            '<th style="padding:6px">Parent</th>' +
+            '<th style="padding:6px">Description</th>' +
+            '<th style="padding:6px">Param overrides</th>' +
+            '<th style="padding:6px">Process overrides</th>' +
+          '</tr>' +
+        '</thead>' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table>';
+    // Wire row click → expand editor
+    Array.prototype.forEach.call(host.querySelectorAll('.inv-iv-row'), function(tr) {
+      tr.addEventListener('click', function() {
+        var nm = tr.getAttribute('data-name');
+        _toggleInterventionEditor(invName, nm);
+      });
+    });
+    // Auto-expand if requested via the Composites-tab jump button
+    var jumpTo = window._interventionsJumpTo;
+    if (jumpTo) {
+      window._interventionsJumpTo = null;
+      // Defer to next tick so the DOM is settled before we click-toggle.
+      setTimeout(function() {
+        _toggleInterventionEditor(invName, jumpTo, /*forceOpen=*/true);
+      }, 0);
+    }
+  }
+  window._renderInterventionsTab = _renderInterventionsTab;
+
+  function _toggleInterventionEditor(invName, name, forceOpen) {
+    var hostRow = document.querySelector(
+      '.inv-iv-edit[data-name="' + name.replace(/"/g, '\\"') + '"]');
+    if (!hostRow) return;
+    var cell = hostRow.querySelector('td');
+    var isOpen = hostRow.style.display !== 'none';
+    if (isOpen && !forceOpen) {
+      hostRow.style.display = 'none';
+      if (cell) cell.innerHTML = '';
+      return;
+    }
+    // Close all other editors first (single-edit-at-a-time UX).
+    Array.prototype.forEach.call(
+      document.querySelectorAll('.inv-iv-edit'),
+      function(tr) {
+        if (tr !== hostRow) {
+          tr.style.display = 'none';
+          var c = tr.querySelector('td');
+          if (c) c.innerHTML = '';
+        }
+      }
+    );
+    hostRow.style.display = '';
+    var entries = window._invCompositesCache || [];
+    var entry = null;
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i] && entries[i].name === name) { entry = entries[i]; break; }
+    }
+    if (!entry) {
+      if (cell) cell.innerHTML = '<p style="color:#c00">Variant not found in cache.</p>';
+      return;
+    }
+    var iv = entry.intervention || {};
+    var desc = iv.description || '';
+    var paramJson = JSON.stringify(iv.parameter_overrides || {}, null, 2);
+    var procJson = JSON.stringify(iv.process_overrides || {}, null, 2);
+    var inputId = 'inv-iv-desc-' + name;
+    var paramId = 'inv-iv-param-' + name;
+    var procId = 'inv-iv-proc-' + name;
+    var errId = 'inv-iv-err-' + name;
+    cell.innerHTML =
+      '<div style="padding:10px;background:#fafafa;border:1px solid #eee">' +
+        '<div style="margin-bottom:8px">' +
+          '<label style="display:block;font-weight:600;margin-bottom:2px">Description</label>' +
+          '<input type="text" id="' + _esc(inputId) + '" value="' + _esc(desc) +
+            '" style="width:100%;padding:4px">' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+          '<div>' +
+            '<label style="display:block;font-weight:600;margin-bottom:2px">Parameter overrides (JSON)</label>' +
+            '<textarea id="' + _esc(paramId) + '" rows="8"' +
+              ' style="width:100%;font-family:monospace;font-size:12px">' +
+              _esc(paramJson) +
+            '</textarea>' +
+          '</div>' +
+          '<div>' +
+            '<label style="display:block;font-weight:600;margin-bottom:2px">Process overrides (JSON)</label>' +
+            '<textarea id="' + _esc(procId) + '" rows="8"' +
+              ' style="width:100%;font-family:monospace;font-size:12px">' +
+              _esc(procJson) +
+            '</textarea>' +
+          '</div>' +
+        '</div>' +
+        '<div id="' + _esc(errId) + '" style="color:#c00;margin-top:6px;min-height:1em"></div>' +
+        '<div style="margin-top:8px">' +
+          '<button class="action-btn" data-iv-save="' + _esc(name) + '">Save</button> ' +
+          '<button class="btn-mini" data-iv-cancel="' + _esc(name) + '">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    var saveBtn = cell.querySelector('[data-iv-save]');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', function() {
+        _saveIntervention(invName, name, entry.extends || '');
+      });
+    }
+    var cancelBtn = cell.querySelector('[data-iv-cancel]');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', function() {
+        hostRow.style.display = 'none';
+        cell.innerHTML = '';
+      });
+    }
+  }
+  window._toggleInterventionEditor = _toggleInterventionEditor;
+
+  function _saveIntervention(invName, name, extendsName) {
+    var descEl = document.getElementById('inv-iv-desc-' + name);
+    var paramEl = document.getElementById('inv-iv-param-' + name);
+    var procEl = document.getElementById('inv-iv-proc-' + name);
+    var errEl = document.getElementById('inv-iv-err-' + name);
+    if (!descEl || !paramEl || !procEl) return;
+    if (errEl) errEl.textContent = '';
+    var paramObj, procObj;
+    try {
+      paramObj = paramEl.value.trim() ? JSON.parse(paramEl.value) : {};
+      if (paramObj === null || typeof paramObj !== 'object' || Array.isArray(paramObj)) {
+        throw new Error('parameter_overrides must be a JSON object');
+      }
+    } catch (e) {
+      if (errEl) errEl.textContent = 'Parameter overrides JSON error: ' + (e.message || e);
+      return;
+    }
+    try {
+      procObj = procEl.value.trim() ? JSON.parse(procEl.value) : {};
+      if (procObj === null || typeof procObj !== 'object' || Array.isArray(procObj)) {
+        throw new Error('process_overrides must be a JSON object');
+      }
+    } catch (e) {
+      if (errEl) errEl.textContent = 'Process overrides JSON error: ' + (e.message || e);
+      return;
+    }
+    var body = {
+      investigation: invName,
+      name: name,
+      extends: extendsName,
+      description: descEl.value || '',
+      parameter_overrides: paramObj,
+      process_overrides: procObj,
+    };
+    fetch('/api/investigation-composite-perturb', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    })
+      .then(function(r) {
+        return r.json().then(function(j) { return {ok: r.ok, body: j}; });
+      })
+      .then(function(res) {
+        if (!res.ok) {
+          if (errEl) errEl.textContent = (res.body && res.body.error) || 'save failed';
+          return;
+        }
+        if (typeof _showToast === 'function') _showToast('Saved intervention "' + name + '"');
+        // Re-fetch composites so the cache and table reflect the new state.
+        fetch('/api/investigation-composites?investigation=' + encodeURIComponent(invName))
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            var list = (data && data.composites) || [];
+            window._invCompositesCache = list;
+            _renderInterventionsTab(invName, list);
+          });
+      })
+      .catch(function(err) {
+        if (errEl) errEl.textContent = 'Network error: ' + err;
+      });
+  }
+  window._saveIntervention = _saveIntervention;
 
   // ── Investigation Observables tab handlers ────────────────────────────────
 
