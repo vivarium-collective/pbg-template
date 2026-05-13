@@ -691,3 +691,39 @@ def test_post_save_sidecar_rejects_missing_fields(workspace_server):
         {'investigation': 'demo'},
     )
     assert code == 400, j
+
+
+# ---------------------------------------------------------------------------
+# Composite process configs endpoint tests
+# ---------------------------------------------------------------------------
+
+def test_post_composite_process_configs_returns_rows(workspace_server):
+    doc = {
+        'parameters': {'rate': {'default': 1.0, 'units': '1/s'}},
+        'state': {
+            'p': {'_type': 'process', 'address': 'local:Foo',
+                  'config': {'rate': 2.5}},
+        },
+    }
+    code, j = _post(
+        workspace_server.url + '/api/composite-process-configs',
+        {'document': doc},
+    )
+    assert code == 200, j
+    rows = j['rows']
+    assert len(rows) == 1
+    assert rows[0]['name'] == 'p'
+    assert rows[0]['address'] == 'local:Foo'
+    cfg = rows[0]['configs'][0]
+    assert cfg['key'] == 'rate'
+    assert cfg['value'] == 2.5
+    assert cfg['default'] == 1.0
+    assert cfg['units'] == '1/s'
+
+
+def test_post_composite_process_configs_rejects_missing_document(workspace_server):
+    code, j = _post(
+        workspace_server.url + '/api/composite-process-configs',
+        {},
+    )
+    assert code == 400, j

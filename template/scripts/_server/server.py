@@ -615,6 +615,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-composite-rebuild":      self._post_investigation_composite_rebuild,
             "/api/investigation-composite-save-sidecar": self._post_investigation_composite_save_sidecar,
             "/api/investigation-set-observables":    self._post_investigation_set_observables,
+            "/api/composite-process-configs": self._post_composite_process_configs,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -3659,6 +3660,20 @@ if __name__ == "__main__":
             return self._json(*_commit_or_run(commit_msg, do_action))
         except Exception as e:
             return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_composite_process_configs(self, body: dict):
+        """POST /api/composite-process-configs {document}
+        Returns: {rows: [{name, address, configs: [{key, value, default?, units?, description?}]}, ...]}
+
+        Walks the document and returns a row per process node, with all its
+        config keys + defaults/units pulled from the parameters block when
+        available.
+        """
+        from scripts._lib.compose_doc_edit import walk_process_configs
+        doc = body.get("document")
+        if not isinstance(doc, dict):
+            return self._json({"error": "document required"}, 400)
+        return self._json({"rows": walk_process_configs(doc)}, 200)
 
     def _post_investigation_composite_rebuild(self, body: dict):
         """POST /api/investigation-composite-rebuild {investigation, name}

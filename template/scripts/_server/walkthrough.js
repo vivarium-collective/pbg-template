@@ -2151,9 +2151,88 @@
 
   /** Stub renderers — replaced by Tasks 4-6 when those tasks land. */
   function _ceRenderConfigure() {
-    var el = document.getElementById('ce-panel-configure');
-    if (el) el.innerHTML = '<p class="empty-state">Configure tab — Task 4.</p>';
+    var panel = document.getElementById('ce-panel-configure');
+    if (!panel) return;
+    if (!window._composeDoc) {
+      panel.innerHTML = '<p class="empty-state">No composite loaded.</p>';
+      return;
+    }
+    fetch('/api/composite-process-configs', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ document: window._composeDoc }),
+    }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        var rows = data.rows || [];
+        if (rows.length === 0) {
+          panel.innerHTML = '<p class="empty-state">No processes in this composite.</p>';
+          return;
+        }
+        panel.innerHTML = rows.map(function(row) {
+          var configs = (row.configs || []).map(function(c) {
+            var inputType = typeof c.value;
+            var inputAttr, valAttr;
+            if (inputType === 'number') {
+              inputAttr = 'type="number" step="any"';
+              valAttr = 'value="' + _esc(String(c.value)) + '"';
+            } else if (inputType === 'boolean') {
+              inputAttr = 'type="checkbox"' + (c.value ? ' checked' : '');
+              valAttr = '';
+            } else {
+              inputAttr = 'type="text"';
+              valAttr = 'value="' + _esc(String(c.value == null ? '' : c.value)) + '"';
+            }
+            var unitsBadge = c.units
+              ? '<span style="color:#888;font-size:0.8em;margin-left:6px">[' + _esc(String(c.units)) + ']</span>'
+              : '';
+            var defStr = (c.default !== undefined)
+              ? ('default: ' + _esc(JSON.stringify(c.default)))
+              : '';
+            return '<div style="display:grid;grid-template-columns:160px 1fr 200px;gap:8px;padding:4px 0;align-items:center">' +
+                   '<code>' + _esc(c.key) + '</code>' +
+                   '<input ' + inputAttr + ' ' + valAttr +
+                       ' onchange="_ceUpdateConfig(\'' + _esc(row.name) + '\',\'' + _esc(c.key) + '\',this)">' +
+                   '<small style="color:#888">' + defStr + unitsBadge + '</small>' +
+                   '</div>';
+          }).join('');
+          return '<details open style="margin-bottom:10px;border:1px solid #e5e7eb;border-radius:4px;padding:8px">' +
+                 '<summary style="cursor:pointer;font-weight:600">' +
+                 _esc(row.name) +
+                 ' <small style="color:#666;font-weight:normal">(' + _esc(row.address) + ')</small>' +
+                 '</summary>' +
+                 '<div style="margin-top:8px">' + configs + '</div>' +
+                 '</details>';
+        }).join('');
+      })
+      .catch(function(err) {
+        panel.innerHTML = '<p style="color:#991b1b">Failed to load configs: ' + _esc(String(err)) + '</p>';
+      });
   }
+  window._ceRenderConfigure = _ceRenderConfigure;
+
+  function _ceUpdateConfig(processName, key, inputEl) {
+    if (!window._composeDoc) return;
+    var raw = inputEl.type === 'checkbox' ? inputEl.checked : inputEl.value;
+    // Best-effort type coercion based on the input element's type attribute
+    var value;
+    if (inputEl.type === 'number') {
+      value = parseFloat(raw);
+      if (isNaN(value)) value = raw;
+    } else if (inputEl.type === 'checkbox') {
+      value = !!raw;
+    } else {
+      value = raw;
+    }
+    var state = window._composeDoc.state || {};
+    var proc = state[processName];
+    if (!proc || !proc.config) {
+      console.warn('process not found:', processName);
+      return;
+    }
+    proc.config[key] = value;
+    _cePushDocToLoom();  // wiring view doesn't change for config edits, but cheap to keep in sync
+  }
+  window._ceUpdateConfig = _ceUpdateConfig;
+
   function _ceRenderObservables() {
     var el = document.getElementById('ce-panel-observables');
     if (el) el.innerHTML = '<p class="empty-state">Observables tab — Task 5.</p>';
@@ -2162,7 +2241,6 @@
     var el = document.getElementById('ce-panel-visualization');
     if (el) el.innerHTML = '<p class="empty-state">Visualization tab — Task 6.</p>';
   }
-  window._ceRenderConfigure     = _ceRenderConfigure;
   window._ceRenderObservables   = _ceRenderObservables;
   window._ceRenderVisualization = _ceRenderVisualization;
 
