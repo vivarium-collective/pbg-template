@@ -2882,8 +2882,10 @@
       '<div class="investigation-detail-tabs">' +
         '<button class="investigation-detail-tab active" data-tab="overview" onclick="_invDetailTab(\'overview\')">Overview</button>' +
         '<button class="investigation-detail-tab" data-tab="composites" onclick="_invDetailTab(\'composites\')">Composites</button>' +
+        '<button class="investigation-detail-tab" data-tab="groups" onclick="_invDetailTab(\'groups\')">Groups</button>' +
         '<button class="investigation-detail-tab" data-tab="interventions" onclick="_invDetailTab(\'interventions\')">Interventions</button>' +
         '<button class="investigation-detail-tab" data-tab="runs" onclick="_invDetailTab(\'runs\')">Runs (' + runs.length + ')</button>' +
+        '<button class="investigation-detail-tab" data-tab="observables" onclick="_invDetailTab(\'observables\')">Observables</button>' +
         '<button class="investigation-detail-tab" data-tab="viz" onclick="_invDetailTab(\'viz\')">Visualizations (' + vizFiles.length + ')</button>' +
         '<button class="investigation-detail-tab" data-tab="conclusions" onclick="_invDetailTab(\'conclusions\')">Conclusions</button>' +
       '</div>' +
@@ -2906,6 +2908,9 @@
           '</div>' +
         '</div>' +
       '</div>' +
+      '<div class="investigation-detail-panel" data-tab="groups">' +
+        '<div class="ws-groups-stub">Groups — coming in B7.</div>' +
+      '</div>' +
       '<div class="investigation-detail-panel" data-tab="interventions">' +
         '<div id="inv-interventions-host">' +
           '<p class="empty-state">Loading interventions…</p>' +
@@ -2913,6 +2918,9 @@
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="runs">' +
         (runs.length ? _renderInvestigationRunsTable(runs, name) : '<p class="empty-state">No runs yet — click Run to generate them.</p>') +
+      '</div>' +
+      '<div class="investigation-detail-panel" data-tab="observables">' +
+        '<div class="ws-observables-stub">Observables — coming in B8.</div>' +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="viz">' +
         '<section class="ws-comparisons" style="margin-bottom:16px;padding:10px;border:1px solid #eee">' +
