@@ -2409,11 +2409,76 @@
   }
   window._ceVizRemove = _ceVizRemove;
 
-  /** Save dialog stub — Task 7 implements the real modal. */
   function _ceOpenSaveModal() {
-    alert('Save sidecar — Task 7 implements the modal.');
+    if (!window._composeDoc) {
+      alert('No composite to save.');
+      return;
+    }
+    var sel = document.getElementById('ce-save-investigation');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— pick an investigation —</option>';
+    var srcEl = document.getElementById('ce-save-source-ref');
+    if (srcEl) {
+      srcEl.innerHTML = window._composeDocSourceRef
+        ? 'Source: <code>' + _esc(window._composeDocSourceRef) + '</code>'
+        : '';
+    }
+    var errEl = document.querySelector('#form-ce-save .form-error');
+    if (errEl) errEl.textContent = '';
+    fetch('/api/investigations').then(function(r) { return r.json(); })
+      .then(function(data) {
+        (data.investigations || []).forEach(function(inv) {
+          var opt = document.createElement('option');
+          opt.value = inv.name;
+          opt.textContent = inv.name;
+          sel.appendChild(opt);
+        });
+        openModal('modal-ce-save');
+      })
+      .catch(function(err) {
+        if (errEl) errEl.textContent = 'Failed to load investigations: ' + String(err);
+        openModal('modal-ce-save');
+      });
   }
   window._ceOpenSaveModal = _ceOpenSaveModal;
+
+  function _ceSubmitSave(form) {
+    var data = new FormData(form);
+    var errEl = form.querySelector('.form-error');
+    if (errEl) errEl.textContent = '';
+    if (!window._composeDoc) {
+      if (errEl) errEl.textContent = 'No composite loaded.';
+      return;
+    }
+    var payload = {
+      investigation: data.get('investigation'),
+      name: data.get('name'),
+      document: window._composeDoc,
+      source_ref: window._composeDocSourceRef || '',
+    };
+    if (!payload.investigation) {
+      if (errEl) errEl.textContent = 'Pick an investigation.';
+      return;
+    }
+    fetch('/api/investigation-composite-save-sidecar', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    }).then(function(r) { return r.json().then(function(j) { return [r.ok, j]; }); })
+      .then(function(parts) {
+        var ok = parts[0], j = parts[1];
+        if (!ok) {
+          if (errEl) errEl.textContent = j.error || 'save failed';
+          return;
+        }
+        closeModal('modal-ce-save');
+        // Nav to investigation Composites tab; reuse the existing helper if available.
+        window.location.hash = '#investigations';
+        if (typeof _openInvestigation === 'function') {
+          _openInvestigation(payload.investigation);
+        }
+      });
+  }
+  window._ceSubmitSave = _ceSubmitSave;
 
   function _ceRenderParameters(params) {
     var container = document.getElementById('ce-parameters');

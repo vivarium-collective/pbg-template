@@ -1002,6 +1002,26 @@
   </div>
 </div>
 
+<!-- Composite Explorer: Save edited composite as sidecar -->
+<div id="modal-ce-save" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-ce-save')">&times;</button>
+    <h3>Save edited composite as sidecar</h3>
+    <form id="form-ce-save" onsubmit="event.preventDefault(); _ceSubmitSave(this)">
+      <label>Investigation
+        <select name="investigation" id="ce-save-investigation" required></select>
+      </label>
+      <label>Sidecar name
+        <input name="name" pattern="^[a-zA-Z0-9_-]+$" required
+               placeholder="e.g. chromosome-partition-tuned">
+      </label>
+      <div id="ce-save-source-ref" style="margin:8px 0;font-size:0.85em;color:#666"></div>
+      <div class="form-error"></div>
+      <button type="submit" class="action-btn">Save</button>
+    </form>
+  </div>
+</div>
+
 <script src="assets/render-helpers.js"></script>
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
 <script src="assets/walkthrough.js" onerror="/* walkthrough unavailable */"></script>
