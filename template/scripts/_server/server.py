@@ -622,6 +622,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/investigation-set-observables":    self._post_investigation_set_observables,
             "/api/investigation-set-conclusions":    self._post_investigation_set_conclusions,
             "/api/investigation-set-overview":       self._post_investigation_set_overview,
+            "/api/investigation-comparison-add":     self._post_investigation_comparison_add,
+            "/api/investigation-comparison-update":  self._post_investigation_comparison_update,
             "/api/composite-process-configs": self._post_composite_process_configs,
             "/api/composite-state-tree-doc":     self._post_composite_state_tree_doc,
             "/api/compose-doc-inject-emitter":   self._post_compose_doc_inject_emitter,
@@ -644,6 +646,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/simulation":    self._delete_simulation,
             "/api/visualization": self._delete_visualization,
             "/api/investigation-composite": self._delete_investigation_composite,
+            "/api/investigation-comparison": self._delete_investigation_comparison,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -3968,6 +3971,137 @@ if __name__ == "__main__":
             spec['composites'] = [c for c in (spec.get('composites') or [])
                                    if c.get('name') != comp_name]
             spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_investigation_comparison_add(self, body: dict):
+        """POST /api/investigation-comparison-add {investigation, name, description?, variants[], observables[]}
+        Appends a comparison entry to spec.yaml.comparisons.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        cmp_name = (body.get("name") or "").strip()
+        variants = body.get("variants") or []
+        observables = body.get("observables") or []
+        description = body.get("description", "")
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if not cmp_name:
+            return self._json({"error": "name required"}, 400)
+        if not isinstance(variants, list) or not variants:
+            return self._json({"error": "variants must be a non-empty list"}, 400)
+        if not isinstance(observables, list) or not observables:
+            return self._json({"error": "observables must be a non-empty list"}, 400)
+        if not isinstance(description, str):
+            return self._json({"error": "description must be a string"}, 400)
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        commit_msg = f"feat(investigations/{inv_name}): add comparison {cmp_name}"
+
+        def do_action():
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+            cmps = list(spec.get("comparisons") or [])
+            if any(c.get("name") == cmp_name for c in cmps):
+                raise ValueError(f"comparison {cmp_name!r} already exists")
+            cmps.append({
+                "name": cmp_name,
+                "description": description,
+                "variants": list(variants),
+                "observables": list(observables),
+            })
+            spec["comparisons"] = cmps
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except ValueError as e:
+            return self._json({"error": str(e)}, 409)
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _post_investigation_comparison_update(self, body: dict):
+        """POST /api/investigation-comparison-update {investigation, name, fields_to_update}
+        Replaces fields on a comparison entry. `name` is immutable; only
+        description/variants/observables can be updated.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        cmp_name = (body.get("name") or "").strip()
+        fields = body.get("fields_to_update") or {}
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if not cmp_name:
+            return self._json({"error": "name required"}, 400)
+        if not isinstance(fields, dict):
+            return self._json({"error": "fields_to_update must be a mapping"}, 400)
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+
+        commit_msg = f"feat(investigations/{inv_name}): update comparison {cmp_name}"
+
+        def do_action():
+            spec = yaml.safe_load(spec_path.read_text()) or {}
+            cmps = spec.get("comparisons") or []
+            idx = next((i for i, c in enumerate(cmps) if c.get("name") == cmp_name), None)
+            if idx is None:
+                raise KeyError(f"comparison {cmp_name!r} not found")
+            for key in ("description", "variants", "observables"):
+                if key in fields:
+                    cmps[idx][key] = fields[key]
+            spec["comparisons"] = cmps
+            spec_path.write_text(yaml.safe_dump(spec, sort_keys=False))
+
+        try:
+            return self._json(*_commit_or_run(commit_msg, do_action))
+        except KeyError as e:
+            return self._json({"error": str(e)}, 404)
+        except Exception as e:
+            return self._json({"error": f"workstream error: {e}"}, 500)
+
+    def _delete_investigation_comparison(self, body: dict):
+        """DELETE /api/investigation-comparison {investigation, name}
+        Refuses with 409 if any visualization's config.comparison references
+        this comparison name.
+        """
+        inv_name = (body.get("investigation") or "").strip()
+        cmp_name = (body.get("name") or "").strip()
+        if not inv_name:
+            return self._json({"error": "investigation required"}, 400)
+        if not cmp_name:
+            return self._json({"error": "name required"}, 400)
+        inv_dir = WORKSPACE / "investigations" / inv_name
+        spec_path = inv_dir / "spec.yaml"
+        if not spec_path.is_file():
+            return self._json({"error": "investigation not found"}, 404)
+        spec = yaml.safe_load(spec_path.read_text()) or {}
+        dependents = [
+            v.get("name", "<unnamed>")
+            for v in (spec.get("visualizations") or [])
+            if ((v.get("config") or {}).get("comparison") == cmp_name)
+        ]
+        if dependents:
+            return self._json(
+                {
+                    "error": f"comparison {cmp_name!r} still referenced by visualization(s): {dependents}",
+                    "dependents": dependents,
+                },
+                409,
+            )
+
+        commit_msg = f"feat(investigations/{inv_name}): delete comparison {cmp_name}"
+
+        def do_action():
+            data = yaml.safe_load(spec_path.read_text()) or {}
+            data["comparisons"] = [
+                c for c in (data.get("comparisons") or []) if c.get("name") != cmp_name
+            ]
+            spec_path.write_text(yaml.safe_dump(data, sort_keys=False))
 
         try:
             return self._json(*_commit_or_run(commit_msg, do_action))

@@ -722,6 +722,130 @@ def test_post_set_overview_partial_update_preserves_other_fields(workspace_serve
     assert spec['status'] == 'completed'
 
 
+# ---------------------------------------------------------------------------
+# Investigation comparison add/update/delete endpoints (Task A4)
+# ---------------------------------------------------------------------------
+
+def test_post_comparison_add_appends(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo', 'composites': [], 'runs': [], 'observables': [],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-comparison-add',
+        {'investigation': 'demo',
+         'name': 'rate-cmp',
+         'description': 'rate doubling',
+         'variants': ['baseline', 'high-rate'],
+         'observables': ['DnaA_count']},
+    )
+    assert code in (200, 500), j
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['comparisons'][-1]['name'] == 'rate-cmp'
+    assert spec['comparisons'][-1]['description'] == 'rate doubling'
+    assert spec['comparisons'][-1]['variants'] == ['baseline', 'high-rate']
+    assert spec['comparisons'][-1]['observables'] == ['DnaA_count']
+
+
+def test_post_comparison_update_replaces(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [], 'runs': [], 'observables': [],
+        'comparisons': [{
+            'name': 'rate-cmp',
+            'description': 'original',
+            'variants': ['baseline', 'high-rate'],
+            'observables': ['DnaA_count'],
+        }],
+    }, sort_keys=False))
+
+    code, j = _post(
+        workspace_server.url + '/api/investigation-comparison-update',
+        {'investigation': 'demo',
+         'name': 'rate-cmp',
+         'fields_to_update': {'description': 'updated'}},
+    )
+    assert code in (200, 500), j
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['comparisons'][0]['description'] == 'updated'
+    # Other fields are preserved
+    assert spec['comparisons'][0]['name'] == 'rate-cmp'
+    assert spec['comparisons'][0]['variants'] == ['baseline', 'high-rate']
+    assert spec['comparisons'][0]['observables'] == ['DnaA_count']
+
+
+def test_delete_comparison_refuses_with_viz_dependents(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [], 'runs': [], 'observables': [],
+        'comparisons': [{
+            'name': 'rate-cmp',
+            'description': 'rate doubling',
+            'variants': ['baseline', 'high-rate'],
+            'observables': ['DnaA_count'],
+        }],
+        'visualizations': [{
+            'name': 'cmp-plot',
+            'config': {'comparison': 'rate-cmp'},
+        }],
+    }, sort_keys=False))
+
+    req = urllib.request.Request(
+        workspace_server.url + '/api/investigation-comparison',
+        data=json.dumps({'investigation': 'demo', 'name': 'rate-cmp'}).encode(),
+        method='DELETE', headers={'Content-Type': 'application/json'},
+    )
+    try:
+        urllib.request.urlopen(req)
+        raise AssertionError('expected refusal')
+    except urllib.error.HTTPError as e:
+        assert e.code == 409, f"expected 409, got {e.code}"
+        body = json.loads(e.read())
+        err = str(body).lower()
+        assert 'visualization' in err or 'cmp-plot' in err, body
+
+    # Spec unchanged — refusal is non-destructive
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['comparisons'][0]['name'] == 'rate-cmp'
+
+
+def test_delete_comparison_succeeds_when_unreferenced(workspace_server):
+    inv = workspace_server.root / 'investigations' / 'demo'
+    inv.mkdir(parents=True)
+    (inv / 'spec.yaml').write_text(yaml.safe_dump({
+        'name': 'demo',
+        'composites': [], 'runs': [], 'observables': [],
+        'comparisons': [{
+            'name': 'rate-cmp',
+            'description': 'rate doubling',
+            'variants': ['baseline', 'high-rate'],
+            'observables': ['DnaA_count'],
+        }],
+        'visualizations': [],
+    }, sort_keys=False))
+
+    req = urllib.request.Request(
+        workspace_server.url + '/api/investigation-comparison',
+        data=json.dumps({'investigation': 'demo', 'name': 'rate-cmp'}).encode(),
+        method='DELETE', headers={'Content-Type': 'application/json'},
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            assert resp.status == 200
+    except urllib.error.HTTPError as e:
+        # 500 acceptable for bare-workspace git failures, but file changes happen eagerly
+        assert e.code == 500, f"expected 200 or 500, got {e.code}"
+
+    spec = yaml.safe_load((inv / 'spec.yaml').read_text())
+    assert spec['comparisons'] == []
+
+
 def test_post_save_sidecar_writes_yaml_and_updates_spec(workspace_server):
     """Save-sidecar writes investigations/<inv>/composites/<name>.yaml and adds the entry to spec.yaml."""
     inv = workspace_server.root / 'investigations' / 'demo'
