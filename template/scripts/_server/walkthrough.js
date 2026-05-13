@@ -2792,6 +2792,9 @@
       return;
     }
     var spec = data.spec || {};
+    // Cache the spec so per-tab handlers (Comparisons, Add-Viz modal, etc.) can
+    // read variants/observables/comparisons without re-fetching.
+    window._invSpecCache = spec;
     var vizFiles = data.viz_files || [];
     var runs = data.runs_summary || [];
     var lastRun = spec.last_run ? new Date(spec.last_run + 'Z').toLocaleString() : '—';
@@ -2912,6 +2915,11 @@
         (runs.length ? _renderInvestigationRunsTable(runs, name) : '<p class="empty-state">No runs yet — click Run to generate them.</p>') +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="viz">' +
+        '<section class="ws-comparisons" style="margin-bottom:16px;padding:10px;border:1px solid #eee">' +
+          '<h3 style="margin-top:0">Comparisons</h3>' +
+          '<div id="ws-comparisons-list"></div>' +
+          '<button class="btn-mini" onclick="_openAddComparisonModal()">+ Add comparison</button>' +
+        '</section>' +
         (vizFiles.length ?
           '<button class="btn-mini" style="margin-bottom:8px" onclick="_openAddVizModal(\'' + _esc(name) + '\')">+ Add visualization</button>' +
           vizFiles.map(function(v) {
@@ -2947,6 +2955,8 @@
         _saveOverviewField(name, 'status', sEl.value);
       });
     }
+    // Render the Comparisons sub-panel (Visualizations tab).
+    _renderComparisonsTable(name, data);
   }
 
   function _saveOverviewField(invName, key, value) {
@@ -2966,6 +2976,293 @@
       .catch(function(e) { alert('Network error: ' + e); });
   }
   window._saveOverviewField = _saveOverviewField;
+
+  // ── Comparisons sub-panel (Visualizations tab, Task B5) ──────────────────
+
+  function _obsPath(o) {
+    // Tolerate both v2 dict-shape ({path:[...]}) and legacy bare-string entries.
+    if (o && typeof o === 'object' && Array.isArray(o.path)) {
+      return o.path.join('/');
+    }
+    return String(o == null ? '' : o);
+  }
+
+  function _renderComparisonsTable(invName, data) {
+    var listEl = document.getElementById('ws-comparisons-list');
+    if (!listEl) return;
+    var spec = (data && data.spec) || window._invSpecCache || {};
+    var comparisons = Array.isArray(spec.comparisons) ? spec.comparisons : [];
+    if (!comparisons.length) {
+      listEl.innerHTML = '<p class="empty-state">No comparisons yet.</p>';
+      return;
+    }
+    listEl.innerHTML = comparisons.map(function(c) {
+      var cname = c && c.name ? String(c.name) : '';
+      var vCsv = (c.variants || []).map(function(v) { return String(v); }).join(', ');
+      var oCsv = (c.observables || []).map(function(o) { return _obsPath(o); }).join(', ');
+      var nameAttr = cname.replace(/'/g, "\\'");
+      return (
+        '<div class="ws-comparison-row" data-name="' + _esc(cname) + '"' +
+            ' style="padding:6px 0;border-bottom:1px solid #f0f0f0">' +
+          '<strong>' + _esc(cname) + '</strong> ' +
+          '<small class="muted">variants: ' + _esc(vCsv || '—') +
+            ' · observables: ' + _esc(oCsv || '—') + '</small> ' +
+          '<button class="btn-mini" onclick="_openEditComparisonModal(\'' + _esc(nameAttr) + '\')">Edit</button> ' +
+          '<button class="btn-mini" style="color:#c00"' +
+            ' onclick="_deleteComparison(\'' + _esc(nameAttr) + '\')">Remove</button>' +
+        '</div>'
+      );
+    }).join('');
+  }
+  window._renderComparisonsTable = _renderComparisonsTable;
+
+  function _closeComparisonModal() {
+    var el = document.getElementById('modal-comparison-edit');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+  window._closeComparisonModal = _closeComparisonModal;
+
+  function _openAddComparisonModal() {
+    _openComparisonModal(null);
+  }
+  window._openAddComparisonModal = _openAddComparisonModal;
+
+  function _openEditComparisonModal(cmpName) {
+    var spec = window._invSpecCache || {};
+    var comparisons = Array.isArray(spec.comparisons) ? spec.comparisons : [];
+    var existing = null;
+    for (var i = 0; i < comparisons.length; i++) {
+      if (comparisons[i] && comparisons[i].name === cmpName) {
+        existing = comparisons[i];
+        break;
+      }
+    }
+    _openComparisonModal(existing);
+  }
+  window._openEditComparisonModal = _openEditComparisonModal;
+
+  function _openComparisonModal(existing) {
+    _closeComparisonModal();
+    var spec = window._invSpecCache || {};
+    var variants = Array.isArray(spec.variants) ? spec.variants : [];
+    var observables = Array.isArray(spec.observables) ? spec.observables : [];
+    var isEdit = !!existing;
+    var initName = isEdit ? String(existing.name || '') : '';
+    var initDesc = isEdit ? String(existing.description || '') : '';
+    var pickedVariants = {};
+    (isEdit ? (existing.variants || []) : []).forEach(function(v) {
+      pickedVariants[String(v)] = true;
+    });
+    var pickedObs = {};
+    (isEdit ? (existing.observables || []) : []).forEach(function(o) {
+      pickedObs[_obsPath(o)] = true;
+    });
+
+    var variantBoxes = variants.length
+      ? variants.map(function(v, i) {
+          var vname = (v && v.name) ? String(v.name) : '';
+          var checked = pickedVariants[vname] ? ' checked' : '';
+          var id = 'cmp-variant-' + i;
+          return (
+            '<label style="display:block;font-weight:normal">' +
+              '<input type="checkbox" class="cmp-variant-cb" value="' + _esc(vname) +
+                '" id="' + _esc(id) + '"' + checked + '> ' +
+              _esc(vname) +
+            '</label>'
+          );
+        }).join('')
+      : '<p class="muted" style="margin:4px 0">No variants in the study yet.</p>';
+
+    var obsEmpty = (observables.length === 0);
+    var obsBoxes = obsEmpty
+      ? '<p class="muted" style="margin:4px 0">No observables in the study yet — add some via the ' +
+        'Composites tab or by editing the spec.yaml directly.</p>'
+      : observables.map(function(o, i) {
+          var path = _obsPath(o);
+          var checked = pickedObs[path] ? ' checked' : '';
+          var id = 'cmp-obs-' + i;
+          return (
+            '<label style="display:block;font-weight:normal">' +
+              '<input type="checkbox" class="cmp-obs-cb" value="' + _esc(path) +
+                '" id="' + _esc(id) + '"' + checked + '> ' +
+              '<code>' + _esc(path) + '</code>' +
+            '</label>'
+          );
+        }).join('');
+
+    var modal = document.createElement('div');
+    modal.id = 'modal-comparison-edit';
+    modal.className = 'modal-overlay';
+    modal.style.display = 'flex';
+    modal.innerHTML =
+      '<div class="modal-box">' +
+        '<button class="modal-close" onclick="_closeComparisonModal()">&times;</button>' +
+        '<h3>' + (isEdit ? 'Edit comparison' : 'Add comparison') + '</h3>' +
+        '<label>Name' +
+          '<input type="text" id="cmp-name" value="' + _esc(initName) + '"' +
+            (isEdit ? ' disabled' : ' required pattern="[a-zA-Z0-9_-]+"') + '>' +
+        '</label>' +
+        '<label>Description' +
+          '<input type="text" id="cmp-description" value="' + _esc(initDesc) + '">' +
+        '</label>' +
+        '<label>Variants</label>' +
+        '<div id="cmp-variants-list" style="max-height:160px;overflow:auto;padding:4px;border:1px solid #eee;margin-bottom:6px">' +
+          variantBoxes +
+        '</div>' +
+        '<label>Observables</label>' +
+        '<div id="cmp-observables-list" style="max-height:160px;overflow:auto;padding:4px;border:1px solid #eee;margin-bottom:6px">' +
+          obsBoxes +
+        '</div>' +
+        '<div class="form-error" id="cmp-form-error" style="color:#c00;min-height:1em"></div>' +
+        '<div style="margin-top:8px">' +
+          '<button type="button" class="action-btn" id="cmp-save-btn"' +
+            (obsEmpty ? ' disabled' : '') + '>Save</button> ' +
+          '<button type="button" class="btn-mini" onclick="_closeComparisonModal()">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+
+    var saveBtn = document.getElementById('cmp-save-btn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', function() {
+        _submitComparisonModal(isEdit, initName);
+      });
+    }
+  }
+
+  function _submitComparisonModal(isEdit, lockedName) {
+    var errEl = document.getElementById('cmp-form-error');
+    if (errEl) errEl.textContent = '';
+    var nameEl = document.getElementById('cmp-name');
+    var descEl = document.getElementById('cmp-description');
+    var cmpName = isEdit ? lockedName : (nameEl ? nameEl.value.trim() : '');
+    if (!cmpName) {
+      if (errEl) errEl.textContent = 'Name is required.';
+      return;
+    }
+    if (!isEdit && !/^[a-zA-Z0-9_-]+$/.test(cmpName)) {
+      if (errEl) errEl.textContent = 'Name must match [a-zA-Z0-9_-]+';
+      return;
+    }
+    var variants = Array.prototype.map.call(
+      document.querySelectorAll('.cmp-variant-cb:checked'),
+      function(cb) { return cb.value; }
+    );
+    var observables = Array.prototype.map.call(
+      document.querySelectorAll('.cmp-obs-cb:checked'),
+      function(cb) { return cb.value; }
+    );
+    if (!variants.length) {
+      if (errEl) errEl.textContent = 'Select at least one variant.';
+      return;
+    }
+    if (!observables.length) {
+      if (errEl) errEl.textContent = 'Select at least one observable.';
+      return;
+    }
+    var description = descEl ? descEl.value : '';
+    _saveComparison(cmpName, {
+      description: description,
+      variants: variants,
+      observables: observables,
+    }, isEdit);
+  }
+
+  function _saveComparison(cmpName, fields, isEdit) {
+    var invName = window._currentInvestigation;
+    if (!invName) {
+      var errEl0 = document.getElementById('cmp-form-error');
+      if (errEl0) errEl0.textContent = 'No active investigation.';
+      return;
+    }
+    var url, body;
+    if (isEdit) {
+      url = '/api/investigation-comparison-update';
+      body = {
+        investigation: invName,
+        name: cmpName,
+        fields_to_update: {
+          description: fields.description,
+          variants: fields.variants,
+          observables: fields.observables,
+        },
+      };
+    } else {
+      url = '/api/investigation-comparison-add';
+      body = {
+        investigation: invName,
+        name: cmpName,
+        description: fields.description,
+        variants: fields.variants,
+        observables: fields.observables,
+      };
+    }
+    fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    })
+      .then(function(r) {
+        return r.json().then(function(j) { return {ok: r.ok, body: j}; });
+      })
+      .then(function(res) {
+        var errEl = document.getElementById('cmp-form-error');
+        if (!res.ok) {
+          if (errEl) errEl.textContent = (res.body && res.body.error) || 'save failed';
+          return;
+        }
+        _closeComparisonModal();
+        if (typeof _showToast === 'function') {
+          _showToast((isEdit ? 'Updated' : 'Added') + ' comparison "' + cmpName + '"');
+        }
+        _openInvestigation(invName);  // re-fetch + re-render
+      })
+      .catch(function(err) {
+        var errEl = document.getElementById('cmp-form-error');
+        if (errEl) errEl.textContent = 'Network error: ' + err;
+      });
+  }
+  window._saveComparison = _saveComparison;
+
+  function _deleteComparison(cmpName) {
+    var invName = window._currentInvestigation;
+    if (!invName) return;
+    if (!confirm('Remove comparison "' + cmpName + '"?')) return;
+    fetch('/api/investigation-comparison', {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({investigation: invName, name: cmpName}),
+    })
+      .then(function(r) {
+        return r.json().then(function(j) { return {ok: r.ok, status: r.status, body: j}; });
+      })
+      .then(function(res) {
+        if (!res.ok) {
+          var msg = (res.body && res.body.error) || ('delete failed (' + res.status + ')');
+          // 409 → dependent visualizations; surface the message inline at the
+          // top of the comparisons list so the user sees which vizzes block it.
+          var listEl = document.getElementById('ws-comparisons-list');
+          if (listEl) {
+            var banner = document.createElement('div');
+            banner.style.cssText = 'color:#c00;padding:6px;margin-bottom:6px;border:1px solid #fbb;background:#fff5f5';
+            banner.textContent = msg;
+            listEl.insertBefore(banner, listEl.firstChild);
+            setTimeout(function() {
+              if (banner.parentNode) banner.parentNode.removeChild(banner);
+            }, 8000);
+          } else {
+            alert(msg);
+          }
+          return;
+        }
+        if (typeof _showToast === 'function') {
+          _showToast('Removed comparison "' + cmpName + '"');
+        }
+        _openInvestigation(invName);  // re-fetch + re-render
+      })
+      .catch(function(err) { alert('Network error: ' + err); });
+  }
+  window._deleteComparison = _deleteComparison;
 
   function _invDetailTab(tab) {
     document.querySelectorAll('.investigation-detail-tab').forEach(function(b) {
@@ -3769,6 +4066,10 @@
     sel.innerHTML = '<option value="">— pick a registered instance or raw class —</option>';
     // Stash instance configs on the select so onchange can auto-fill.
     sel._vizInstanceConfigs = {};
+    // ── B5: inject a Comparison dropdown at the top of the form so the user
+    // can auto-fill sources/observable from a saved comparison. The dropdown
+    // is created once and re-populated each open from the cached spec.
+    _ensureAddVizComparisonDropdown();
     Promise.all([
       fetch('/api/visualization-instances').then(function(r) { return r.json(); }),
       fetch('/api/visualization-classes').then(function(r) { return r.json(); }),
@@ -3816,6 +4117,68 @@
     });
   }
   window._openAddVizModal = _openAddVizModal;
+
+  // ── B5: Comparison dropdown injected into the add-viz modal. Pulls
+  // comparisons from window._invSpecCache (populated by _renderInvestigationDetail).
+  function _ensureAddVizComparisonDropdown() {
+    var form = document.getElementById('form-investigation-add-viz');
+    if (!form) return;
+    var sel = document.getElementById('add-viz-comparison');
+    if (!sel) {
+      var label = document.createElement('label');
+      label.textContent = 'Comparison';
+      sel = document.createElement('select');
+      sel.id = 'add-viz-comparison';
+      sel.name = 'comparison';
+      label.appendChild(sel);
+      // Insert right after the hidden investigation input (i.e. as the first
+      // visible field of the form).
+      var firstChild = form.firstChild;
+      form.insertBefore(label, firstChild);
+    }
+    var spec = window._invSpecCache || {};
+    var comparisons = Array.isArray(spec.comparisons) ? spec.comparisons : [];
+    sel.innerHTML = '<option value="">— None (manual sources/observable) —</option>';
+    comparisons.forEach(function(c) {
+      var name = (c && c.name) ? String(c.name) : '';
+      if (!name) return;
+      var opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    // Reset selection each time the modal opens.
+    sel.value = '';
+    sel.onchange = function() {
+      var picked = sel.value;
+      if (!picked) return;
+      var cmp = null;
+      for (var i = 0; i < comparisons.length; i++) {
+        if (comparisons[i] && comparisons[i].name === picked) {
+          cmp = comparisons[i];
+          break;
+        }
+      }
+      if (!cmp) return;
+      var cfgField = document.querySelector('#form-investigation-add-viz textarea[name="config"]');
+      // Existing convention in the seed-fixture is `{"sources": [...], "observable": "..."}`
+      // — we mirror that shape and merge into whatever JSON is already in the
+      // textarea (so the user can pre-pick a class first, then a comparison).
+      var existing = {};
+      if (cfgField && cfgField.value.trim()) {
+        try { existing = JSON.parse(cfgField.value) || {}; } catch (e) { existing = {}; }
+        if (existing === null || typeof existing !== 'object' || Array.isArray(existing)) {
+          existing = {};
+        }
+      }
+      existing.sources = (cmp.variants || []).map(function(v) { return String(v); });
+      var obs = (cmp.observables || []);
+      existing.observable = obs.length ? _obsPath(obs[0]) : '';
+      existing.comparison = cmp.name;
+      if (cfgField) cfgField.value = JSON.stringify(existing, null, 2);
+    };
+  }
+  window._ensureAddVizComparisonDropdown = _ensureAddVizComparisonDropdown;
 
   function _submitAddViz(form) {
     var data = new FormData(form);
