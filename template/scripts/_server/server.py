@@ -659,13 +659,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_ui_config()
         # Serve the bundled loom-explore viewer.
         if self.path.startswith("/loom-explore"):
-            rel = self.path[len("/loom-explore"):].lstrip("/") or "index.html"
+            # Strip query string before resolving to the file on disk; popup
+            # URLs include ?id=<ref> which would otherwise prevent the
+            # static handler from finding index.html.
+            loom_path = self.path.split("?", 1)[0]
+            rel = loom_path[len("/loom-explore"):].lstrip("/") or "index.html"
             if ".." in rel.split("/"):
                 self.send_response(403); self.end_headers(); return
             target = WORKSPACE / "scripts" / "_assets" / "loom-explore" / rel
             return self._serve_file(target, self._guess_mime(rel))
 
-        rel = self.path.lstrip("/")
+        # Generic static file serving — also strip query strings so any
+        # other route that the client appends params to still resolves.
+        static_path = self.path.split("?", 1)[0]
+        rel = static_path.lstrip("/")
         # Refuse path traversal and absolute paths.
         if ".." in rel.split("/") or rel.startswith("/"):
             self.send_response(403); self.end_headers(); return
