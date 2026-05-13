@@ -801,3 +801,70 @@ def test_post_compose_doc_inject_emitter_empty_paths_strips(workspace_server):
     )
     assert code == 200, j
     assert 'emitter' not in j['document']['state']
+
+
+# ---------------------------------------------------------------------------
+# Visualization tab endpoints: inject-viz, strip-viz, class-inputs (Task 6)
+# ---------------------------------------------------------------------------
+
+def test_post_compose_doc_inject_viz_auto_wires_by_port_name(workspace_server):
+    doc = {
+        'state': {
+            'emitter': {
+                '_type': 'step',
+                'address': 'local:SQLiteEmitter',
+                'config': {'emit': {'observable': 'list[float]', 'time': 'list[float]'}},
+                'inputs': {'observable': ['chromosome', 'count'],
+                            'time': ['chromosome', 'time']},
+            },
+        },
+    }
+    code, j = _post(
+        workspace_server.url + '/api/compose-doc-inject-viz',
+        {'document': doc, 'class_name': 'TimeSeriesPlot',
+         'viz_inputs': {'observable': 'list[float]', 'time': 'list[float]',
+                         'threshold': 'float'},
+         'config': {'title': 'demo'}},
+    )
+    assert code == 200, j
+    viz = j['document']['state']['viz']
+    assert viz['_type'] == 'step'
+    assert viz['address'] == 'local:TimeSeriesPlot'
+    assert viz['config'] == {'title': 'demo'}
+    # 'observable' + 'time' match emitter ports → wired
+    assert viz['inputs']['observable'] == ['emitter', 'observable']
+    assert viz['inputs']['time'] == ['emitter', 'time']
+    # 'threshold' doesn't match → omitted
+    assert 'threshold' not in viz['inputs']
+
+
+def test_post_compose_doc_strip_viz(workspace_server):
+    doc = {
+        'state': {
+            'viz': {'_type': 'step', 'address': 'local:TimeSeriesPlot', 'config': {}},
+        },
+    }
+    code, j = _post(
+        workspace_server.url + '/api/compose-doc-strip-viz',
+        {'document': doc},
+    )
+    assert code == 200, j
+    assert 'viz' not in j['document']['state']
+
+
+def test_get_visualization_class_inputs(workspace_server):
+    """Should return the declared inputs() map for a registered Viz class."""
+    import urllib.request, urllib.error
+    req = urllib.request.Request(
+        workspace_server.url + '/api/visualization-class-inputs?name=TimeSeriesPlot'
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read())
+        inputs = data.get('inputs') or {}
+        # TimeSeriesPlot has at minimum `observable` + `time` ports per its declaration
+        assert 'observable' in inputs
+        assert 'time' in inputs
+    except urllib.error.HTTPError as e:
+        # If pbg-superpowers isn't installed, the class won't be found → 404 acceptable
+        assert e.code == 404

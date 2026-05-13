@@ -2309,10 +2309,105 @@
   window._ceObservablesChanged = _ceObservablesChanged;
 
   function _ceRenderVisualization() {
-    var el = document.getElementById('ce-panel-visualization');
-    if (el) el.innerHTML = '<p class="empty-state">Visualization tab — Task 6.</p>';
+    var panel = document.getElementById('ce-panel-visualization');
+    if (!panel) return;
+    if (!window._composeDoc) {
+      panel.innerHTML = '<p class="empty-state">No composite loaded.</p>';
+      return;
+    }
+    fetch('/api/visualization-classes')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var classes = data.classes || [];
+        var currentViz = (window._composeDoc.state || {}).viz;
+        var currentClass = '';
+        if (currentViz && currentViz.address) {
+          currentClass = (currentViz.address.split(':')[1] || '').split('.').pop();
+        }
+        var currentCfgStr = (currentViz && currentViz.config)
+          ? JSON.stringify(currentViz.config, null, 2) : '{}';
+        var emitterPorts = Object.keys(((window._composeDoc.state || {}).emitter || {}).inputs || {});
+        var optionsHtml = '<option value="">— pick a Visualization class —</option>' +
+                          classes.map(function(c) {
+                            var sel = (c.name === currentClass) ? ' selected' : '';
+                            var doc = c.doc ? ' — ' + _esc(c.doc) : '';
+                            return '<option value="' + _esc(c.name) + '"' + sel + '>' +
+                                   _esc(c.name) + doc + '</option>';
+                          }).join('');
+        var portsHint = emitterPorts.length
+          ? emitterPorts.map(function(p) { return '<code>' + _esc(p) + '</code>'; }).join(', ')
+          : '<em>none — add observables first</em>';
+        panel.innerHTML =
+          '<label>Visualization class' +
+          '<select id="ce-viz-class" onchange="_ceVizChanged()">' + optionsHtml + '</select>' +
+          '</label>' +
+          '<label>Config (JSON)' +
+          '<textarea id="ce-viz-config" rows="4" onchange="_ceVizChanged()">' +
+          _esc(currentCfgStr) + '</textarea>' +
+          '</label>' +
+          '<p style="font-size:0.85em;color:#555;margin:8px 0">' +
+          'Auto-wire: viz inputs that match these emitter ports will be connected: ' +
+          portsHint + '</p>' +
+          '<button class="btn-mini" onclick="_ceVizRemove()" style="margin-top:8px">Remove visualization</button>';
+      })
+      .catch(function(err) {
+        panel.innerHTML = '<p style="color:#991b1b">Failed to load Viz classes: ' + _esc(String(err)) + '</p>';
+      });
   }
   window._ceRenderVisualization = _ceRenderVisualization;
+
+  function _ceVizChanged() {
+    if (!window._composeDoc) return;
+    var className = (document.getElementById('ce-viz-class') || {}).value || '';
+    var configRaw = (document.getElementById('ce-viz-config') || {}).value || '{}';
+    var config;
+    try { config = JSON.parse(configRaw); }
+    catch (e) { console.warn('viz config JSON parse:', e); return; }
+    if (!className) {
+      // Strip viz
+      fetch('/api/compose-doc-strip-viz', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ document: window._composeDoc }),
+      }).then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.document) { window._composeDoc = data.document; _cePushDocToLoom(); }
+        });
+      return;
+    }
+    // Fetch the class's declared inputs() for auto-wire
+    fetch('/api/visualization-class-inputs?name=' + encodeURIComponent(className))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var vizInputs = data.inputs || {};
+        return fetch('/api/compose-doc-inject-viz', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            document: window._composeDoc,
+            class_name: className,
+            viz_inputs: vizInputs,
+            config: config,
+          }),
+        });
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.document) {
+          window._composeDoc = data.document;
+          _cePushDocToLoom();
+          // Re-render the hint line in case emitter ports changed in between
+          // (no full re-render to preserve current input focus).
+        }
+      })
+      .catch(function(err) { console.error('viz inject failed:', err); });
+  }
+  window._ceVizChanged = _ceVizChanged;
+
+  function _ceVizRemove() {
+    var sel = document.getElementById('ce-viz-class');
+    if (sel) sel.value = '';
+    _ceVizChanged();
+  }
+  window._ceVizRemove = _ceVizRemove;
 
   /** Save dialog stub — Task 7 implements the real modal. */
   function _ceOpenSaveModal() {

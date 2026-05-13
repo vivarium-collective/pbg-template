@@ -542,6 +542,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._get_visualization_status()
         if self.path.startswith("/api/visualization-instances"):
             return self._get_visualization_instances()
+        if self.path.startswith("/api/visualization-class-inputs"):
+            return self._get_visualization_class_inputs()
         if self.path.startswith("/api/visualization-classes"):
             return self._get_visualization_classes()
         if self.path.startswith("/api/ui-config"):
@@ -618,6 +620,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/composite-process-configs": self._post_composite_process_configs,
             "/api/composite-state-tree-doc":     self._post_composite_state_tree_doc,
             "/api/compose-doc-inject-emitter":   self._post_compose_doc_inject_emitter,
+            "/api/compose-doc-inject-viz":       self._post_compose_doc_inject_viz,
+            "/api/compose-doc-strip-viz":        self._post_compose_doc_strip_viz,
         }
         handler_fn = route_map.get(self.path)
         if handler_fn is None:
@@ -3708,6 +3712,59 @@ if __name__ == "__main__":
         except Exception as e:
             return self._json({"error": f"inject failed: {e}"}, 400)
         return self._json({"document": out}, 200)
+
+    def _post_compose_doc_inject_viz(self, body: dict):
+        """POST /api/compose-doc-inject-viz {document, class_name, viz_inputs, config?}
+        Returns: {document: <mutated copy>}
+        """
+        from scripts._lib.compose_doc_edit import inject_viz_step
+        import copy
+        doc = body.get("document")
+        if not isinstance(doc, dict):
+            return self._json({"error": "document required"}, 400)
+        out = copy.deepcopy(doc)
+        try:
+            inject_viz_step(
+                out,
+                class_name=body.get("class_name") or "",
+                viz_inputs=body.get("viz_inputs") or {},
+                config=body.get("config") or {},
+            )
+        except Exception as e:
+            return self._json({"error": f"inject failed: {e}"}, 400)
+        return self._json({"document": out}, 200)
+
+    def _post_compose_doc_strip_viz(self, body: dict):
+        """POST /api/compose-doc-strip-viz {document}  →  {document: <without viz>}"""
+        from scripts._lib.compose_doc_edit import strip_viz_step
+        import copy
+        doc = body.get("document")
+        if not isinstance(doc, dict):
+            return self._json({"error": "document required"}, 400)
+        out = copy.deepcopy(doc)
+        strip_viz_step(out)
+        return self._json({"document": out}, 200)
+
+    def _get_visualization_class_inputs(self):
+        """GET /api/visualization-class-inputs?name=<short>
+        Returns: {inputs: {<port>: <type>, ...}}
+        Used by the Composite Explorer Visualization tab to auto-wire viz
+        ports to the emitter's outputs by name match.
+        """
+        import urllib.parse
+        qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
+        name = qs.get("name", "").strip()
+        if not name:
+            return self._json({"error": "name required"}, 400)
+        cls, _short = self._resolve_viz_class(f"local:{name}")
+        if cls is None:
+            return self._json({"error": f"class not found: {name}"}, 404)
+        try:
+            inst = cls.__new__(cls)
+            inputs = inst.inputs() or {}
+        except Exception as e:
+            return self._json({"error": f"inputs() failed: {e}"}, 500)
+        return self._json({"inputs": inputs}, 200)
 
     def _post_investigation_composite_rebuild(self, body: dict):
         """POST /api/investigation-composite-rebuild {investigation, name}
