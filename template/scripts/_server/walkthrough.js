@@ -2799,6 +2799,71 @@
     var statusClass = ({planned:'planned', running:'in_progress', complete:'complete',
                         failed:'gate_pending'})[status] || 'planned';
 
+    // ── Overview-tab data (B2) ────────────────────────────────────────────────
+    var ovQuestion   = (typeof spec.question === 'string') ? spec.question : '';
+    var ovHypothesis = (typeof spec.hypothesis === 'string') ? spec.hypothesis : '';
+    var ovStatus     = spec.status || 'draft';
+    var variants     = Array.isArray(spec.variants) ? spec.variants : [];
+    var baseline     = spec.baseline || '';
+    var baselineEntry = null;
+    for (var bi = 0; bi < variants.length; bi++) {
+      if (variants[bi] && variants[bi].name === baseline) { baselineEntry = variants[bi]; break; }
+    }
+    var baselineSource = (baselineEntry && baselineEntry.source) ? baselineEntry.source : '—';
+    var variantNames = variants.map(function(v) { return v && v.name ? v.name : ''; }).filter(Boolean);
+    var comparisons  = Array.isArray(spec.comparisons) ? spec.comparisons : [];
+    var comparisonNames = comparisons.map(function(c) { return c && c.name ? c.name : ''; }).filter(Boolean);
+    var concText = (typeof spec.conclusions === 'string') ? spec.conclusions : '';
+    var concExcerpt = concText.length > 200 ? concText.slice(0, 200) + '…' : concText;
+    var statusOptions = ['draft','in-progress','completed','archived'].map(function(opt) {
+      var sel = (opt === ovStatus) ? ' selected' : '';
+      return '<option value="' + opt + '"' + sel + '>' + opt + '</option>';
+    }).join('');
+    // Per-variant run breakdown (only show if there's a meaningful breakdown)
+    var runsByVariant = {};
+    runs.forEach(function(r) {
+      var v = (r && (r.variant || r.variant_name)) || '';
+      if (v) runsByVariant[v] = (runsByVariant[v] || 0) + 1;
+    });
+    var breakdownKeys = Object.keys(runsByVariant);
+    var runsBreakdown = '';
+    if (breakdownKeys.length > 1) {
+      runsBreakdown = ' <small>(' + breakdownKeys.map(function(k) {
+        return _esc(k) + ': ' + runsByVariant[k];
+      }).join(', ') + ')</small>';
+    }
+    var overviewHtml =
+      '<section class="ws-overview-meta">' +
+        '<label>Question' +
+          '<textarea id="ov-question" rows="2">' + _esc(ovQuestion) + '</textarea>' +
+        '</label>' +
+        '<label>Hypothesis' +
+          '<textarea id="ov-hypothesis" rows="2">' + _esc(ovHypothesis) + '</textarea>' +
+        '</label>' +
+        '<label>Status' +
+          '<select id="ov-status">' + statusOptions + '</select>' +
+        '</label>' +
+      '</section>' +
+      '<dl class="ws-overview-list">' +
+        '<dt>Baseline</dt>' +
+        '<dd>' + _esc(baseline || '—') + ' <small>(' + _esc(baselineSource) + ')</small></dd>' +
+        '<dt>Variants</dt>' +
+        '<dd>' + variants.length + (variantNames.length ? ' — ' + _esc(variantNames.join(', ')) : '') + '</dd>' +
+        '<dt>Runs</dt>' +
+        '<dd>' + runs.length + ' total' + runsBreakdown + '</dd>' +
+        '<dt>Comparisons</dt>' +
+        '<dd>' + comparisons.length + (comparisonNames.length ? ' — ' + _esc(comparisonNames.join(', ')) : '') + '</dd>' +
+        '<dt>Visualizations</dt>' +
+        '<dd>' + vizFiles.length + '</dd>' +
+      '</dl>' +
+      '<section class="ws-overview-conclusions">' +
+        '<h3>Conclusions excerpt</h3>' +
+        (concText.trim()
+          ? '<p>' + _esc(concExcerpt) + '</p>'
+          : '<p><em>No conclusions yet.</em></p>') +
+        '<a href="#" onclick="_invDetailTab(\'conclusions\'); return false;">Read more →</a>' +
+      '</section>';
+
     detail.innerHTML =
       '<div class="investigation-detail-header">' +
         '<div><strong style="font-size:1.1em">' + _esc(name) + '</strong> ' +
@@ -2819,7 +2884,7 @@
         '<button class="investigation-detail-tab" data-tab="conclusions" onclick="_invDetailTab(\'conclusions\')">Conclusions</button>' +
       '</div>' +
       '<div class="investigation-detail-panel active" data-tab="overview">' +
-        '<div class="ws-overview-stub">Overview — coming in B2.</div>' +
+        overviewHtml +
       '</div>' +
       '<div class="investigation-detail-panel" data-tab="composites">' +
         '<div style="margin-bottom:8px">' +
@@ -2857,7 +2922,46 @@
       '<div class="investigation-detail-panel" data-tab="conclusions">' +
         '<div class="ws-conclusions-stub">Conclusions — coming in B6.</div>' +
       '</div>';
+
+    // ── Overview-tab auto-save wiring (B2) ────────────────────────────────────
+    var qEl = document.getElementById('ov-question');
+    if (qEl) {
+      qEl.addEventListener('blur', function() {
+        _saveOverviewField(name, 'question', qEl.value);
+      });
+    }
+    var hEl = document.getElementById('ov-hypothesis');
+    if (hEl) {
+      hEl.addEventListener('blur', function() {
+        _saveOverviewField(name, 'hypothesis', hEl.value);
+      });
+    }
+    var sEl = document.getElementById('ov-status');
+    if (sEl) {
+      sEl.value = (spec.status || 'draft');
+      sEl.addEventListener('change', function() {
+        _saveOverviewField(name, 'status', sEl.value);
+      });
+    }
   }
+
+  function _saveOverviewField(invName, key, value) {
+    var body = { investigation: invName, fields: {} };
+    body.fields[key] = value;
+    fetch('/api/investigation-set-overview', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    })
+      .then(function(r) {
+        if (!r.ok) {
+          return r.json().then(function(j) { alert(j.error || 'save failed'); });
+        }
+        if (typeof _showToast === 'function') _showToast('Saved ' + key);
+      })
+      .catch(function(e) { alert('Network error: ' + e); });
+  }
+  window._saveOverviewField = _saveOverviewField;
 
   function _invDetailTab(tab) {
     document.querySelectorAll('.investigation-detail-tab').forEach(function(b) {
