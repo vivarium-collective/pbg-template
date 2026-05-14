@@ -17,10 +17,9 @@ __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
-reports/assets/cache/
-# Dashboard-copied report assets (style.css, client.js, study-detail.js, …) —
+# Dashboard-copied report assets (style.css, client.js, vivarium-logo.png, …) —
 # regenerated from vivarium-dashboard on each report render. Only .keep is tracked.
-reports/assets/*.js
-reports/assets/*.css
+reports/assets/*
+!reports/assets/.keep
 # Transient brainstorm session artifacts (server PIDs, logs, rendered HTML).
 .superpowers/brainstorm/
