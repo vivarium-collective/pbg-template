@@ -257,6 +257,19 @@ def main() -> None:
         except Exception:
             pass
 
+    # Try to import vivarium_dashboard for dashboard-equivalent validation.
+    _dashboard_load_spec = None
+    _dashboard_spec_error = None
+    _dashboard_importable = False
+    try:
+        from vivarium_dashboard.lib.investigations import (  # type: ignore[import]
+            load_spec as _dashboard_load_spec,
+            InvestigationSpecError as _dashboard_spec_error,
+        )
+        _dashboard_importable = True
+    except ImportError:
+        pass  # warn once in summary; don't hard-fail
+
     study_names: list[str] = []
     study_statuses: list[str] = []
     study_warnings: list[str] = []
@@ -270,7 +283,7 @@ def main() -> None:
             study_names.append(s_name)
             study_statuses.append(s_status)
 
-            # Validate against schema if available
+            # Validate against JSON schema if available
             if study_schema is not None:
                 try:
                     from jsonschema import Draft202012Validator
@@ -287,6 +300,17 @@ def main() -> None:
                         study_warnings.append(f"  WARN study {s_name}: {ve.message}")
                 except Exception as ve:
                     study_warnings.append(f"  WARN study {s_name}: {ve}")
+
+            # Dashboard-equivalent validation: run the same migration + validation
+            # path that the running dashboard uses (catches v3→v4 field collisions
+            # and other issues that JSON Schema alone cannot detect).
+            if _dashboard_load_spec is not None:
+                try:
+                    _dashboard_load_spec(study_yaml_path)
+                except _dashboard_spec_error as e:
+                    study_warnings.append(
+                        f"  WARN study {s_name} fails dashboard load: {e}"
+                    )
         except Exception as exc:
             study_warnings.append(f"  WARN could not parse {study_yaml_path}: {exc}")
 
@@ -322,14 +346,31 @@ def main() -> None:
     if n_studies > 3:
         study_names_preview += f", ... (+{n_studies - 3} more)"
 
+    # Build study validation label
+    schema_check = "schema ✓" if study_schema is not None else "schema skipped"
+    if _dashboard_importable:
+        dashboard_check = "dashboard ✓"
+    else:
+        dashboard_check = "dashboard skipped — install vivarium-dashboard"
+
     print("workspace lint: OK")
     print(f"  workspace: {ws_name}  (package: {ws_pkg})")
     print(f"  {n_expert} expert_docs, {n_bib} bib keys, {n_claims} claims")
     if n_studies == 0:
         print("  0 studies")
     else:
-        print(f"  {n_studies} studies: {study_names_preview}  (status: {status_summary})")
+        print(
+            f"  {n_studies} studies: {study_names_preview}  "
+            f"(status: {status_summary})  "
+            f"(validated: {schema_check}, {dashboard_check})"
+        )
     print(f"  {n_active_runs} active runs, {n_completed_runs} completed runs")
+
+    if not _dashboard_importable and n_studies > 0:
+        print(
+            "  (vivarium-dashboard not importable; dashboard-equivalent validation skipped)",
+            file=sys.stderr,
+        )
 
     for w in study_warnings:
         print(w, file=sys.stderr)
