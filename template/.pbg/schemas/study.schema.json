@@ -29,6 +29,11 @@
       "enum": ["draft", "in-progress", "completed", "archived"],
       "description": "Lifecycle status. Agents set 'draft' on creation; users advance to 'in-progress' once work starts."
     },
+    "lifecycle_phase": {
+      "type": "string",
+      "enum": ["design", "build", "simulate", "evaluate", "decide"],
+      "description": "Optional declaration of the study's current high-level phase. The 5-phase lifecycle (Design → Build → Simulate → Evaluate → Decide) is the canonical coarse-grained coordinate; the existing `status:` field captures the finer-grained runtime state within a phase. If absent, the dashboard infers the phase from status + the presence of artifacts (spec fields filled, runs.db exists, etc.). See docs/concepts/vivarium-dashboard-model.md#study-lifecycle."
+    },
     "objective": {
       "type": "string",
       "description": "One-paragraph statement of what this study measures or demonstrates."
