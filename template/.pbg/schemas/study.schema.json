@@ -588,6 +588,99 @@
       "type": "object",
       "description": "Renamed from references because `references:` is dashboard-v4-reserved (list of {file} shape). Keys are section names (e.g. 'expert', 'bib_keys'), values are lists of strings. Free-form additional sections allowed.",
       "additionalProperties": true
+    },
+    "followup_proposals": {
+      "type": "array",
+      "description": "Decide-phase output. Each entry is a proposal for a follow-up study motivated by a gap this study revealed. Lifted into a child study via /pbg-study seed-from-followup, which stamps the child with `seeded_from:` and auto-adds the parent to its `pipeline_gate.prerequisites`.",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "motivation"],
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Slug, unique within this study's followup_proposals."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short human-readable proposal title."
+          },
+          "motivation": {
+            "type": "string",
+            "description": "What gap in this study motivates the follow-up."
+          },
+          "hypothesized_mechanism": {
+            "type": "string",
+            "description": "Optional. The missing biology/process the follow-up would add. Becomes the seeded child's model_change: if no explicit seed.model_change is provided."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["proposed", "accepted", "rejected", "seeded"],
+            "default": "proposed",
+            "description": "Lifecycle of the proposal itself. Flipped to `seeded` automatically by /pbg-study seed-from-followup."
+          },
+          "seeded_study": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "description": "Set when status == seeded. Slug of the child study created from this proposal."
+          },
+          "seed": {
+            "type": "object",
+            "description": "Optional. Verbatim seed fields transferred to the child study.yaml at seed time. Any shape accepted; common keys mirror the v3 study fields below.",
+            "additionalProperties": true,
+            "properties": {
+              "purpose": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "question": {"type": "string"},
+                  "mechanism": {"type": "string"},
+                  "expected_outcome": {"type": "string"}
+                }
+              },
+              "key_assumptions": {
+                "type": "array",
+                "items": {"type": "string"}
+              },
+              "model_change": {
+                "oneOf": [
+                  {"type": "object", "additionalProperties": true},
+                  {"type": "string"}
+                ]
+              },
+              "simulation_set": {
+                "oneOf": [
+                  {"type": "array"},
+                  {"type": "object", "additionalProperties": true}
+                ]
+              },
+              "pipeline_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "seeded_from": {
+      "type": "object",
+      "description": "Provenance stamp set automatically by /pbg-study seed-from-followup when this study is created from a parent's followup_proposals entry. Queryable lineage: `grep -r 'seeded_from' studies/*/study.yaml` finds all seeded children.",
+      "required": ["study", "proposal_id"],
+      "additionalProperties": true,
+      "properties": {
+        "study": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$",
+          "description": "Parent study slug."
+        },
+        "proposal_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "Proposal id within the parent's followup_proposals list."
+        }
+      }
     }
   }
 }
