@@ -26,13 +26,13 @@
     },
     "status": {
       "type": "string",
-      "enum": ["draft", "in-progress", "completed", "archived"],
-      "description": "Lifecycle status. Agents set 'draft' on creation; users advance to 'in-progress' once work starts."
+      "enum": ["draft", "in-progress", "completed", "archived", "planned", "running", "ran", "complete", "failed", "invalid"],
+      "description": "Lifecycle status. Two enums coexist: the v3 author-set values (draft, in-progress, completed, archived) and the dashboard's runtime sub-state values within a phase (planned, running, ran, complete, failed, invalid). The latter are what the parallel-agent's canonical studies use alongside the top-level `phase:` field."
     },
-    "lifecycle_phase": {
+    "phase": {
       "type": "string",
-      "enum": ["design", "build", "simulate", "evaluate", "decide"],
-      "description": "Optional declaration of the study's current high-level phase. The 5-phase lifecycle (Design → Build → Simulate → Evaluate → Decide) is the canonical coarse-grained coordinate; the existing `status:` field captures the finer-grained runtime state within a phase. If absent, the dashboard infers the phase from status + the presence of artifacts (spec fields filled, runs.db exists, etc.). See docs/concepts/vivarium-dashboard-model.md#study-lifecycle."
+      "enum": ["Design", "Build", "Simulate", "Evaluate", "Decide"],
+      "description": "Optional declaration of the study's current high-level phase. The 5-phase lifecycle (Design → Build → Simulate → Evaluate → Decide) is the canonical coarse-grained coordinate; the existing `status:` field captures the finer-grained runtime state within a phase. The enum is capitalized — the dashboard's study-detail.html template reads `study.phase` directly. If absent, the dashboard infers the phase from status + the presence of artifacts (spec fields filled, runs.db exists, etc.). See docs/concepts/vivarium-dashboard-model.md for the canonical 8-section structure."
     },
     "objective": {
       "type": "string",
@@ -167,14 +167,14 @@
         "auto_discover": {"type": "boolean"},
         "data_source": {
           "type": "string",
-          "enum": ["runs_db", "emitter", "file"]
+          "description": "Where the dashboard reads test inputs from. Common values: runs_db, emitter, file, latest_run. Free-form for forward compat across dashboard versions."
         },
         "pytest_args": {
           "type": "array",
           "items": {"type": "string"}
         },
         "last_results": {
-          "type": "object",
+          "type": ["object", "null"],
           "additionalProperties": true,
           "properties": {
             "passed": {"type": "integer"},
@@ -340,6 +340,254 @@
         {"type": "array", "items": {"type": "string"}},
         {"type": "string"}
       ]
+    },
+    "purpose": {
+      "type": "object",
+      "description": "Section 1 of the canonical 8-section structure. Replaces v3 question + hypothesis + objective. Sub-keys: question, mechanism, expected_outcome (all free-form strings).",
+      "additionalProperties": true,
+      "properties": {
+        "question": {"type": "string"},
+        "mechanism": {"type": "string"},
+        "expected_outcome": {"type": "string"}
+      }
+    },
+    "pipeline_gate": {
+      "type": "object",
+      "description": "Section 2 of the canonical 8-section structure. Captures study-level DAG semantics: which parent studies must be done, which child studies become unblocked, and what counts as 'safe to proceed'. Supersedes parent_studies as the source-of-truth (parent_studies remains as a v3 back-compat shim).",
+      "additionalProperties": true,
+      "properties": {
+        "prerequisites": {
+          "type": "array",
+          "description": "List of parent study slugs that must reach the proceed_condition.",
+          "items": {"type": "string"}
+        },
+        "enables": {
+          "type": "array",
+          "description": "List of child study slugs unblocked when this study's primary tests pass.",
+          "items": {"type": "string"}
+        },
+        "proceed_condition": {
+          "type": "string",
+          "description": "Free-form description of when downstream studies may safely start."
+        },
+        "blocks_until_resolved": {
+          "type": "string",
+          "description": "Free-form description of what happens to the pipeline if primary tests fail."
+        }
+      }
+    },
+    "simulation_set": {
+      "description": "Section 3 of the canonical 8-section structure. Replaces v3 variants + interventions. Each entry is a concrete run plan: base_model, perturbation, condition, duration, seeds, readouts collected, behavior tests applied, and gating status. Array shape preferred; object shape accepted for forward compatibility.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {"type": "string"},
+              "base_model": {"type": "string"},
+              "perturbation": {
+                "description": "null for no perturbation; otherwise an object whose keys describe what to override.",
+                "oneOf": [
+                  {"type": "null"},
+                  {"type": "object", "additionalProperties": true}
+                ]
+              },
+              "condition": {"type": "string"},
+              "duration_min": {"type": "number"},
+              "seeds": {
+                "type": "array",
+                "items": {"type": "integer"}
+              },
+              "readouts": {
+                "type": "array",
+                "items": {"type": "string"}
+              },
+              "applies_tests": {
+                "type": "array",
+                "items": {"type": "string"}
+              },
+              "status": {
+                "type": "string",
+                "description": "Common values: ready, gated. Free-form for forward compat."
+              },
+              "blocked_by_requirements": {
+                "type": "array",
+                "items": {"type": "string"}
+              }
+            }
+          }
+        },
+        {"type": "object", "additionalProperties": true}
+      ]
+    },
+    "model_change": {
+      "description": "Section 4 of the canonical 8-section structure (paired with implementation_requirements). What code changes in the composite. Object shape is preferred; string shape accepted for terse summaries.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "base_model": {"type": "string"},
+            "new_processes": {"type": "array"},
+            "new_state_variables": {"type": "array"},
+            "new_parameters": {"type": "array"},
+            "modified_processes": {"type": "array"},
+            "new_listeners": {"type": "array"},
+            "notes": {"type": "string"}
+          }
+        },
+        {"type": "string"}
+      ]
+    },
+    "key_assumptions": {
+      "type": "array",
+      "description": "Cross-cutting field paired with section 4 (Build). Short biological context — assumption strings. Long-form lit review belongs in references/notes/<bib-key>.md, not here.",
+      "items": {"type": "string"}
+    },
+    "readouts": {
+      "type": "array",
+      "description": "Section 5 of the canonical 8-section structure. Replaces v3 observables. Each readout declares what is collected from a simulation run and from where, plus its availability status.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "store_path": {"type": "string"},
+          "index_by": {"type": "object", "additionalProperties": true},
+          "units": {"type": "string"},
+          "status": {
+            "type": "string",
+            "description": "Common values: available, derived-needed, aspirational. Free-form for forward compat."
+          },
+          "blocked_by_requirements": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    },
+    "behavior_tests": {
+      "type": "array",
+      "description": "Section 6 of the canonical 8-section structure. Replaces v3 expected_behavior. Note the field is named behavior_tests because `tests:` is dashboard-v4 reserved (for the auto_discover/data_source/pytest_args config block). Each test maps a (measure, pass_if) pair onto a named simulation in simulation_set.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": {"type": "string"},
+          "classification": {
+            "type": "string",
+            "description": "Common values: primary, supporting, diagnostic, regression. Free-form for forward compat."
+          },
+          "description": {"type": "string"},
+          "measure": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "kind": {"type": "string"}
+            }
+          },
+          "pass_if": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "op": {"type": "string"}
+            }
+          },
+          "units": {"type": "string"},
+          "requires_simulation": {"type": "string"},
+          "blocked_by_requirements": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "calibration_anchor": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Optional block surfacing literature-vs-model divergences as part of the test, not just pass/fail."
+          },
+          "cites": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    },
+    "conclusion_logic": {
+      "type": "object",
+      "description": "Cross-cutting field paired with section 6 (Tests). Explicit if-pass / if-fail mapping; separates implementation success from biological validation.",
+      "additionalProperties": true,
+      "properties": {
+        "if_primary_tests_pass": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "implementation_status": {"type": "string"},
+            "biological_validation": {"type": "string"},
+            "pipeline_unblocks": {
+              "type": "array",
+              "items": {"type": "string"}
+            }
+          }
+        },
+        "if_primary_tests_fail": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "diagnose": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "block_downstream": {"type": "string"}
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "description": "Section 7 of the canonical 8-section structure. Explicit out-of-scope claims. Prevents overclaim from a passing test.",
+      "items": {"type": "string"}
+    },
+    "implementation_requirements": {
+      "description": "Section 8 of the canonical 8-section structure (paired with model_change). Concrete actionable items. Array shape preferred; object shape accepted for forward compatibility.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "id": {"type": "string"},
+              "kind": {
+                "type": "string",
+                "description": "Common values: listener, parameter_hook, process, data. Free-form for forward compat."
+              },
+              "title": {"type": "string"},
+              "effort": {
+                "type": "string",
+                "description": "Common values: XS, S, M, L, XL."
+              },
+              "description": {"type": "string"},
+              "steps": {
+                "type": "array",
+                "items": {"type": "string"}
+              },
+              "defer_until": {"type": "string"},
+              "unblocks": {
+                "type": "array",
+                "items": {"type": "string"}
+              }
+            }
+          }
+        },
+        {"type": "object", "additionalProperties": true}
+      ]
+    },
+    "bibliography": {
+      "type": "object",
+      "description": "Renamed from references because `references:` is dashboard-v4-reserved (list of {file} shape). Keys are section names (e.g. 'expert', 'bib_keys'), values are lists of strings. Free-form additional sections allowed.",
+      "additionalProperties": true
     }
   }
 }
