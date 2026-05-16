@@ -116,7 +116,7 @@ When all your in-flight stage branches are merged, the rail badge clears.
 ## Two paths to the same workspace
 
 - **Browser dashboard** is the primary UI. Pure-CLI workflows are supported via `python3 scripts/lint-workspace.py` + direct YAML edits, but the buttons handle branch-creation and PR setup for you.
-- **Claude Code + [pbg-superpowers]** adds skills that pair with the dashboard: `/pbg-study` and `/pbg-investigation` (scaffold a study or investigation), `/pbg-viz` (generate a visualization), `/pbg-wrapper` / `/pbg-expert` (wrap a new simulator), `/pbg-composer` (compose multiple wrappers), `/pbg-report` (regenerate per-model reports). The dashboard and the skills share the same `workspace.yaml`.
+- **Claude Code + [pbg-superpowers]** adds skills that pair with the dashboard: `/pbg-study` and `/pbg-investigation` (scaffold a study or investigation), `/pbg-viz` (generate a visualization), `/pbg-expert` (wrap a simulator; pass `--lightweight` for in-workspace, or omit for a sibling repo + composite form via `<name> <tools…>`), `/pbg-report` (regenerate per-model reports). The dashboard and the skills share the same `workspace.yaml`.
 
 ## Config files to know
 
