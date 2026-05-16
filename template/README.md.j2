@@ -1,18 +1,34 @@
 # {{ workspace_name }}
 
-A process-bigraph research workspace. Use the `/pbg-*` skills to drive the
-canonical PR flow:
+A Process-Bigraph research workspace scaffolded from
+[pbg-template](https://github.com/vivarium-collective/pbg-template).
 
-1. `/pbg-add-model <name>` — register a new model (creates a submodule)
-2. `/pbg-pull-processes` — pull required pbg-* wrappers
-3. `/pbg-data <model>` — curate datasets + references
-4. `/pbg-expert-input <model>` — capture expert-stated expected behavior
-5. `/pbg-baseline <model>` — build minimal end-to-end composite
-6. `/pbg-phase-plan <model>` — lay out multi-phase plan
-7. `/pbg-phase <n> <model>` — implement each phase
+## Getting started
 
-Optional dashboard:
+    bash scripts/serve.sh           # open the dashboard
+    python3 scripts/lint-workspace.py
 
-- `/pbg-server start` — launch local HTTP server for live guidance + progress
+See `NEXT_STEPS.md` for the full tour.
 
-See `docs/` and `reports/index.html` for details.
+## Working with this workspace
+
+The [pbg-superpowers](https://github.com/vivarium-collective/pbg-superpowers)
+Claude Code plugin provides skills that drive the canonical PR flow:
+
+- `/pbg-study <slug>` — start a study (8-section spec, `phase: Design|Build|Simulate|Evaluate|Decide`).
+- `/pbg-investigation <slug>` — group related studies into an investigation (DAG via `pipeline_gate.prerequisites`).
+- `/pbg-wrapper` / `/pbg-expert` — wrap a simulator as a process-bigraph Process or Step.
+- `/pbg-composer` — wire wrapped simulators into a composite.
+- `/pbg-viz` — generate a Visualization from a natural-language description.
+- `/pbg-report` — regenerate `reports/index.html`.
+
+Decide-phase studies can record `followup_proposals[]`; seed a child study
+from any proposal with `/pbg-study seed-from-followup <parent>/<proposal_id>`.
+
+## Layout
+
+- `workspace.yaml` — canonical state (validated against `.pbg/schemas/workspace.schema.json`).
+- `{{ package_path }}/` — your Python package (`core.py` exposes `build_core()`).
+- `studies/`, `composites/`, `references/`, `datasets/` — research artifacts.
+- `.pbg/schemas/` — JSON schemas the lint + dashboard validate against.
+- `scripts/` — `lint-workspace.py`, `serve.sh`, helpers.

@@ -76,9 +76,25 @@ Empty Discovered view usually means the venv isn't built (`uv pip install -e ".[
 
 Composite documents — process-bigraph state trees — live here. Pick one, inspect its wiring (process tree, store paths, emitters), and run it from the **Composite Explorer** sub-page to confirm it produces sensible output before wiring it into an investigation. Composites you write directly into `{{ package_path }}/composites/` show up automatically.
 
-## 4 — Investigations
+## 4 — Studies and Investigations
 
-The research-recipe layer. An investigation pins a composite, names a set of observables to track, declares one or more simulation runs (single / parameter sweep / random seeds), and selects which visualizations to render. The Run button executes them, writes results, and snapshots the run for reproducibility.
+A **study** (`studies/<slug>/study.yaml`) is one research question, with a
+`phase:` of `Design | Build | Simulate | Evaluate | Decide` and an 8-section
+canonical structure (`purpose`, `simulation_set`, `model_change`,
+`key_assumptions`, `readouts`, `behavior_tests`, `conclusion_logic`,
+`limitations`). Use `/pbg-study <slug>` from the [pbg-superpowers] plugin to
+scaffold one. Decide-phase studies can record `followup_proposals[]`; seed a
+child study from any proposal with `/pbg-study seed-from-followup
+<parent>/<proposal_id>` (the child gets a `seeded_from:` provenance stamp).
+
+An **investigation** (`investigations/<slug>/investigation.yaml`) groups
+related studies and orders them as a DAG via `pipeline_gate.prerequisites`.
+Use `/pbg-investigation <slug>` to scaffold.
+
+The legacy per-investigation "run a composite + observables + visualizations"
+flow still lives in the dashboard's Investigations tab — pick a composite,
+declare simulations (single / sweep / seeds), name observables, run, save,
+compare.
 
 ## 5 — Visualizations
 
@@ -100,14 +116,15 @@ When all your in-flight stage branches are merged, the rail badge clears.
 ## Two paths to the same workspace
 
 - **Browser dashboard** is the primary UI. Pure-CLI workflows are supported via `python3 scripts/lint-workspace.py` + direct YAML edits, but the buttons handle branch-creation and PR setup for you.
-- **Claude Code + [pbg-superpowers]** adds skills that pair with the dashboard: `/pbg-viz` (generate a visualization), `/pbg-wrapper` / `/pbg-expert` (wrap a new simulator), `/pbg-composer` (compose multiple wrappers), `/pbg-report` (regenerate per-model reports). The dashboard and the skills share the same `workspace.yaml`.
+- **Claude Code + [pbg-superpowers]** adds skills that pair with the dashboard: `/pbg-study` and `/pbg-investigation` (scaffold a study or investigation), `/pbg-viz` (generate a visualization), `/pbg-wrapper` / `/pbg-expert` (wrap a new simulator), `/pbg-composer` (compose multiple wrappers), `/pbg-report` (regenerate per-model reports). The dashboard and the skills share the same `workspace.yaml`.
 
 ## Config files to know
 
-- `workspace.yaml` — canonical state (observables, simulations, visualizations, phases, imports, datasets, …)
+- `workspace.yaml` — canonical state (observables, simulations, visualizations, imports, datasets, …)
+- `studies/<slug>/study.yaml` — one research question (8 canonical sections, `phase:` lifecycle)
+- `investigations/<slug>/investigation.yaml` — DAG of studies via `pipeline_gate.prerequisites`
 - `references/{papers.bib, claims.yaml}` — bibliography + claim → paper mapping
-- `.pbg/schemas/workspace.schema.json` — JSON schema (lint enforces it)
-- `phases/phase-<n>.md` — per-phase spec (frontmatter + body)
+- `.pbg/schemas/{workspace,study,investigation}.schema.json` — JSON schemas (lint enforces them)
 
 ## Focused dashboard panels
 
