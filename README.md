@@ -5,28 +5,52 @@ workspace is a self-contained research repo: a Python package, study specs,
 composite documents, references, and the JSON schemas the dashboard and lint
 tools validate against.
 
-Two ways to use it:
+## Getting Started
 
-1. **With the [pbg-superpowers](https://github.com/vivarium-collective/pbg-superpowers) Claude Code plugin** — AI-assisted authoring flow.
-2. **Standalone via GitHub "Use this template"** — vanilla workspace, no plugin required.
+Two paths, depending on whether you want AI assistance.
 
-## Quick start (with plugin)
+### Path A — Standalone (recommended starting point)
 
-Install the plugin, then from any directory:
+Use this template directly. No plugin, no Claude Code required.
 
-    /pbg-workspace my-research-workspace
+1. Click **Use this template** on github.com/vivarium-collective/pbg-template
+   (or `git clone https://github.com/vivarium-collective/pbg-template my-workspace`).
+2. Initialize and install:
 
-## Quick start (standalone)
+       cd my-workspace
+       bash use-this-template-init.sh        # prompts for workspace name, renders .j2 files
+       uv venv .venv && source .venv/bin/activate
+       uv pip install -e ".[dev]"            # pulls in vivarium-dashboard
+       python3 scripts/lint-workspace.py     # should print "workspace lint: OK"
 
-Click **Use this template** on github.com/vivarium-collective/pbg-template,
-clone your new repo, then:
+3. Launch the dashboard:
 
-    bash use-this-template-init.sh   # prompts for workspace name, renders .j2 files
-    uv venv .venv && source .venv/bin/activate
-    uv pip install -e ".[dev]"
-    python3 scripts/lint-workspace.py   # should print "workspace lint: OK"
+       bash scripts/serve.sh                 # or: vivarium-dashboard serve --workspace .
 
-See the generated `NEXT_STEPS.md` for the full tour.
+   Open the URL it prints. See the generated `NEXT_STEPS.md` for a guided tour,
+   and the [vivarium-dashboard](https://github.com/vivarium-collective/vivarium-dashboard)
+   README for the dashboard's own feature walkthrough.
+
+### Path B — AI-augmented (via the pbg-superpowers Claude Code plugin)
+
+Want AI-assisted authoring? Install the
+[pbg-superpowers](https://github.com/vivarium-collective/pbg-superpowers)
+Claude Code plugin; running `/pbg-workspace my-project` from inside Claude
+Code clones this template and bootstraps a workspace with conversational
+study, composite, and visualization authoring on top. See the
+[pbg-superpowers Getting Started](https://github.com/vivarium-collective/pbg-superpowers#getting-started)
+for the full walkthrough.
+
+### What to expect
+
+A scaffolded workspace is a regular Python project. `pbg_<slug>/` holds your
+code (composites, processes, visualizations); `studies/` and `composites/`
+hold YAML specs; `references/` is your bibliography and claims log; and
+`.pbg/schemas/` validates everything via `scripts/lint-workspace.py`. The
+dashboard reads and writes these files, and you can edit them by hand —
+both flows stay in sync. Every change the dashboard makes is a git commit
+on your current branch, so you get a full audit trail of how your study
+evolved.
 
 ## What a scaffolded workspace contains
 
@@ -57,4 +81,4 @@ plugin's current version; standalone users get whatever was last synced here.
 
 ## License
 
-MIT.
+TBD — license file pending before 1.0.
