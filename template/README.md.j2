@@ -17,8 +17,8 @@ Claude Code plugin provides skills that drive the canonical PR flow:
 
 - `/pbg-study <slug>` — start a study (8-section spec, `phase: Design|Build|Simulate|Evaluate|Decide`).
 - `/pbg-investigation <slug>` — group related studies into an investigation (DAG via `pipeline_gate.prerequisites`).
-- `/pbg-wrapper` / `/pbg-expert` — wrap a simulator as a process-bigraph Process or Step.
-- `/pbg-composer` — wire wrapped simulators into a composite.
+- `/pbg-expert <tool>` — wrap a simulator as a process-bigraph Process or Step (sibling repo + tests + report). Pass `--lightweight` to write in-workspace instead.
+- `/pbg-expert <name> <tools…>` — wire wrapped simulators into a composite (sibling repo, or `--lightweight` for in-workspace).
 - `/pbg-viz` — generate a Visualization from a natural-language description.
 - `/pbg-report` — regenerate `reports/index.html`.
 
