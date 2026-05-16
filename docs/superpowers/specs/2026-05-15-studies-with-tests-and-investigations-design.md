@@ -2,6 +2,7 @@
 
 **Date:** 2026-05-15
 **Status:** Approved for implementation
+**STATUS:** Investigations dropped 2026-05-16 — only the Studies-with-tests portion of this spec is implemented. See git log for the removal commit.
 **Owner:** Eran (process-bigraph workspaces)
 **Builds on:**
 - `2026-05-12-study-model-design.md` (Study v3 — baseline / variants / interventions / runs / viz / conclusion).
