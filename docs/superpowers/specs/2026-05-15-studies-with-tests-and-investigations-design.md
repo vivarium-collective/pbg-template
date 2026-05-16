@@ -251,21 +251,23 @@ Concurrency: per-study `.pbg/study-test-results/<slug>.lock`. Second concurrent 
 
 ### Investigation endpoints
 
+The legacy `/api/investigation-*` routes are already in use for Studies (Studies were called "Investigations" in v2). To avoid collisions, the new endpoints use the `/api/plan*` prefix. The user-facing UI labels still read "Investigations"; "plan" is an internal naming choice for routes + module identifiers.
+
 | Method + path | Body | Purpose |
 |---|---|---|
-| `GET /api/investigations-list` | — | All investigations: name, status (derived), study count, references. |
-| `GET /api/investigation/<slug>` | — | Full investigation.yaml + per-study derived status + per-study test summary. |
-| `POST /api/investigation-create` | `{name, objective?, hypothesis?, studies[]}` | Scaffolds `investigations/<slug>/investigation.yaml`. |
-| `POST /api/investigation-set-meta` | `{slug, objective?, hypothesis?, status?}` | Selective metadata update. |
-| `POST /api/investigation-study-add` | `{slug, study, position?, gate?}` | Appends or inserts. |
-| `POST /api/investigation-study-remove` | `{slug, study}` | Removes from the list. |
-| `POST /api/investigation-study-set-status` | `{slug, study, status}` | Manual override (status is normally derived). |
-| `POST /api/investigation-reference-add` | `{slug, file, label?}` | Appends to references. |
-| `DELETE /api/investigation` | `{slug}` | Removes the directory. |
+| `GET /api/plans` | — | All investigations: name, status, study count, references. |
+| `GET /api/plan/<slug>` | — | Full investigation.yaml + per-study derived status + per-study test summary. |
+| `POST /api/plan-create` | `{name, objective?, hypothesis?, studies[], references?}` | Scaffolds `investigations/<slug>/investigation.yaml`. |
+| `POST /api/plan-set-meta` | `{slug, objective?, hypothesis?, status?}` | Selective metadata update. |
+| `POST /api/plan-study-add` | `{slug, study, position?, gate?}` | Appends or inserts. |
+| `POST /api/plan-study-remove` | `{slug, study}` | Removes from the list. |
+| `POST /api/plan-study-set-status` | `{slug, study, status}` | Manual override (status is normally derived). |
+| `POST /api/plan-reference-add` | `{slug, file, label?}` | Appends to references. |
+| `DELETE /api/plan` | `{slug}` | Removes the directory. |
 
-Status derivation lives server-side: GET endpoints render `status` from current test results + run-count, NOT from the on-disk value. The `set-status` endpoint writes a manual override which the server then respects until the underlying conditions are met again — escape hatch for "I know better; mark this done."
+Status derivation lives server-side: GET endpoints render `derived_status` per study from current test results + run-count, NOT from the on-disk value. The `set-status` endpoint writes a manual override (`status_override:`) which the server then respects until the underlying conditions are met again — escape hatch for "I know better; mark this done."
 
-The list endpoint is named `investigations-list` (not `investigations`) to avoid colliding with the legacy v2 endpoint `GET /api/investigations` which currently returns Studies. That legacy endpoint stays as-is; it now coexists with the new investigations-list.
+The legacy `/api/investigations` endpoint (which lists Studies) stays as-is; it now coexists with the new `/api/plans`.
 
 ### Dashboard UX
 
