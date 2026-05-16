@@ -3,6 +3,8 @@
 .pbg/state.json
 .pbg/composite-runs.db
 .pbg/runs/
+# Per-study test-runner artifacts
+.pbg/study-test-results/
 # Investigation runtime artifacts (results DB + rendered HTML + lock file).
 # spec.yaml + data/ are tracked; everything else is regenerated on each run.
 investigations/*/runs.db
