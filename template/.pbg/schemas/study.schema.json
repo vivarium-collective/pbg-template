@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vivarium-collective.github.io/pbg-template/schemas/study.schema.json",
+  "title": "study.yaml (v3)",
+  "description": "Schema for a pbg-superpowers study definition (studies/<slug>/study.yaml). Canonical as of pbg-superpowers v3: baseline is always a non-empty list of dicts, NOT a single dict.",
+  "type": "object",
+  "required": ["name", "baseline"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 3,
+      "description": "Always 3 for v3 study files."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "description": "Kebab-case slug matching the enclosing directory name (e.g. dnaa-01-expression-dynamics)."
+    },
+    "created": {
+      "type": "string",
+      "description": "ISO-8601 date when this study file was created (YYYY-MM-DD)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "in-progress", "completed", "archived"],
+      "description": "Lifecycle status. Agents set 'draft' on creation; users advance to 'in-progress' once work starts."
+    },
+    "objective": {
+      "type": "string",
+      "description": "One-paragraph statement of what this study measures or demonstrates."
+    },
+    "description": {
+      "type": "string",
+      "description": "Extended background / context. Multi-line YAML strings are fine."
+    },
+    "hypothesis": {
+      "type": "string",
+      "description": "Testable prediction; optional for exploratory studies."
+    },
+    "conclusion": {
+      "type": ["string", "null"],
+      "description": "Filled in after analysis. Leave null while status is draft/in-progress."
+    },
+    "baseline": {
+      "type": "array",
+      "description": "CANONICAL: always a non-empty list, even if there is only one architecture. Each entry is a named simulation configuration. Canonical since v3; do NOT use the old single-dict form.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "composite"],
+        "additionalProperties": true,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Short identifier for this baseline run (e.g. 'baseline', 'wild-type')."
+          },
+          "composite": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+            "description": "Dotted Python import path to the composite factory function (e.g. v2ecoli.composites.baseline.baseline)."
+          },
+          "params": {
+            "type": "object",
+            "description": "Free-form keyword arguments forwarded to the composite factory."
+          }
+        }
+      }
+    },
+    "variants": {
+      "type": "array",
+      "description": "List of named parameter perturbations applied on top of baseline.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": true,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "interventions": {
+      "type": "array",
+      "description": "Structural modifications (add/remove process, rewire) applied before running.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": true,
+        "properties": {
+          "name": {"type": "string"},
+          "kind": {
+            "type": "string",
+            "enum": ["add_process", "remove_process", "change_config", "rewire"]
+          },
+          "description": {"type": "string"}
+        }
+      }
+    },
+    "observables": {
+      "type": "array",
+      "description": "Store-path bindings to observe during runs.",
+      "items": {
+        "type": "object",
+        "required": ["name", "store_path"],
+        "additionalProperties": true,
+        "properties": {
+          "name": {"type": "string"},
+          "store_path": {"type": "string"},
+          "units": {"type": "string"},
+          "description": {"type": "string"}
+        }
+      }
+    },
+    "visualizations": {
+      "type": "array",
+      "description": "Declared visualizations for this study's outputs.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": true,
+        "properties": {
+          "name": {"type": "string"},
+          "address": {"type": "string"},
+          "config": {"type": "object"}
+        }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "description": "Auto-managed run records. Agents should not write here directly; /pbg-study run-baseline populates this.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {"type": "string"},
+          "status": {
+            "type": "string",
+            "enum": ["pending", "running", "completed", "failed"]
+          },
+          "started_at": {"type": "string"},
+          "completed_at": {"type": "string"},
+          "results_path": {"type": "string"}
+        }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "description": "Test configuration block. Usually auto-managed.",
+      "additionalProperties": true,
+      "properties": {
+        "auto_discover": {"type": "boolean"},
+        "data_source": {
+          "type": "string",
+          "enum": ["runs_db", "emitter", "file"]
+        },
+        "pytest_args": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "last_results": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "passed": {"type": "integer"},
+            "failed": {"type": "integer"},
+            "errors": {"type": "integer"},
+            "timestamp": {"type": "string"}
+          }
+        }
+      }
+    },
+    "references": {
+      "description": "References supporting this study. May be an object (keyed sections) or an array of {file, section?} items.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file"],
+            "additionalProperties": true,
+            "properties": {
+              "file": {"type": "string"},
+              "section": {"type": "string"}
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Sectioned references object: keys are section names (e.g. 'expert', 'bib_keys', 'claims'), values are lists of strings.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      ]
+    },
+    "implementation_tasks": {
+      "description": "Work items for implementing this study. May be a string (free-form) or a list of strings.",
+      "oneOf": [
+        {"type": "string"},
+        {"type": "array", "items": {"type": "string"}}
+      ]
+    },
+    "parent_studies": {
+      "type": "array",
+      "description": "Slugs of studies that must be completed before this one (DAG dependency hints for /pbg-study dag).",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_-]*$"
+      }
+    },
+    "expected_behavior": {
+      "description": "Advisory: list of expected qualitative outcomes used for review, not automated assertion. Free-form strings.",
+      "oneOf": [
+        {"type": "array", "items": {"type": "string"}},
+        {"type": "string"}
+      ]
+    },
+    "expert_questions": {
+      "description": "Advisory: open questions to pose to domain experts. Free-form strings or list.",
+      "oneOf": [
+        {"type": "array", "items": {"type": "string"}},
+        {"type": "string"}
+      ]
+    }
+  }
+}
