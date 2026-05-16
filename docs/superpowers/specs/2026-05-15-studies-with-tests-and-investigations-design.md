@@ -502,6 +502,19 @@ Decision: **merge PR #28 first, then carve into studies in a follow-up PR.** Rat
 - Walk through every study via the dashboard.
 - Run `/pbg-implement-study cooperativity` (the one study without prior PR #28 work) as the real test of the agent skill.
 
+## Related follow-up (separate spec needed): expanded Variant scope
+
+This spec keeps the existing Study v3 Variant model unchanged (`parameter_overrides` only). Eran has confirmed that the Variant model needs to be expanded to support:
+
+- **Initial-state overrides** (current state values at composite construction).
+- **Process configuration overrides** including pathway-level edits (config keys inside a process, not just top-level params).
+- **Plugging in new modules** — adding a process not present in the baseline.
+- **Replacing modules** — swapping a process implementation (partially scoped in `multi-composite-investigations-design.md` as `process_overrides:`, but not implemented in v3).
+
+This expansion is **its own spec** — it touches the composite-derivation system, not the test/investigation surface this spec defines. Studies-with-tests and Investigations-as-plans land independently of variant-scope expansion.
+
+When expanded-variant lands, no schema change to this spec is required: the test fixture, runner, and investigation chain all operate over the run output, not the variant recipe.
+
 ## Out of scope (follow-ups)
 
 - **DAG investigations** with `depends_on:` per study.
