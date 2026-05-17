@@ -967,19 +967,23 @@
     },
     "seeded_from": {
       "type": "object",
-      "description": "Provenance stamp set automatically by /pbg-study seed-from-followup when this study is created from a parent's followup_proposals entry. Queryable lineage: `grep -r 'seeded_from' studies/*/study.yaml` finds all seeded children.",
-      "required": ["study", "proposal_id"],
+      "description": "Provenance stamp set automatically by /pbg-study seed-from-followup when this study is created from a parent's followup_proposals entry. Queryable lineage: `grep -r 'seeded_from' studies/*/study.yaml` finds all seeded children. Pass 10B adds an optional `finding:` field, populated when the child was seeded from a specific finding via `--from-finding <id>`; this lets follow-up lineage trace not just which proposal seeded which child but which *finding* on the parent motivated the follow-up.",
       "additionalProperties": true,
       "properties": {
         "study": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9_-]*$",
-          "description": "Parent study slug."
+          "description": "Parent study slug. Optional individually (back-compat; Pass 8 + Pass 10B treat all three sub-fields as independently optional)."
         },
         "proposal_id": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]*$",
-          "description": "Proposal id within the parent's followup_proposals list."
+          "description": "Proposal id within the parent's followup_proposals list. Optional individually."
+        },
+        "finding": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+          "description": "Pass 10B. Optional. Finding id (e.g. `F-03`) on the parent study that motivated this seeded child. Set automatically when `/pbg-study seed-from-followup --from-finding <id>` is used. Enables queries like `grep -r 'finding: F-' studies/*/study.yaml` to trace finding-to-followup lineage."
         }
       }
     }
