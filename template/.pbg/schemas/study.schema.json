@@ -27,7 +27,37 @@
     "status": {
       "type": "string",
       "enum": ["draft", "in-progress", "completed", "archived", "planned", "running", "ran", "complete", "failed", "invalid"],
-      "description": "Lifecycle status. Two enums coexist: the v3 author-set values (draft, in-progress, completed, archived) and the dashboard's runtime sub-state values within a phase (planned, running, ran, complete, failed, invalid). The latter are what the parallel-agent's canonical studies use alongside the top-level `phase:` field."
+      "description": "Lifecycle status. Two enums coexist: the v3 author-set values (draft, in-progress, completed, archived) and the dashboard's runtime sub-state values within a phase (planned, running, ran, complete, failed, invalid). The latter are what the parallel-agent's canonical studies use alongside the top-level `phase:` field. NOTE: superseded for new specs by the six independent multi-axis status fields below (design_status, implementation_status, simulation_status, evaluation_status, gate_status, expert_review_status). Kept for v3 back-compat — existing studies that set only `status:` continue to validate. Pass A infrastructure-feedback roadmap."
+    },
+    "design_status": {
+      "type": ["string", "null"],
+      "enum": ["planned", "drafted", "expert_reviewed", "approved", null],
+      "description": "Multi-axis status (Pass A). How mature the spec/design is. Independent of all other axes. Optional."
+    },
+    "implementation_status": {
+      "type": ["string", "null"],
+      "enum": ["not_started", "partial", "complete", null],
+      "description": "Multi-axis status (Pass A). Whether the code that backs the study (composites, processes, listeners) has been written. Independent of all other axes. Optional."
+    },
+    "simulation_status": {
+      "type": ["string", "null"],
+      "enum": ["not_run", "running", "ran", "failed", null],
+      "description": "Multi-axis status (Pass A). Whether the simulations described in simulation_set have been executed. Independent of all other axes. Optional."
+    },
+    "evaluation_status": {
+      "type": ["string", "null"],
+      "enum": ["not_evaluated", "evaluated", "failed_evaluation", null],
+      "description": "Multi-axis status (Pass A). Whether behavior_tests have been run against the simulation output. Independent of all other axes. Optional."
+    },
+    "gate_status": {
+      "type": ["string", "null"],
+      "enum": ["blocked", "needs_calibration", "passed", "failed", "stale", null],
+      "description": "Multi-axis status (Pass A). The pipeline-gate verdict — drives downstream unblocking. When set, the dashboard renders this as the headline status pill. Independent of all other axes. Optional."
+    },
+    "expert_review_status": {
+      "type": ["string", "null"],
+      "enum": ["not_requested", "requested", "reviewed", "approved", "disputed", null],
+      "description": "Multi-axis status (Pass A). Whether a domain expert has signed off on the study's framing/conclusions. Independent of all other axes. Optional."
     },
     "phase": {
       "type": "string",
@@ -358,8 +388,54 @@
       "properties": {
         "prerequisites": {
           "type": "array",
-          "description": "List of parent study slugs that must reach the proceed_condition.",
-          "items": {"type": "string"}
+          "description": "List of parent dependencies. Each entry is one of: (a) a bare slug string (legacy form), (b) an object {study, condition: tests-passed | ran | complete} (the existing object form, identical to parent_studies entries), or (c) Pass A extended object form with required_gate_status / outputs_used / artifact_hashes for stale-propagation and downstream-validation. All new fields are optional.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                "description": "Legacy bare-string form: parent slug."
+              },
+              {
+                "type": "object",
+                "required": ["study"],
+                "additionalProperties": false,
+                "properties": {
+                  "study": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]*$",
+                    "description": "Slug of the parent study."
+                  },
+                  "condition": {
+                    "type": "string",
+                    "enum": ["tests-passed", "ran", "complete"],
+                    "default": "tests-passed",
+                    "description": "When the parent satisfies this condition, this study is unblocked. Same semantics as parent_studies[].condition."
+                  },
+                  "required_gate_status": {
+                    "type": ["string", "null"],
+                    "enum": ["blocked", "needs_calibration", "passed", "failed", "stale", null],
+                    "description": "Pass A extension. The minimum gate_status the parent must reach for this dependency to count. Independent of `condition` — both can be specified; the dashboard ANDs them."
+                  },
+                  "outputs_used": {
+                    "type": "array",
+                    "description": "Pass A extension. Named outputs (readouts, derived metrics) from the parent that this study actually consumes. Lets the linter detect over-broad dependencies and lets the dashboard show targeted dataflow edges.",
+                    "items": {"type": "string"}
+                  },
+                  "artifact_hashes": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Pass A extension. Hashes of upstream artifacts this study was last validated against. When the parent regenerates an artifact whose hash diverges, the dashboard flips this study's gate_status to `stale`. All sub-fields optional.",
+                    "properties": {
+                      "model_commit": {"type": ["string", "null"]},
+                      "parca_cache": {"type": ["string", "null"]},
+                      "analysis_script": {"type": ["string", "null"]}
+                    }
+                  }
+                }
+              }
+            ]
+          }
         },
         "enables": {
           "type": "array",
@@ -658,6 +734,71 @@
               "pipeline_gate": {
                 "type": "object",
                 "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "description": "First-class study findings (Pass A; full structure being worked out across passes — see notes/2026-05-16-findings-protocol.md). Each finding states something we learned and (optionally) ties it back to literature, expert references, and full reproducibility provenance. `additionalProperties: true` on each entry so authors can experiment with fields beyond the minimum enforced here.",
+      "items": {
+        "type": "object",
+        "required": ["id", "statement"],
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "description": "Stable slug — typically `F-01`, `F-02`, ... — unique within this study."
+          },
+          "statement": {
+            "type": "string",
+            "description": "One-paragraph English claim. The headline a reader scans."
+          },
+          "provenance": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Pass A finding_provenance. Full reproducibility metadata for a single finding. All sub-fields optional — populate what you have. Lets a reader (or downstream linter) check whether the finding is still backed by the current artifacts.",
+            "properties": {
+              "run_ids": {
+                "type": "array",
+                "description": "IDs of runs (from runs.db) the finding was extracted from.",
+                "items": {"type": "string"}
+              },
+              "simulation_config_hash": {
+                "type": ["string", "null"],
+                "description": "Hash of the simulation config (composite + params) used to produce the underlying runs."
+              },
+              "model_commit_hash": {
+                "type": ["string", "null"],
+                "description": "Git commit of the model/composite code that produced the underlying runs."
+              },
+              "parca_cache_hash": {
+                "type": ["string", "null"],
+                "description": "Hash of the parca/sim_data cache used (when relevant)."
+              },
+              "random_seeds": {
+                "type": "array",
+                "description": "Random seeds the underlying runs were executed with.",
+                "items": {"type": ["integer", "string"]}
+              },
+              "analysis_script": {
+                "type": ["string", "null"],
+                "description": "Path or dotted function reference to the analysis code that derived the finding from raw output."
+              },
+              "evaluator_version": {
+                "type": ["string", "null"],
+                "description": "Version string of the evaluator/scorer that produced the finding."
+              },
+              "raw_data_artifact": {
+                "type": ["string", "null"],
+                "description": "Path or URI to raw output (e.g. runs.db path, emitter SQLite, NumPy archive)."
+              },
+              "metric_table_artifact": {
+                "type": ["string", "null"],
+                "description": "Path or URI to a structured metric table summarizing the finding (e.g. CSV/Parquet)."
               }
             }
           }
