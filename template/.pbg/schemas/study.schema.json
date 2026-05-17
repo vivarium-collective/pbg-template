@@ -453,46 +453,168 @@
       }
     },
     "simulation_set": {
-      "description": "Section 3 of the canonical 8-section structure. Replaces v3 variants + interventions. Each entry is a concrete run plan: base_model, perturbation, condition, duration, seeds, readouts collected, behavior tests applied, and gating status. Array shape preferred; object shape accepted for forward compatibility.",
+      "description": "Section 3 of the canonical 8-section structure. Replaces v3 variants + interventions. Each entry is a concrete run plan. Pass B adds an optional `kind:` discriminator: when absent or `single`, the existing free-form single-run shape applies (back-compat). When `kind: sweep`, the entry is a structured parameter sweep with axes, candidates, and rejection reasons (see the Pass B sweep-table spec). Array shape preferred; object shape accepted for forward compatibility.",
       "oneOf": [
         {
           "type": "array",
           "items": {
-            "type": "object",
-            "additionalProperties": true,
-            "properties": {
-              "name": {"type": "string"},
-              "base_model": {"type": "string"},
-              "perturbation": {
-                "description": "null for no perturbation; otherwise an object whose keys describe what to override.",
-                "oneOf": [
-                  {"type": "null"},
-                  {"type": "object", "additionalProperties": true}
-                ]
+            "oneOf": [
+              {
+                "description": "Single-run entry (kind absent or kind: single). Free-form per the v3/v4 single-simulation shape.",
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "single",
+                    "description": "Optional discriminator. Absent defaults to single."
+                  },
+                  "name": {"type": "string"},
+                  "base_model": {"type": "string"},
+                  "perturbation": {
+                    "description": "null for no perturbation; otherwise an object whose keys describe what to override.",
+                    "oneOf": [
+                      {"type": "null"},
+                      {"type": "object", "additionalProperties": true}
+                    ]
+                  },
+                  "condition": {"type": "string"},
+                  "duration_min": {"type": "number"},
+                  "seeds": {
+                    "type": "array",
+                    "items": {"type": "integer"}
+                  },
+                  "readouts": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  },
+                  "applies_tests": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  },
+                  "status": {
+                    "type": "string",
+                    "description": "Common values: ready, gated. Free-form for forward compat."
+                  },
+                  "blocked_by_requirements": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                },
+                "not": {"required": ["kind"], "properties": {"kind": {"const": "sweep"}}}
               },
-              "condition": {"type": "string"},
-              "duration_min": {"type": "number"},
-              "seeds": {
-                "type": "array",
-                "items": {"type": "integer"}
-              },
-              "readouts": {
-                "type": "array",
-                "items": {"type": "string"}
-              },
-              "applies_tests": {
-                "type": "array",
-                "items": {"type": "string"}
-              },
-              "status": {
-                "type": "string",
-                "description": "Common values: ready, gated. Free-form for forward compat."
-              },
-              "blocked_by_requirements": {
-                "type": "array",
-                "items": {"type": "string"}
+              {
+                "description": "Sweep entry (kind: sweep). Structured Cartesian-product parameter sweep. axes + name are required; runs/aggregate_metrics/candidates_selected/rejection_reasons are populated AFTER execution.",
+                "type": "object",
+                "required": ["kind", "name", "axes"],
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "sweep"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Slug for the sweep (e.g. te-multiplier-sweep)."
+                  },
+                  "base_model": {
+                    "type": "string",
+                    "description": "Optional; inherits from study if absent."
+                  },
+                  "axes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "One or more swept axes. Multiple axes = Cartesian product.",
+                    "items": {
+                      "type": "object",
+                      "required": ["parameter", "values"],
+                      "additionalProperties": true,
+                      "properties": {
+                        "parameter": {
+                          "type": "string",
+                          "description": "Dotted path or parameter id."
+                        },
+                        "values": {
+                          "type": "array",
+                          "minItems": 1,
+                          "description": "Discrete values to sweep over."
+                        }
+                      }
+                    }
+                  },
+                  "seeds": {
+                    "type": "array",
+                    "items": {"type": "integer"}
+                  },
+                  "duration": {
+                    "type": "number",
+                    "description": "Duration in seconds (per run)."
+                  },
+                  "duration_min": {
+                    "type": "number",
+                    "description": "Alternate duration in minutes (matches single-run shape)."
+                  },
+                  "metrics": {
+                    "type": "array",
+                    "description": "Names of metrics captured per run.",
+                    "items": {"type": "string"}
+                  },
+                  "pass_fail_tests": {
+                    "type": "array",
+                    "description": "behavior_tests slugs to apply per run.",
+                    "items": {"type": "string"}
+                  },
+                  "candidate_selection": {
+                    "type": "string",
+                    "description": "Free-form strategy for picking winning runs."
+                  },
+                  "runs": {
+                    "type": "array",
+                    "description": "POPULATED AFTER EXECUTION. Each entry: {axis_values: {...}, seed: int, run_id: str, metrics: {...}, test_results: {test_name: pass|fail}}.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "properties": {
+                        "axis_values": {"type": "object", "additionalProperties": true},
+                        "seed": {"type": "integer"},
+                        "run_id": {"type": "string"},
+                        "metrics": {"type": "object", "additionalProperties": true},
+                        "test_results": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string",
+                            "enum": ["pass", "fail", "error", "skipped"]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "aggregate_metrics": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "POPULATED — e.g., {pass_rate: 0.4, candidate_count: 2}."
+                  },
+                  "candidates_selected": {
+                    "type": "array",
+                    "description": "POPULATED — list of selected run_ids.",
+                    "items": {"type": "string"}
+                  },
+                  "rejection_reasons": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": "POPULATED — {run_id: reason} for rejected runs."
+                  },
+                  "artifact_path": {
+                    "type": ["string", "null"],
+                    "description": "Optional path to CSV/JSON dump on disk."
+                  },
+                  "status": {
+                    "type": "string",
+                    "description": "Common values: ready, gated, ran. Free-form for forward compat."
+                  }
+                }
               }
-            }
+            ]
           }
         },
         {"type": "object", "additionalProperties": true}
