@@ -126,9 +126,15 @@ def test_expert_review_status_rejects_invalid_enum(validator):
 
 
 def test_findings_minimal_entry_validates(validator):
+    # Updated for Pass 10A: kind + status are now required alongside id + statement.
     spec = _minimal_v3_study(
         findings=[
-            {"id": "F-01", "statement": "v2ecoli reproduces the DnaA shortfall."}
+            {
+                "id": "F-01",
+                "kind": "biological",
+                "status": "contradicts",
+                "statement": "v2ecoli reproduces the DnaA shortfall.",
+            }
         ]
     )
     validator.validate(spec)
@@ -139,6 +145,8 @@ def test_findings_with_full_provenance_validates(validator):
         findings=[
             {
                 "id": "F-02",
+                "kind": "biological",
+                "status": "contradicts",
                 "statement": "Autorepression is missing.",
                 "provenance": {
                     "run_ids": ["run-001", "run-002"],
@@ -160,9 +168,16 @@ def test_findings_with_full_provenance_validates(validator):
 def test_findings_mixed_minimal_and_full_validates(validator):
     spec = _minimal_v3_study(
         findings=[
-            {"id": "F-01", "statement": "Bare-minimum finding."},
+            {
+                "id": "F-01",
+                "kind": "biological",
+                "status": "confirms",
+                "statement": "Bare-minimum finding.",
+            },
             {
                 "id": "F-02",
+                "kind": "computational",
+                "status": "novel",
                 "statement": "Finding with provenance.",
                 "provenance": {
                     "run_ids": ["run-001"],
@@ -175,13 +190,19 @@ def test_findings_mixed_minimal_and_full_validates(validator):
 
 
 def test_finding_missing_id_rejected(validator):
-    spec = _minimal_v3_study(findings=[{"statement": "no id here"}])
+    spec = _minimal_v3_study(
+        findings=[
+            {"kind": "biological", "status": "confirms", "statement": "no id here"}
+        ]
+    )
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(spec)
 
 
 def test_finding_missing_statement_rejected(validator):
-    spec = _minimal_v3_study(findings=[{"id": "F-01"}])
+    spec = _minimal_v3_study(
+        findings=[{"id": "F-01", "kind": "biological", "status": "confirms"}]
+    )
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(spec)
 
@@ -192,9 +213,9 @@ def test_finding_extra_fields_allowed(validator):
         findings=[
             {
                 "id": "F-01",
-                "statement": "test",
                 "kind": "biological",
                 "status": "contradicts",
+                "statement": "test",
                 "evidence": {"from_test": "t1"},
                 "expected": {"cites": ["smith2020"]},
                 "next_action": "Add listener X.",
@@ -322,9 +343,16 @@ def test_full_pass_a_study_validates(validator):
             "proceed_condition": "primary tests pass.",
         },
         findings=[
-            {"id": "F-01", "statement": "Bare-minimum finding."},
+            {
+                "id": "F-01",
+                "kind": "biological",
+                "status": "confirms",
+                "statement": "Bare-minimum finding.",
+            },
             {
                 "id": "F-02",
+                "kind": "computational",
+                "status": "novel",
                 "statement": "Finding with provenance.",
                 "provenance": {
                     "run_ids": ["run-001"],
