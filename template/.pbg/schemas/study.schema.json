@@ -864,10 +864,10 @@
     },
     "findings": {
       "type": "array",
-      "description": "First-class study findings (Pass A; full structure being worked out across passes — see notes/2026-05-16-findings-protocol.md). Each finding states something we learned and (optionally) ties it back to literature, expert references, and full reproducibility provenance. `additionalProperties: true` on each entry so authors can experiment with fields beyond the minimum enforced here.",
+      "description": "First-class study findings (Pass A + Pass 10A; see notes/2026-05-16-findings-protocol.md). Each finding states something we learned and (optionally) ties it back to literature, expert references, and full reproducibility provenance. Required fields (Pass 10A): id, kind, status, statement. All other sub-objects are optional with loose internal shape (`additionalProperties: true`) so authors can experiment with fields beyond the minimum enforced here.",
       "items": {
         "type": "object",
-        "required": ["id", "statement"],
+        "required": ["id", "kind", "status", "statement"],
         "additionalProperties": true,
         "properties": {
           "id": {
@@ -875,9 +875,47 @@
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
             "description": "Stable slug — typically `F-01`, `F-02`, ... — unique within this study."
           },
+          "kind": {
+            "type": "string",
+            "enum": ["biological", "computational", "methodological"],
+            "description": "Pass 10A. What category of claim this finding makes. biological = a claim about the modeled system's biology (matches/contradicts/extends literature). computational = a software/wiring/listener bug or correctness finding. methodological = a finding about how studies should be run (sample size, aggregation, evaluation pipeline)."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["confirms", "partial", "contradicts", "novel"],
+            "description": "Pass 10A. How the finding relates to its expected reference. confirms = model matches expectation. partial = model matches some aspects. contradicts = model diverges from expectation. novel = no prior expectation; finding surfaces something new."
+          },
           "statement": {
             "type": "string",
             "description": "One-paragraph English claim. The headline a reader scans."
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Pass 10A. Optional. Where the finding came from. Common keys: from_run (run name), from_test (behavior_test name), observed (scalar/string measurement), units, window, reduction, smoking_gun (log/trace/diff), discovered_during (free-form provenance note). All sub-fields optional and loose."
+          },
+          "expected": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Pass 10A. Optional. The literature/reference comparator the finding is being judged against. Common keys: cites (list of bib_keys from references/papers.bib), range ([low, high]) OR threshold (number), summary (one-paragraph plain-English reference claim). All sub-fields optional and loose."
+          },
+          "expert_reference": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Pass 10A. Optional. Pointer into a workspace expert PDF. Common keys: doc (expert_doc id from workspace.yaml.expert_docs), section (e.g. '§4.1'), quote (verbatim PDF excerpt), note (curator gloss when no clean quote exists). All sub-fields optional and loose."
+          },
+          "explanation": {
+            "type": "string",
+            "description": "Pass 10A. Optional. Multi-paragraph rationale — why we believe the finding, alternatives ruled out."
+          },
+          "next_action": {
+            "type": "string",
+            "description": "Pass 10A. Optional. Concrete one-liner — often 'Seed follow-up X' or 'Re-run with Y'."
+          },
+          "obsoleted_by": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "description": "Pass 10A. Optional. ID of a later finding that supersedes this one. Lets findings be append-only across runs while still chaining staleness."
           },
           "provenance": {
             "type": "object",

@@ -1,0 +1,328 @@
+findings:
+- id: F-01
+  kind: biological
+  status: contradicts
+  statement: "v2ecoli's baseline emits a stable DnaA pool of ~115 molecules/cell \u2014\nabout 5\xD7 below the mass-spec literature band [300, 800].\n"
+  evidence:
+    from_run: baseline-heavy-tf (and baseline-postfix)
+    from_test: dnaA-count-in-range
+    observed: 115
+    units: molecules/cell
+    reduction: median over second-half window
+  expected:
+    cites:
+    - Schmidt2016NatBiotechnol
+    - Sekimizu1991JBacteriol
+    - Mori2021MolSysBiol
+    - Liu2020NatMicrobiol
+    range:
+    - 300
+    - 800
+    summary: 'Mass-spec quantification (Schmidt 2016) puts DnaA at 300-800
+
+      copies/cell across slow-growth conditions; corroborated by
+
+      Mori 2021 and Liu 2020. Sekimizu 1991 earlier reported ~1000
+
+      by western blot.
+
+      '
+  explanation: "The shortfall is consistent across timepoints (115 stable across\na 10-min run), suggesting a calibration problem rather than a\ntransient. Most likely cause: EG10235 (dnaA) translation_efficiency\nin the ParCa cache is set for a smaller per-cell target. Less\nlikely: DnaA degradation rate too high. NOT a concept mismatch \u2014\nbulk[PD03831[c]] + bulk[MONOMER0-160[c]] sum reconciles with the\nlistener's aggregate post-fix.\n"
+  expert_reference:
+    doc: chromosome_replication_plan
+    note: "Plan \xA72.1 lists 'DnaA per-cell count' as a layer-1 sanity check."
+  next_action: Seed calibration_task follow-up; do not start dnaa-02 until resolved.
+- id: F-02
+  kind: biological
+  status: confirms
+  statement: "v2ecoli DOES reproduce the textbook DnaA autorepression signature\nwhen measured properly: Pearson r = \u22120.594 across 5 seeds \xD7 10 min\nbetween DnaA-TF binding (column 12 of n_bound_TF_per_TU) and dnaA-\nspecific mRNA copy number (mRNA_cistron_counts[227] = EG10235_RNA).\nLiterature predicts r \u2264 \u22120.3 \u2014 v2ecoli falls comfortably in band.\n\nOriginal status was \"contradicts\" based on coarser measures (cell-\nwide init events as Y, single-seed). Refining to dnaA-specific Y +\nmulti-seed aggregation flipped the result. See update history below.\n"
+  evidence:
+    from_run: "baseline-seed{0..4} (5 seeds \xD7 10 min, pooled)"
+    from_test: autorepression-correlation
+    observed: -0.594
+    units: Pearson r (dimensionless)
+    window: "second_half \xB7 pooled across 5 seeds (1503 step-records)"
+  expected:
+    cites:
+    - Speck1999EMBO
+    - Saggioro2013BiochemJ
+    - Katayama2017Frontiers
+    - Hansen2018DnaATale
+    range:
+    - -1.0
+    - -0.3
+    summary: 'Speck 1999 + Saggioro 2013 establish DnaA''s autorepression of its
+
+      own promoter; Hansen 2018 reviews the homeostatic feedback loop.
+
+      All predict a negative correlation between DnaA binding occupancy
+
+      and dnaA transcription rate within steady-state windows.
+
+      '
+  explanation: "Three iterations to land this result:\n  (1) Cell-wide init events as Y \u2192 r = +0.20 (false negative \u2014\n      dnaA's signal lost in the 3277-TU sum).\n  (2) dnaA-specific per-step init events \u2192 degenerate (variance \u2248 0).\n  (3) dnaA mRNA copy number, pooled across 5 seeds \u2192 r = \u22120.594.\nThe TRUE signal is there; the iteration history is itself a\nmethodology finding (see F-07).\n"
+  expert_reference:
+    doc: replication_initiation_molecular_info
+    quote: "\"DnaA binding at the dnaAp1 / dnaAp2 promoters represses dnaA\ntranscription, producing a homeostatic loop that maintains\ntotal DnaA per cell\" \u2014 \xA74 (DnaA autoregulation).\n"
+  next_action: Seed "Investigate v2ecoli's lack of autorepression signature" follow-up; refine Y axis to dnaA TU first.
+- id: F-03
+  kind: biological
+  status: confirms
+  statement: "DnaA pool is homeostatically regulated within a steady-state window\n\u2014 rolling coefficient of variation 0.008 across the second half\nof a 10-min sim, well under the 10% literature-derived threshold.\n"
+  evidence:
+    from_run: baseline-heavy-tf
+    from_test: dnaA-concentration-stable
+    observed: 0.008
+    units: fraction (max rolling CV)
+    window: second_half
+  expected:
+    cites:
+    - Hansen2018DnaATale
+    - Hansen1999JBacteriol
+    - Hansen2021FrontMolBiosci
+    threshold: 0.1
+    summary: 'Hansen 2018 reviews evidence that DnaA per-cell pool is tightly
+
+      regulated (CV well under 10%) within a steady-state window even
+
+      though the absolute count differs across conditions.
+
+      '
+  explanation: "v2ecoli reaches the homeostatic regime quickly \u2014 CV stays well\nbelow threshold even at the 10-min mark. This is the ONE primary\ntest dnaa-01 passes. Consistent with the model having a working\nfeedback loop in principle, even if the absolute count (F-01) and\nthe autorepression signature (F-02) need work.\n"
+- id: F-04
+  kind: computational
+  status: novel
+  statement: "All v2ecoli listener output fields declared as plain `array[\u2026]`\naccumulate across timesteps because bigraph-schema's default array\ncombinator is element-wise addition. Affects 43 fields across 7\nlistener files; previously silently corrupted every per-tick\nreadout. Fixed by wrapping in `overwrite[array[\u2026]]`.\n"
+  evidence:
+    discovered_during: dnaa-01 baseline run, first SQLite-emitted history ever.
+    smoking_gun: "monomer_counts[3861] grew linearly at exactly ~115/s (\u2248 300\xD7\nthe instantaneous DnaA pool by step 300), but bulk[PD03831[c]]\nstayed at 0-1. Replaying the listener's math on captured state\nreturned 115 \u2014 proving the listener was correct and the\naccumulation was in the emit pipeline.\n"
+  expected:
+    summary: Per-tick listener emissions should REPLACE, not sum.
+  explanation: 'Without `overwrite[]`, the schema combinator for `array[N,T]` is
+
+    additive merge. The semantic mismatch was invisible until a
+
+    persistent emitter (SQLiteEmitter) made multi-tick history queryable.
+
+    '
+  next_action: "(1) PR #51 lands the monomer_counts fix on main. (2) Wider sweep\n(43 fields \xD7 7 files) sits on dnaa-replication-studies branch.\n(3) Add lint rule to prevent regression.\n"
+- id: F-05
+  kind: computational
+  status: novel
+  statement: 'n_bound_TF_per_TU is gated behind an opt-in flag (~900 KB/tick)
+
+    that defaults OFF in v2ecoli. Any study that needs DnaA-binding
+
+    data must opt in via `emit_n_bound_TF_per_TU=True` (or the runner''s
+
+    `--heavy_tf_listener` flag).
+
+    '
+  evidence:
+    discovered_during: dnaa-01f-apply-overwrite-fix-to-sibling-listeners run
+    smoking_gun: 'After the listener overwrite[] fix, the field STILL emitted as
+
+      length-0 list. Tracing showed tf_binding''s config_schema has
+
+      `emit_n_bound_TF_per_TU: bool default False` with the comment
+
+      "Heavy debug listener: ~900KB/timestep."
+
+      '
+  expected:
+    summary: Tests reading this field need to opt in.
+  explanation: "Not a bug \u2014 an intentional cost gate. Documentation in tf_binding.py\nflags it but no central inventory tells study authors which heavy\nlisteners exist and which behavior tests require them.\n"
+  next_action: '(1) dnaa-01''s autorepression-correlation now declares
+
+    `prerequisites: [--heavy_tf_listener]` so the runner can warn if
+
+    omitted. (2) Consider promoting heavy-listener opt-in to a
+
+    composite-level parameter so it''s visible from study.yaml without
+
+    a runner kwarg.
+
+    '
+- id: F-06
+  kind: biological
+  status: contradicts
+  statement: 'v2ecoli''s baseline dnaA mRNA pool is ~0.18 copies/cell on average
+
+    (range 0-1 across a 10-min window). Combined with F-01 (low DnaA
+
+    protein), this points at LOW transcription rate as a co-driver of
+
+    the protein shortfall, not translation efficiency alone.
+
+    '
+  evidence:
+    from_run: baseline-dnaA-mrna
+    from_test: "ad-hoc inspection (no behavior_test yet \u2014 mean dnaA mRNA <1 makes correlation tests degenerate)"
+    observed: 0.18
+    units: dnaA mRNA copies/cell (mean across 10-min run; range 0-1; stdev 0.39)
+    reduction: mean over full 10-min window
+  expected:
+    cites:
+    - Li2014Cell
+    - Mori2021MolSysBiol
+    summary: 'Li 2014 (ribosome profiling) and Mori 2021 (proteome quantification)
+
+      imply dnaA mRNA is rare (~1 copy/cell on average) but rarely 0 in
+
+      a steady-state window. v2ecoli''s 0.18 mean is on the very low end.
+
+      '
+  explanation: "Sparse dnaA mRNA breaks the autorepression-correlation test\n(insufficient variance to compute Pearson r even with cistron-\nspecific Y axis). Implies TWO calibration knobs need attention,\nnot just translation_efficiency:\n  \u2022 dnaA transcription initiation rate (rnap probabilities)\n  \u2022 dnaA mRNA degradation rate (if too high)\nEither could explain why downstream DnaA protein ends up at 115/cell.\n"
+  next_action: 'Expand the EG10235 calibration follow-up to cover BOTH mRNA-level
+
+    parameters (transcription init prob, mRNA half-life) and protein-
+
+    level (translation efficiency). A single recalibration pass on
+
+    translation alone is unlikely to land DnaA in the literature band.
+
+    '
+- id: F-07
+  kind: methodological
+  status: confirms
+  statement: "Multi-seed aggregation rescues rare-event correlation tests for\nsingle-cell whole-cell simulations. Pooling 5 seeds \xD7 10 min raised\ndnaA mRNA nonzero-fraction from ~12% (single seed) to 15% (5 seeds)\nwhile increasing sample size from 300 to 1503 step-records. That\nwas enough to compute r = \u22120.594 (was insufficient_variance at any\nsingle-seed window length).\n"
+  evidence:
+    from_run: baseline-seed{0..4} aggregated by evaluate_multiseed.py
+    from_test: autorepression-correlation
+    observed: r_5seed=-0.594  (vs single-seed=insufficient_variance)
+    units: pooled Pearson r
+  expected:
+    summary: "Standard correlation tests need O(100+) variance-bearing samples.\nSingle-cell rare events (dnaA mRNA at 0.18 copies/cell) only hit\n~12% nonzero rate \u2014 pooling across seeds is the cheapest path\nto enough variance.\n"
+  explanation: "Of the three design options I'd noted:\n  (a) multi-generation \u2014 not tested, still on the table for tests\n      that need temporal autocorrelation (replication-cycle effects)\n  (b) MULTI-SEED AGGREGATION \u2014 chosen, works at 5 seeds \xD7 10 min\n  (c) inducible-DnaA perturbation \u2014 bigger model change, deferred\nThe multi-seed evaluator (studies/dnaa-01-expression-dynamics/sims/\nevaluate_multiseed.py) pools all baseline-seed* runs and runs the\nsame behavior_tests against the concatenated history.\n"
+  next_action: 'Generalize the multi-seed evaluator into a workspace-shared helper
+
+    so other studies can use it without copy-paste. Add a
+
+    `runs_aggregate: pool-seeds` field to behavior_tests to declare
+
+    when pooling is required.
+
+    '
+- id: F-08
+  kind: biological
+  status: confirms
+  statement: "Multiplying dnaA's ParCa translation_efficiency by 50\xD7 lands the\nDnaA monomer pool at median 497/cell \u2014 squarely in the literature\nband [300, 800]. The 50\xD7 factor is empirical from a calibration\nsweep: 5\xD7 barely moved the needle (115 \u2192 129, autorepression\nbuffered the increase), 50\xD7 broke through the homeostasis.\n"
+  evidence:
+    from_run: baseline-te50x (dnaa_te_multiplier=50.0, seed 0, 10 min)
+    from_test: dnaA-count-in-range
+    observed: 497
+    units: molecules/cell (median, second-half window)
+    sweep:
+      1x:
+        te: 7.23e-05
+        median_dnaa: 115
+        test: FAIL
+      5x:
+        te: 0.000362
+        median_dnaa: 129
+        test: FAIL
+      50x:
+        te: 0.00362
+        median_dnaa: 497
+        test: PASS
+  expected:
+    cites:
+    - Schmidt2016NatBiotechnol
+    - Sekimizu1991JBacteriol
+    - Mori2021MolSysBiol
+    range:
+    - 300
+    - 800
+  explanation: "The 50\xD7 factor itself raises a flag: 3.6e-3 sits ABOVE the current\nmax TE in v2ecoli's proteome (2.1e-3). So either (a) ParCa's\nderived TE for dnaA is genuinely wrong by ~50\xD7 (units bug? cistron-\nvs-monomer indexing?), (b) dnaA's TE has been under-calibrated\nrelative to other proteins, or (c) Schmidt/Mori measure something\ndifferent from what v2ecoli's monomer_counts represents.\n\nWhichever it is, the LEVER works \u2014 recalibrating TE alone is\nsufficient to close the F-01 gate. F-06's \"two-knob\" framing\n(Tx + Tl) may be wrong: at 50\xD7 TE, dnaA mRNA stayed near 0 yet\nprotein landed in band, because every rare mRNA event now\nproduces 50\xD7 more protein.\n\nSide effect to investigate: at 50\xD7 TE, autorepression-correlation\nflips to r=+0.613 in a single 10-min seed. Multi-seed pooling\n(per F-07) hasn't been re-run at 50\xD7 yet \u2014 needs verification\nthat the feedback loop still behaves correctly under the new\ncalibration before formally passing\
+    \ the gate.\n"
+  expert_reference:
+    doc: chromosome_replication_plan
+    note: "Plan \xA72.1 expects DnaA ~300-800/cell as a layer-1 sanity check.\nv2ecoli reaches this with a 50\xD7 TE adjustment.\n"
+  next_action: "(1) Multi-seed at 50\xD7 TE \u2192 re-evaluate autorepression-correlation\n    under the new calibration.\n(2) Seed a follow-up study to investigate WHY the cached TE is so\n    low (units bug? ParCa source data? indexing mismatch?). Don't\n    ship the 50\xD7 override permanently until the root cause is\n    understood.\n(3) Once (1) confirms the feedback loop still holds, dnaa-01's\n    pipeline_gate can formally pass and dnaa-02 unblocks.\n"
+- id: F-09
+  kind: biological
+  status: contradicts
+  statement: "The 50\xD7 TE calibration that lands DnaA in the literature band\n(F-08) BREAKS the autorepression signature. Multi-seed Pearson r\nflips from \u22120.594 (1\xD7 TE, 5-seed pool) to +0.596 (50\xD7 TE, 5-seed\npool). Production overwhelms the negative feedback at this scale.\n"
+  evidence:
+    from_run: "baseline-te50x-seed{0..4} (5 seeds \xD7 10 min, multi-seed pool)"
+    from_test: autorepression-correlation
+    observed: 0.596
+    units: pooled Pearson r
+    sweep_comparison:
+      1x_5seed_pool:
+        pearson_r: -0.594
+        dnaa_count_median: 115
+      50x_5seed_pool:
+        pearson_r: 0.596
+        dnaa_count_median: 497
+  expected:
+    cites:
+    - Speck1999EMBO
+    - Saggioro2013BiochemJ
+    - Hansen2018DnaATale
+    range:
+    - -1.0
+    - -0.3
+    summary: "Literature autorepression should hold across calibration changes\nto TE \u2014 the negative feedback is a structural feature of the\npromoter/binding architecture, not a function of absolute protein\nlevel. A r=+0.6 result is biologically anomalous.\n"
+  explanation: "Three interpretations of the inversion:\n  (a) At 50\xD7 TE, dnaA mRNA \u2192 50\xD7 protein each event. Even rare\n      mRNA spikes (still 0-2 copies/cell) drive large protein\n      jumps that swamp the binding-feedback timescale. The\n      feedback IS active but mathematically saturated.\n  (b) The autorepression model's fold_change parameter scales with\n      DnaA binding linearly; at 5\xD7 more bound DnaA, the\n      suppression might be capped (saturable promoter) and\n      contribute no further variance to transcription, leaving\n      the correlation to be driven by other noise sources.\n  (c) v2ecoli's autorepression strength is genuinely too weak to\n      maintain negative correlation at literature-band DnaA levels.\n\nDiagnostic test: a TE sweep at 5\xD7, 10\xD7, 20\xD7 \u2014 find the TE value\nabove which r flips sign. That value bounds the model's effective\nautorepression strength.\n\nPipeline implication: the 50\xD7 TE override is NOT a clean pass for\n\
+    dnaa-01. It trades F-01 PASS for F-02 FAIL. The real calibration\nrequires either (a) finding the source bug in ParCa's TE (so the\n\"true\" TE is moderate, not 50\xD7), or (b) re-tuning the\nautorepression strength alongside TE so both stay biological.\n"
+  expert_reference:
+    doc: replication_initiation_molecular_info
+    note: "\xA74 (DnaA autoregulation) describes the loop as essential to\nmaintaining ~constant per-cell DnaA. Breaking the negative\ncorrelation at high TE suggests v2ecoli's wiring of this loop\nmay need a saturable-binding term or stronger fold_change.\n"
+  next_action: "Seed two follow-ups:\n  \u2022 TE sweep (5\xD7, 10\xD7, 20\xD7, 50\xD7, 100\xD7) \u2192 find the inflection where\n    r flips sign. Quantifies autorepression's saturation point.\n  \u2022 Investigate the ParCa-derived TE value for EG10235 \u2014 find why\n    the cache says 7.23e-5 when 50\xD7 breaks the proteome max. Could\n    be a units/indexing bug.\n"
+- id: F-10
+  kind: biological
+  status: contradicts
+  statement: "TE-sweep across 6 multipliers (1\xD7, 5\xD7, 10\xD7, 20\xD7, 50\xD7, 100\xD7) shows\nthere is NO single TE multiplier that simultaneously satisfies\ndnaA-count-in-range AND autorepression-correlation. The autorepression\nsaturation point sits between 20\xD7 and 50\xD7; the count-in-range\nthreshold (300+) sits between 20\xD7 and 50\xD7. The two curves cross\nbut neither test is in pass range at the crossover.\n"
+  evidence:
+    from_run: baseline-te{1,5,10,20,50,100}x-seed* (17 sims total, ~3 seeds per multiplier)
+    from_test: te-sweep (custom evaluator, sims/evaluate_te_sweep.py)
+    sweep_table:
+      1x:
+        dnaA_median: 115
+        mrna_mean: 0.0
+        pearson_r: null
+        count_test: FAIL
+        autorep_test: FAIL_no_variance
+      5x:
+        dnaA_median: 129
+        mrna_mean: 0.0
+        pearson_r: null
+        count_test: FAIL
+        autorep_test: FAIL_no_variance
+      10x:
+        dnaA_median: 188
+        mrna_mean: 0.332
+        pearson_r: -0.301
+        count_test: FAIL
+        autorep_test: PASS
+      20x:
+        dnaA_median: 296
+        mrna_mean: 0.286
+        pearson_r: -0.253
+        count_test: FAIL
+        autorep_test: FAIL_just_above_threshold
+      50x:
+        dnaA_median: 497
+        mrna_mean: 0.306
+        pearson_r: 0.613
+        count_test: PASS
+        autorep_test: FAIL_sign_flipped
+      100x:
+        dnaA_median: 108
+        mrna_mean: 0.063
+        pearson_r: -0.093
+        count_test: FAIL
+        autorep_test: FAIL_system_collapse
+  expected:
+    summary: 'In a faithful model, both tests should pass simultaneously at
+
+      the calibrated TE value. v2ecoli does not have such a TE.
+
+      '
+  explanation: "Three reveals from the sweep:\n\n  (i) THE SIGN FLIP IS REAL. Pearson r is negative at 10\xD7\u201320\xD7 and\n      positive at 50\xD7. The autorepression model saturates somewhere\n      in the 20\xD7\u201350\xD7 window. Below saturation, binding suppresses\n      mRNA \u2192 r negative. Above saturation, binding doesn't change\n      mRNA much, and the residual correlation is driven by noise +\n      translation lag \u2192 r flips.\n\n  (ii) THE 100\xD7 COLLAPSE. At 100\xD7 TE, DnaA actually CRASHES BACK\n       DOWN to 108 \u2014 lower than baseline \u2014 with dnaA mRNA almost\n       absent (6% nonzero, mean 0.063). This is a system instability:\n       extreme over-production triggers some downstream cascade\n       (likely chromosome-bound DnaA depleting via replication, or\n       autorepression hitting a hard ceiling). Worth understanding\n       independently \u2014 may indicate where v2ecoli's negative\n       feedback IS strong (just not in the 1\xD7\u201350\xD7\
+    \ regime).\n\n  (iii) NO SINGLE TE PASSES BOTH TESTS. The \"true\" calibration\n        point \u2014 where the model both reproduces autorepression AND\n        sits in the literature DnaA band \u2014 does NOT exist along\n        the TE-only axis. dnaa-01 cannot be closed by recalibrating\n        TE alone. Either:\n          (a) the autorepression fold_change parameter needs\n              re-tuning alongside TE (joint calibration), or\n          (b) v2ecoli's autorepression model is structurally too\n              weak to maintain negative correlation at literature-\n              band DnaA levels (needs a stronger / saturable model).\n"
+  expert_reference:
+    doc: replication_initiation_molecular_info
+    note: "\xA74 (DnaA autoregulation) gives a Hill-like binding model with\ncooperative interaction at dnaAp1/dnaAp2. v2ecoli's linear-ish\nfold_change parametrization may not capture the cooperative\nterm, which is what would maintain negative correlation at\nhigher DnaA levels.\n"
+  next_action: "(1) Joint calibration sweep: TE \xD7 autorepression-fold-change grid\n    (3 \xD7 3 = 9 points around the 20\xD7\u201350\xD7 TE inflection).\n(2) Investigate the 100\xD7 collapse \u2014 what triggers DnaA back down?\n(3) Read replication_initiation_molecular_info \xA74 with fresh eyes\n    for what the autorepression Hill coefficient SHOULD be.\n"
