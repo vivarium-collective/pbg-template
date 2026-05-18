@@ -449,6 +449,31 @@
         "blocks_until_resolved": {
           "type": "string",
           "description": "Free-form description of what happens to the pipeline if primary tests fail."
+        },
+        "gate_evaluator": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Declarative evaluator that backs the top-level gate_status pill. `expr` references behavior_test names; the dashboard evaluates it after the latest run and writes `result` + `blocked_by`. Lets the dashboard compute gate state without parsing the prose in proceed_condition / blocks_until_resolved.",
+          "properties": {
+            "expr": {
+              "type": "string",
+              "description": "Boolean expression over behavior_test outcomes. Common form: `tests['<name>'].result == 'PASS' AND tests['<other>'].result == 'PASS'`. Free-form so workspaces can adopt their own DSL."
+            },
+            "result": {
+              "type": ["string", "null"],
+              "enum": ["blocked", "needs_calibration", "passed", "failed", "stale", null],
+              "description": "Last-computed verdict. Mirrors the gate_status enum so the dashboard can lift it directly. Null when the evaluator has not been run yet."
+            },
+            "blocked_by": {
+              "type": "array",
+              "description": "POPULATED — list of behavior_test names whose failure or absence is blocking the gate. Empty when result is 'passed'.",
+              "items": {"type": "string"}
+            },
+            "evaluated_at": {
+              "type": ["string", "null"],
+              "description": "ISO-8601 timestamp of the last evaluation. Lets the dashboard mark the verdict as stale when behind a fresher simulation."
+            }
+          }
         }
       }
     },
