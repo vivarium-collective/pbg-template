@@ -30,5 +30,19 @@ from any proposal with `/pbg-study seed-from-followup <parent>/<proposal_id>`.
 - `workspace.yaml` — canonical state (validated against `.pbg/schemas/workspace.schema.json`).
 - `{{ package_path }}/` — your Python package (`core.py` exposes `build_core()`).
 - `studies/`, `composites/`, `references/`, `datasets/` — research artifacts.
+- `notes/` — friction logs, walkthroughs, agent transcripts, ADRs. See `notes/README.md` for the
+  cleanup rule: **files under `notes/` survive cleanup sweeps by default**, because they're the
+  input to the next round of infrastructure improvements.
 - `.pbg/schemas/` — JSON schemas the lint + dashboard validate against.
 - `scripts/` — `lint-workspace.py`, `serve.sh`, helpers.
+
+## Cleanup conventions
+
+Cleanup PRs (`chore(cleanup): …`, `chore(repo): trim …`) routinely remove generated files,
+one-shot scripts, and stale planning docs. Two locations are off-limits to bulk cleanup:
+
+- `notes/**` — see the rule in `notes/README.md`.
+- `references/notes/**` — per-paper literature notes, used by the findings protocol.
+
+If a specific file in either location is genuinely obsolete, delete it in its own commit
+with a one-line justification per file. Don't bundle with unrelated cleanup.
