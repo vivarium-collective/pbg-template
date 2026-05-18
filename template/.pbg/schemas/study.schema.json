@@ -654,11 +654,32 @@
           "name": {"type": "string"},
           "description": {"type": "string"},
           "store_path": {"type": "string"},
-          "index_by": {"type": "object", "additionalProperties": true},
+          "index_by": {
+            "type": "object",
+            "required": ["type", "value"],
+            "additionalProperties": true,
+            "description": "Identifier-system lookup for store_path. `type` names the catalog (bulk_id, rna_id, monomer_id, tf_id, literal_index, ...); `value` is the key into that catalog. Extra fields allowed for workspace-specific dialects.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "Identifier catalog name. Common values: bulk_id, rna_id, monomer_id, tf_id, literal_index. Free-form for workspace-specific catalogs.",
+                "examples": ["bulk_id", "rna_id", "monomer_id", "tf_id", "literal_index"]
+              },
+              "value": {
+                "description": "String for symbolic IDs (e.g. 'PD03831[c]'), integer for literal_index lookups.",
+                "oneOf": [
+                  {"type": "string"},
+                  {"type": "integer"}
+                ]
+              }
+            }
+          },
           "units": {"type": "string"},
           "status": {
             "type": "string",
-            "description": "Common values: available, derived-needed, aspirational. Free-form for forward compat."
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "examples": ["available", "derived-needed", "aspirational"],
+            "description": "Availability of this readout in the current workspace. Common values: available (plumbed today), derived-needed (requires a new listener/derived value), aspirational (planned, deferred to a later study). Kebab-case enforced via pattern; values are free-form for forward compat."
           },
           "blocked_by_requirements": {
             "type": "array",
