@@ -724,7 +724,37 @@
           "calibration_anchor": {
             "type": "object",
             "additionalProperties": true,
-            "description": "Optional block surfacing literature-vs-model divergences as part of the test, not just pass/fail."
+            "description": "Optional block surfacing literature-vs-model divergences as part of the test, not just pass/fail. Lets the dashboard show whether a failing test is a calibration problem, a threshold-vs-reality mismatch, or a conceptual disagreement.",
+            "properties": {
+              "observed_value": {
+                "description": "Value measured against the live model (populated by /pbg-study preview-viz or run-tests). Numeric in most cases; string allowed for categorical outcomes.",
+                "oneOf": [
+                  {"type": "number"},
+                  {"type": "string"}
+                ]
+              },
+              "literature_target": {
+                "description": "Target value drawn from the cited literature (typically the midpoint of the expected band). Hand-authored.",
+                "oneOf": [
+                  {"type": "number"},
+                  {"type": "string"}
+                ]
+              },
+              "divergence_factor": {
+                "type": "number",
+                "description": "Auto-computed: |observed_value - literature_target| (or observed/literature for ratio scales). The dashboard renders an alarm when this exceeds the workspace's threshold."
+              },
+              "resolution": {
+                "type": "string",
+                "enum": ["model", "thresholds", "concept", "unresolved"],
+                "description": "Expert verdict on what to do about the divergence. `model` = recalibrate the model; `thresholds` = widen the behavior_test band; `concept` = the test or hypothesis itself needs revision; `unresolved` = pending expert review."
+              },
+              "cites": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Bib keys backing the literature_target. May overlap with the parent test's cites."
+              }
+            }
           },
           "cites": {
             "type": "array",
