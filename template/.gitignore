@@ -1,20 +1,17 @@
 .venv/
-.pbg/server/
-.pbg/state.json
-.pbg/composite-runs.db
-.pbg/runs/
-# Per-study test-runner artifacts
-.pbg/study-test-results/
+# Dashboard runtime state (composite-runs.db + WAL/SHM, dashboard/, runs/,
+# viz-requests/, agent-responses/, …). Everything under .pbg/ is generated;
+# the directory is recreated on demand by the dashboard. v2ecoli friction
+# #15 (2026-05-19): a granular per-subdir list missed sqlite WAL/SHM
+# sidecars (.pbg/composite-runs.db-shm / -wal) and .pbg/dashboard/, which
+# tripped the dashboard's own dirty-tree gate on Install + workstream
+# commit. A blanket entry collapses the maintenance surface.
+.pbg/
 # Investigation runtime artifacts (results DB + rendered HTML + lock file).
 # spec.yaml + data/ are tracked; everything else is regenerated on each run.
 investigations/*/runs.db
 investigations/*/viz/
 investigations/*/.run.lock
-.pbg/viz-requests/
-.pbg/viz-responses/
-.pbg/agent-requests/
-.pbg/agent-responses/
-.pbg/visualizations-staged/
 __pycache__/
 *.pyc
 *.egg-info/
