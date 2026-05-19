@@ -4,11 +4,12 @@
   "type": "object",
   "required": ["schema_version", "name", "created", "plugin_version"],
   "properties": {
-    "schema_version": {"const": 2},
+    "schema_version": {"enum": [2, 3]},
     "name": {"type": "string", "minLength": 1},
     "created": {"type": "string", "format": "date"},
     "plugin_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "package_path": {"type": "string"},
+    "default_baseline": {"$ref": "#/definitions/defaultBaseline"},
     "pbg_processes": {
       "type": "array", "items": {"type": "string"},
       "description": "Legacy from v0.1.x — kept as optional for migrated workspaces; new workspaces omit it."
@@ -73,6 +74,20 @@
     }
   },
   "definitions": {
+    "defaultBaseline": {
+      "type": "object",
+      "description": "v3 (Phase 2): pre-fill defaults for new Study baselines so authors don't repeat composite + params + run-knobs per Study. v2ecoli friction #18 (2026-05-19): adding this block required bumping schema_version to 3, which the schema did not yet accept.",
+      "additionalProperties": false,
+      "properties": {
+        "composite":      {"type": "string", "description": "Spec id (e.g. pbg_<slug>.composites.<name>) used as the default baseline composite."},
+        "params":         {"type": "object", "description": "Default params dict for the composite (free-form; matches the composite's parameter schema)."},
+        "duration_s":     {"type": "number", "exclusiveMinimum": 0},
+        "max_duration_s": {"type": "number", "exclusiveMinimum": 0},
+        "interval_s":     {"type": "number", "exclusiveMinimum": 0},
+        "stop_on":        {"type": "string", "description": "Termination signal name (e.g. 'division', 'global_time>=N'). Composite-defined."},
+        "description":    {"type": "string"}
+      }
+    },
     "stageStatus": {
       "type": "object",
       "required": ["status"],
