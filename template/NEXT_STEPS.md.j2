@@ -113,6 +113,10 @@ Every dashboard action (install a module, add an observable, generate a viz, …
 
 When all your in-flight stage branches are merged, the rail badge clears.
 
+### Container image (GHCR)
+
+Each push triggers `.github/workflows/build-and-push.yml`, which builds your workspace `Dockerfile` and publishes `ghcr.io/<owner>/<repo>:<tag>` (tags: `<branch>`, `pr-N`, `sha-<short>`, `latest` on default). The workflow also **auto-syncs the GHCR package's visibility to the source repo's visibility** on each push — so if your repo is public, `docker pull ghcr.io/<owner>/<repo>:<tag>` works anonymously without anyone running a manual "Change visibility" toggle. If you intentionally want the image private even though the repo is public, either set the repo to private or remove the `Sync GHCR package visibility` step from the workflow.
+
 ## Two paths to the same workspace
 
 - **Browser dashboard** is the primary UI. Pure-CLI workflows are supported via `python3 scripts/lint-workspace.py` + direct YAML edits, but the buttons handle branch-creation and PR setup for you.

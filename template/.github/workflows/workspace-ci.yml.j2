@@ -21,7 +21,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: false
       - name: Init external submodules (best-effort, non-recursive)
@@ -34,7 +34,7 @@ jobs:
           git submodule update --init external/ 2>&1 || true
           echo "--- external/ contents ---"
           ls -la external/ 2>&1 || true
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install uv
