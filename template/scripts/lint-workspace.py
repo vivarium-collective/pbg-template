@@ -273,6 +273,11 @@ def main() -> None:
     study_names: list[str] = []
     study_statuses: list[str] = []
     study_warnings: list[str] = []
+    # F-friction #6: keep a separate count of studies that fail dashboard
+    # load so the summary line can swap ✓ for ✗ when any fail. Without this,
+    # the summary said `dashboard ✓` while WARN lines underneath said
+    # `fails dashboard load`. Headline + body must agree.
+    n_studies_failed_dashboard = 0
 
     for study_yaml_path in sorted((WS_ROOT / "studies").glob("*/study.yaml")):
         study_dir = study_yaml_path.parent.name
@@ -311,6 +316,7 @@ def main() -> None:
                     study_warnings.append(
                         f"  WARN study {s_name} fails dashboard load: {e}"
                     )
+                    n_studies_failed_dashboard += 1
         except Exception as exc:
             study_warnings.append(f"  WARN could not parse {study_yaml_path}: {exc}")
 
@@ -333,6 +339,11 @@ def main() -> None:
 
     inv_names: list[str] = []
     inv_warnings: list[str] = []
+    # Cross-reference target — the slugs we'll check investigation references
+    # against. Computed once from the studies directory rather than per-iter.
+    on_disk_study_slugs = {p.parent.name for p in
+                            (WS_ROOT / "studies").glob("*/study.yaml")}
+
     for inv_yaml_path in sorted((WS_ROOT / "investigations").glob("*/investigation.yaml")):
         inv_dir = inv_yaml_path.parent.name
         try:
@@ -354,6 +365,26 @@ def main() -> None:
                     pass
                 except Exception as ve:
                     inv_warnings.append(f"  WARN investigation {i_name}: {ve}")
+
+            # Cross-reference check (mem3dg-readdy friction #18 — "Investigations
+            # don't validate that their study slugs exist"). Without this, an
+            # investigation seeded with `studies: [fixed-boundary, ...]` against
+            # an empty studies/ dir passes lint and 404s in the dashboard.
+            referenced_slugs: set[str] = set()
+            for slug in (inv_data.get("studies") or []):
+                if isinstance(slug, str):
+                    referenced_slugs.add(slug)
+            for ac in (inv_data.get("acceptance_criteria") or []):
+                if isinstance(ac, dict) and isinstance(ac.get("study"), str):
+                    referenced_slugs.add(ac["study"])
+            for slug in sorted(referenced_slugs):
+                if slug not in on_disk_study_slugs:
+                    inv_warnings.append(
+                        f"  WARN investigation {i_name}: references study "
+                        f"{slug!r} which has no studies/{slug}/study.yaml on "
+                        "disk. Seed it with `/pbg-study new` or remove the "
+                        "reference."
+                    )
         except Exception as exc:
             inv_warnings.append(f"  WARN could not parse {inv_yaml_path}: {exc}")
     n_investigations = len(inv_names)
@@ -389,12 +420,17 @@ def main() -> None:
     if n_studies > 3:
         study_names_preview += f", ... (+{n_studies - 3} more)"
 
-    # Build study validation label
+    # Build study validation label. F-friction #6: when any study fails
+    # dashboard load, the summary must say ✗ — the WARN lines underneath
+    # already say "fails dashboard load", and the headline contradicting
+    # them is exactly the bug.
     schema_check = "schema ✓" if study_schema is not None else "schema skipped"
-    if _dashboard_importable:
-        dashboard_check = "dashboard ✓"
-    else:
+    if not _dashboard_importable:
         dashboard_check = "dashboard skipped — install vivarium-dashboard"
+    elif n_studies_failed_dashboard > 0:
+        dashboard_check = f"dashboard ✗ ({n_studies_failed_dashboard} failing)"
+    else:
+        dashboard_check = "dashboard ✓"
 
     print("workspace lint: OK")
     print(f"  workspace: {ws_name}  (package: {ws_pkg})")
