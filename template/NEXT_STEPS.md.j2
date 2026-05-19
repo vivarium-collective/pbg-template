@@ -115,7 +115,17 @@ When all your in-flight stage branches are merged, the rail badge clears.
 
 ### Container image (GHCR)
 
-Each push triggers `.github/workflows/build-and-push.yml`, which builds your workspace `Dockerfile` and publishes `ghcr.io/<owner>/<repo>:<tag>` (tags: `<branch>`, `pr-N`, `sha-<short>`, `latest` on default). The workflow also **auto-syncs the GHCR package's visibility to the source repo's visibility** on each push — so if your repo is public, `docker pull ghcr.io/<owner>/<repo>:<tag>` works anonymously without anyone running a manual "Change visibility" toggle. If you intentionally want the image private even though the repo is public, either set the repo to private or remove the `Sync GHCR package visibility` step from the workflow.
+Each push triggers `.github/workflows/build-and-push.yml`, which builds your workspace `Dockerfile` and publishes `ghcr.io/<owner>/<repo>:<tag>` (tags: `<branch>`, `pr-N`, `sha-<short>`, `latest` on default). Images are multi-arch (`linux/amd64` + `linux/arm64`), so Apple Silicon contributors get native pulls.
+
+**Anonymous `docker pull` — visibility depends on who owns the repo:**
+
+- **Org-owned repos** (e.g. `vivarium-collective/<workspace>`): the workflow's `Sync GHCR package visibility` step auto-syncs the package visibility to match the source repo on every push. If your repo is public, `docker pull ghcr.io/<owner>/<repo>:<tag>` works anonymously immediately. Nothing else to do.
+
+- **User-owned repos** (e.g. `<your-username>/<workspace>`): GitHub's REST API does **not** allow the workflow's default `GITHUB_TOKEN` to flip user-owned-package visibility (it requires a PAT with `write:packages` scope). The very first push will publish the package as **private** and emit a `::notice::` in the workflow log explaining this. Two ways to make anonymous pulls work:
+  1. **One-time UI link** (recommended, no PAT needed). On `github.com`, open your profile's **Packages** tab → click the package → **Package settings** → **Manage Actions access** → connect this repository → under **Danger Zone** → **Change package visibility** set to `public`. After that one-time link, every future push inherits visibility from the repo automatically.
+  2. **`GHCR_PAT` secret** (full automation). Create a Personal Access Token (classic) with `write:packages` scope, add it as a repo secret named `GHCR_PAT`. The workflow auto-detects the secret and uses it instead of `GITHUB_TOKEN` for the visibility step.
+
+If you intentionally want the image private even though the repo is public, leave `GHCR_PAT` unset and skip the one-time UI link.
 
 ## Two paths to the same workspace
 
