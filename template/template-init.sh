@@ -64,31 +64,29 @@ EOF
   echo "created $PACKAGE_PATH/{__init__.py,core.py}"
 fi
 
-# vivarium-dashboard isn't on PyPI yet. If the user has a sibling checkout
-# at $VIVARIUM_DASHBOARD_PATH or ../vivarium-dashboard, append a
-# [tool.uv.sources] entry so `uv pip install -e ".[dev]"` resolves it
-# locally. Otherwise the install fails with "vivarium-dashboard was not
-# found in the package registry". Skip cleanly if pyproject.toml already
-# has a [tool.uv.sources] block (don't clobber user edits).
+# vivarium-dashboard isn't on PyPI yet. Pin it via [tool.uv.sources]:
+#   - if a sibling checkout exists (or VIVARIUM_DASHBOARD_PATH is set), pin
+#     to that local path so local dev iterates against the user's checkout;
+#   - otherwise, fall back to a git source on
+#     github.com/vivarium-collective/vivarium-dashboard@main so that Docker
+#     builds and CI runs (which have no local sibling) can still resolve it.
+# Skip cleanly if pyproject.toml already has a [tool.uv.sources] block
+# (don't clobber user edits).
 VIVARIUM_LOCAL="${VIVARIUM_DASHBOARD_PATH:-../vivarium-dashboard}"
+VIVARIUM_GIT_URL="https://github.com/vivarium-collective/vivarium-dashboard.git"
+VIVARIUM_GIT_REF="${VIVARIUM_DASHBOARD_REF:-main}"
 if [ -f pyproject.toml ] \
    && ! grep -q '^\[tool\.uv\.sources\]' pyproject.toml \
-   && [ -d "$VIVARIUM_LOCAL" ] \
-   && [ -f "$VIVARIUM_LOCAL/pyproject.toml" ]; then
-  printf '\n[tool.uv.sources]\nvivarium-dashboard = { path = "%s", editable = true }\n' \
-    "$VIVARIUM_LOCAL" >> pyproject.toml
-  echo "pinned vivarium-dashboard to local source: $VIVARIUM_LOCAL"
-elif [ -f pyproject.toml ] && grep -q '"vivarium-dashboard"' pyproject.toml; then
-  cat >&2 <<'WARN'
-note: vivarium-dashboard is listed as a dependency but is not yet on PyPI.
-      `uv pip install -e ".[dev]"` will fail with "not found in package
-      registry" unless one of these is true:
-        - ../vivarium-dashboard exists as a sibling checkout (auto-pin)
-        - VIVARIUM_DASHBOARD_PATH points at a checkout before re-running
-        - you add a [tool.uv.sources] entry manually:
-            [tool.uv.sources]
-            vivarium-dashboard = { path = "/path/to/vivarium-dashboard", editable = true }
-WARN
+   && grep -q '"vivarium-dashboard"' pyproject.toml; then
+  if [ -d "$VIVARIUM_LOCAL" ] && [ -f "$VIVARIUM_LOCAL/pyproject.toml" ]; then
+    printf '\n[tool.uv.sources]\nvivarium-dashboard = { path = "%s", editable = true }\n' \
+      "$VIVARIUM_LOCAL" >> pyproject.toml
+    echo "pinned vivarium-dashboard to local source: $VIVARIUM_LOCAL"
+  else
+    printf '\n[tool.uv.sources]\nvivarium-dashboard = { git = "%s", branch = "%s" }\n' \
+      "$VIVARIUM_GIT_URL" "$VIVARIUM_GIT_REF" >> pyproject.toml
+    echo "pinned vivarium-dashboard to git source: $VIVARIUM_GIT_URL@$VIVARIUM_GIT_REF (no local sibling found)"
+  fi
 fi
 
 # Remove the init script itself once we're done
