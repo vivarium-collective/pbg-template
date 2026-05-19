@@ -413,6 +413,31 @@ def main() -> None:
         except Exception:
             pass
 
+    # v2ecoli friction #2: `_type: 'any'` is not a registered bigraph-schema
+    # type; it slips through inline python composite builds but explodes
+    # inside the subprocess runner with "schema is not found". Surface
+    # any literal use as an advisory warning — the fix is to switch to
+    # `'node'` (the registered alias for "untyped node").
+    any_type_warnings: list[str] = []
+    pkg_path = ws.get("package_path")
+    if pkg_path:
+        pkg_dir = WS_ROOT / pkg_path
+        if pkg_dir.exists():
+            _any_pat = re.compile(r"""['"]_type['"]\s*:\s*['"]any['"]""")
+            for py_file in pkg_dir.rglob("*.py"):
+                try:
+                    text = py_file.read_text()
+                except OSError:
+                    continue
+                for lineno, line in enumerate(text.splitlines(), 1):
+                    if _any_pat.search(line):
+                        any_type_warnings.append(
+                            f"WARN {py_file.relative_to(WS_ROOT)}:{lineno}: "
+                            f"'_type': 'any' — use 'node' (registered alias); "
+                            f"'any' raises 'schema is not found' inside the "
+                            f"dashboard's subprocess runner. (v2ecoli friction #2)"
+                        )
+
     # Print summary
     ws_name = ws.get("name", "?")
     ws_pkg = ws.get("package_path", "")
@@ -462,6 +487,8 @@ def main() -> None:
         )
 
     for w in study_warnings:
+        print(w, file=sys.stderr)
+    for w in any_type_warnings:
         print(w, file=sys.stderr)
 
 
