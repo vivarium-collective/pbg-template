@@ -318,6 +318,49 @@ def main() -> None:
     status_counts = Counter(study_statuses)
     status_summary = ", ".join(f"{v} {k}" for k, v in sorted(status_counts.items()))
 
+    # Enumerate investigations (added 2026-05-18 per mem3dg-readdy friction §8 —
+    # "Lint summary doesn't mention investigations". Investigations are lighter
+    # than studies — typically just name, title, studies[] — but they're the
+    # first artifact a workspace promotion lands, so the lint summary should
+    # confirm they exist + parse.)
+    inv_schema_path = WS_ROOT / ".pbg" / "schemas" / "investigation.schema.json"
+    inv_schema: dict | None = None
+    if inv_schema_path.exists():
+        try:
+            inv_schema = json.loads(inv_schema_path.read_text())
+        except Exception:
+            pass
+
+    inv_names: list[str] = []
+    inv_warnings: list[str] = []
+    for inv_yaml_path in sorted((WS_ROOT / "investigations").glob("*/investigation.yaml")):
+        inv_dir = inv_yaml_path.parent.name
+        try:
+            inv_data = yaml.safe_load(inv_yaml_path.read_text()) or {}
+            i_name = inv_data.get("name", inv_dir)
+            inv_names.append(i_name)
+            if inv_schema is not None:
+                try:
+                    from jsonschema import Draft202012Validator
+                    validator = Draft202012Validator(inv_schema)
+                    errs = sorted(validator.iter_errors(inv_data),
+                                  key=lambda e: list(e.path))
+                    for err in errs:
+                        path_str = ".".join(str(p) for p in err.path) if err.path else "(root)"
+                        inv_warnings.append(
+                            f"  WARN investigation {i_name}: [{path_str}] {err.message}"
+                        )
+                except ImportError:
+                    pass
+                except Exception as ve:
+                    inv_warnings.append(f"  WARN investigation {i_name}: {ve}")
+        except Exception as exc:
+            inv_warnings.append(f"  WARN could not parse {inv_yaml_path}: {exc}")
+    n_investigations = len(inv_names)
+    inv_names_preview = ", ".join(inv_names[:3])
+    if n_investigations > 3:
+        inv_names_preview += f", ... (+{n_investigations - 3} more)"
+
     # Count runs (by checking for runs.db files)
     n_active_runs = 0
     n_completed_runs = 0
@@ -356,6 +399,10 @@ def main() -> None:
     print("workspace lint: OK")
     print(f"  workspace: {ws_name}  (package: {ws_pkg})")
     print(f"  {n_expert} expert_docs, {n_bib} bib keys, {n_claims} claims")
+    if n_investigations == 0:
+        print("  0 investigations")
+    else:
+        print(f"  {n_investigations} investigations: {inv_names_preview}")
     if n_studies == 0:
         print("  0 studies")
     else:
@@ -365,6 +412,12 @@ def main() -> None:
             f"(validated: {schema_check}, {dashboard_check})"
         )
     print(f"  {n_active_runs} active runs, {n_completed_runs} completed runs")
+
+    # Surface investigation validation warnings (one line per error). These
+    # don't fail the lint — they're advisory; the dashboard does strict
+    # validation when an investigation is loaded.
+    for w in inv_warnings:
+        print(w, file=sys.stderr)
 
     if not _dashboard_importable and n_studies > 0:
         print(
