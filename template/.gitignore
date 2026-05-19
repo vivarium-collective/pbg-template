@@ -5,8 +5,14 @@
 # #15 (2026-05-19): a granular per-subdir list missed sqlite WAL/SHM
 # sidecars (.pbg/composite-runs.db-shm / -wal) and .pbg/dashboard/, which
 # tripped the dashboard's own dirty-tree gate on Install + workstream
-# commit. A blanket entry collapses the maintenance surface.
-.pbg/
+# commit. Note: `.pbg/*` (not `.pbg/`) so the re-include below can rescue
+# scaffolded schema files — gitignore can't re-include children of a
+# parent directory that's been fully excluded.
+.pbg/*
+# .pbg/schemas/*.json (workspace/study/investigation) ship via scaffold
+# and ARE authored content. They live under .pbg/ for namespacing but
+# need to remain tracked.
+!.pbg/schemas/
 # Investigation runtime artifacts (results DB + rendered HTML + lock file).
 # spec.yaml + data/ are tracked; everything else is regenerated on each run.
 investigations/*/runs.db
