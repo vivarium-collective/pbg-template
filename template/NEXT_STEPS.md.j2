@@ -79,17 +79,62 @@ Composite documents — process-bigraph state trees — live here. Pick one, ins
 ## 4 — Studies and Investigations
 
 A **study** (`studies/<slug>/study.yaml`) is one research question, with a
-`phase:` of `Design | Build | Simulate | Evaluate | Decide` and an 8-section
-canonical structure (`purpose`, `simulation_set`, `model_change`,
-`key_assumptions`, `readouts`, `behavior_tests`, `conclusion_logic`,
-`limitations`). Use `/pbg-study <slug>` from the [pbg-superpowers] plugin to
-scaffold one. Decide-phase studies can record `followup_proposals[]`; seed a
-child study from any proposal with `/pbg-study seed-from-followup
-<parent>/<proposal_id>` (the child gets a `seeded_from:` provenance stamp).
+`phase:` of `Design | Build | Simulate | Evaluate | Decide`. Use `/pbg-study
+<slug>` from the [pbg-superpowers] plugin to scaffold one. Decide-phase
+studies can record `followup_proposals[]`; seed a child study from any
+proposal with `/pbg-study seed-from-followup <parent>/<proposal_id>` (the
+child gets a `seeded_from:` provenance stamp).
+
+### The study.yaml narrative spine (schema v4)
+
+A complete study has 14 sections, grouped into three layers. Fill them in
+roughly top-to-bottom — sections marked **★** are the ones most worth
+authoring first because the dashboard renders them at the top of the report
+and a reviewer can land on a study without reading the YAML.
+
+**Executive layer** (renders at the top of the study page)
+1. `runtime:` — per-study execution overrides (subprocess_timeout_s, default_emitter, max_generations, post_run_scripts). Skip if you're using workspace defaults.
+2. **★ `report:`** — `{title, verdict, confidence, evidence_quality, objective, conclusion, main_insight, caveat, key_metrics: [...]}`. The exec summary a reviewer reads first.
+3. **★ `study_card:`** — `{goal, mechanism, why_before_next, expected_result, main_expert_question}`. One paragraph each. The dashboard one-pager.
+
+**Framing layer** (what + why)
+4. **★ `question:`** + `assumptions:` — the hypothesis, plus the literature facts the study assumes (each with `cites` + `verified_in_v2ecoli` flag).
+5. **★ `conditions:`** — `{baseline, variants, model_settings: [...], expert_inputs: [...]}`. `model_settings` is the tunable-parameter catalog (each with default/current/range/cites). v3 specs put baseline/variants at top level; v4 groups them under `conditions:`.
+6. `enforced_params:` — parameter values the study REQUIRES be applied. The framework verifies after each run and flags drift.
+
+**Validation layer** (what would falsify it)
+7. **★ `tests:`** (a.k.a. `behavior_tests:` for v3 compat) — `[{name, classification, measure: {path, kind, window}, pass_if: {op, low/high}, status, cites}]`. Each test ties a measurable outcome to a literature-grounded threshold.
+8. **★ `readouts:`** — `[{name, store_path, units, status, blocked_by_requirements}]`. The observables the tests read from. `store_path` is the exact emission path in the composite output.
+9. `biological_summary:` — multi-paragraph plain-English mechanism prose. The textbook write-up.
+10. `literature_anchors:` — `[{expectation, model_observable, source, status_in_workspace}]`. Pairs each literature claim with the model observable that would falsify or confirm it.
+
+**Implementation + decisions layer**
+11. `model_change:` — declarative inventory: `{base_model, new_processes, new_state_variables, new_parameters, new_listeners, modified_processes}`. What code changes.
+12. `implementation_requirements:` — `[{id, kind, title, effort, status, steps, unblocks}]`. The TODO list.
+13. `design_pivot_required:` — named open decision points with alternatives + `requested_response`. Surfaces the choices an expert can weigh in on.
+14. **★ `conclusion_verdicts:`** — three-track verdict: `{regression_compatibility, biological_validation, explanatory_gain}` each `{result, basis}`. Lets a study be "PASS on regression but MIXED on biology" instead of forcing one boolean.
+
+### The investigation.yaml narrative spine (schema v2)
 
 An **investigation** (`investigations/<slug>/investigation.yaml`) groups
-related studies and orders them as a DAG via `pipeline_gate.prerequisites`.
+related studies and orders them as a DAG. A complete investigation pairs the
+study list with a narrative spine that mirrors the study spine at a level up.
 Use `/pbg-investigation <slug>` to scaffold.
+
+- `executive:` — `{what_is_this, verdict, verdict_status, decisions_needed: [...]}`. The headline panel.
+- `scientific_argument:` — `{main_claim, evidence_for, evidence_against, key_figures, caveats}`. The chain of reasoning.
+- `lead:` — 3-4 sentence intro (first thing a reader sees).
+- `biological_story:` — multi-paragraph mechanism prose.
+- `at_a_glance:` — `[{study, role: '<one-line role>'}]`. What each member study contributes.
+- `how_to_read:` — evaluator tips.
+- `glossary:` — `[{term, definition}]` for investigation-local terms.
+- `guidelines:` — literature anchors, parameter catalog, calibration targets every member study respects.
+- `studies:` — ordered slug list. The DAG topology is derived from each study's `pipeline_gate.prerequisites`.
+- `acceptance_criteria:` — `[{study, behavior}]` referencing `behavior_tests[].name` on member studies.
+
+You do NOT have to fill every section before running. Start with `report` +
+`study_card` + `question` + `conditions` + `tests` + `readouts` (the ★
+sections). Add the rest as the study matures.
 
 The legacy per-investigation "run a composite + observables + visualizations"
 flow still lives in the dashboard's Investigations tab — pick a composite,
