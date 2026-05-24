@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vivarium-collective.github.io/pbg-template/schemas/study.schema.json",
-  "title": "study.yaml (v3)",
-  "description": "Schema for a pbg-superpowers study definition (studies/<slug>/study.yaml). Canonical as of pbg-superpowers v3: baseline is always a non-empty list of dicts, NOT a single dict.",
+  "title": "study.yaml (v3/v4)",
+  "description": "Schema for a pbg-superpowers study definition (studies/<slug>/study.yaml). Accepts schema_version 3 (legacy: baseline is a non-empty list, observables/variants are top-level) and 4 (current: conditions{baseline,variants,model_settings,expert_inputs} groups them, plus the second-tier narrative fields — report, study_card, biological_summary, literature_anchors, design_pivot_required, conclusion_verdicts, runtime, enforced_params, follow_up_of — that the dnaa investigation evolved). All v4 fields are optional; a v3 spec validates unchanged. New scaffolds should write schema_version: 4 with the narrative-spine fields present (empty or commented) so they prompt the author to fill them in.",
   "type": "object",
   "required": ["name", "baseline"],
   "additionalProperties": true,
@@ -12,8 +12,8 @@
     },
     "schema_version": {
       "type": "integer",
-      "const": 3,
-      "description": "Always 3 for v3 study files."
+      "enum": [3, 4],
+      "description": "3 = legacy v3 (baseline/variants/observables at top level). 4 = current (conditions{} grouping + narrative-spine fields populated). New scaffolds emit 4."
     },
     "name": {
       "type": "string",
@@ -173,7 +173,7 @@
     },
     "runs": {
       "type": "array",
-      "description": "Auto-managed run records. Agents should not write here directly; /pbg-study run-baseline populates this.",
+      "description": "DEPRECATED in v4. Use runs.db (per-study SQLite) as the source of truth — runs_meta + history. F2 made the DB canonical; this field remains only for v3 back-compat and is no longer written by /pbg-study run-baseline. Will be removed in a future schema bump.",
       "items": {
         "type": "object",
         "additionalProperties": true,
@@ -1060,6 +1060,226 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
           "description": "Pass 10B. Optional. Finding id (e.g. `F-03`) on the parent study that motivated this seeded child. Set automatically when `/pbg-study seed-from-followup --from-finding <id>` is used. Enables queries like `grep -r 'finding: F-' studies/*/study.yaml` to trace finding-to-followup lineage."
+        }
+      }
+    },
+    "follow_up_of": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "description": "v4 narrative field. Slug of the study this one is a parallel/cleanup follow-up of (e.g. dnaa-02f follow_up_of: dnaa-02). Distinct from `seeded_from` (which is set automatically by /pbg-study seed-from-followup) and from `parent_studies` (which is a DAG dependency). Lets a study explicitly mark itself as a sibling that runs in parallel to resolve an unresolved tension surfaced by the parent."
+    },
+    "runtime": {
+      "type": "object",
+      "description": "v4 narrative field. Per-study runtime/execution overrides. Read by the dashboard's run handlers. All sub-fields optional — populate only what differs from workspace defaults.",
+      "additionalProperties": true,
+      "properties": {
+        "subprocess_timeout_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Override the workspace subprocess timeout for this study's runs. Useful for slow-cycle conditions (e.g. acetate) where the default 600s is too short."
+        },
+        "default_emitter": {
+          "type": "string",
+          "enum": ["sqlite", "xarray"],
+          "description": "Per-study emitter override. Defaults to workspace.yaml.runtime.default_emitter (which itself defaults to sqlite). Set to xarray when the study wires a multi-generation zarr pipeline."
+        },
+        "max_generations": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional cap on multi-generation runs. Framework default is single-generation (run_with_division stops at first division). Set this when the workspace owns its own multi-gen loop (e.g. v2ecoli/library/xarray_run.py)."
+        },
+        "post_run_scripts": {
+          "type": "array",
+          "description": "Dotted Python paths or executable script paths to invoke after each run completes. Each entry receives the runs.db row + the run's emit_paths. Used for in-workspace post-processing without bloating the framework run path.",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "enforced_params": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "v4 narrative field. Composite-parameter values the study REQUIRES be applied (param_enforcement gate). When set, the framework verifies after each run that the declared parameters match what the composite actually applied; mismatches surface as `ParamViolation` entries on the run row + a banner on the report. Accepts either the flat shape `{composite_param: expected_value, ...}` or the wrapped shape `{params: {...}, source: '<bib-key or PDF citation>'}` for traceability — the helper `load_enforced_params()` in pbg_superpowers/param_enforcement.py detects which shape was used. The schema is intentionally permissive (additionalProperties: true) because both shapes overlap and the framework owns the parsing."
+    },
+    "conditions": {
+      "type": "object",
+      "description": "v4 narrative field — the conditions block. Replaces top-level baseline/variants/observables for v4 specs, alongside `model_settings` (tunable parameter catalog with current/default/range/cites) and `expert_inputs` (one-off knobs an expert can twist via the dashboard). The lib/spec_migration.py `_project_v4_redesign_to_legacy_view` projects this to the legacy v3 view for code paths that haven't been updated yet, so v4 specs work everywhere a v3 spec does.",
+      "additionalProperties": true,
+      "properties": {
+        "baseline": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "v4 baseline is a single object (not a list). For multiple baseline composites in v4, use a v3 spec or use sweep-style simulation_set entries.",
+          "properties": {
+            "composite": {"type": "string"},
+            "params": {"type": "object", "additionalProperties": true}
+          }
+        },
+        "variants": {
+          "type": "array",
+          "description": "Same shape as v3 top-level variants[].",
+          "items": {"type": "object", "additionalProperties": true}
+        },
+        "model_settings": {
+          "type": "array",
+          "description": "Tunable parameter catalog. Each entry: {name, default, current, range: [low, high], cites: [bib_keys], notes}. Lets the dashboard show 'this study is configured with X = 0.046 (default 0.046, lit range [0.01, 0.1] per Boesen2024)' for every knob, and lets the param_enforcement linter compare current vs default for drift.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {"type": "string"},
+              "default": {},
+              "current": {},
+              "range": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "description": "[low, high] bounds from the literature."
+              },
+              "units": {"type": "string"},
+              "cites": {"type": "array", "items": {"type": "string"}},
+              "notes": {"type": "string"}
+            }
+          }
+        },
+        "expert_inputs": {
+          "type": "array",
+          "description": "One-off knobs an expert can twist via the dashboard's Study Inputs tab — feature flags, mechanism toggles, calibration choices. Each entry: {name, kind: toggle|enum|number, current, options?, description}.",
+          "items": {"type": "object", "additionalProperties": true}
+        }
+      }
+    },
+    "report": {
+      "type": "object",
+      "description": "v4 narrative field — the executive summary block. Lands at the top of the rendered study page. Lets a reviewer who won't read the YAML or runs.db see the headline verdict, evidence quality, and key numbers in one panel. dnaa-02 example: {title, verdict: failing-bio, confidence: high, evidence_quality: calibrated, objective: '...', conclusion: '...', main_insight: '...', caveat: '...', key_metrics: [{label, value, status}]}.",
+      "additionalProperties": true,
+      "properties": {
+        "title": {"type": "string"},
+        "verdict": {
+          "type": "string",
+          "description": "Free-form headline verdict. Common values: passing | passing-with-caveats | failing-bio | failing-impl | inconclusive | not-yet-run."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["high", "medium", "low"]
+        },
+        "evidence_quality": {
+          "type": "string",
+          "description": "Common values: calibrated (verified against literature targets) | literature-matched (qualitative match) | aspirational (target stated, not yet measured) | regression-only (only structural checks)."
+        },
+        "objective": {"type": "string"},
+        "conclusion": {"type": "string"},
+        "main_insight": {"type": "string"},
+        "caveat": {"type": "string"},
+        "key_metrics": {
+          "type": "array",
+          "description": "Each entry: {label, value, status} or a free-form string. Rendered as a small table next to the verdict.",
+          "items": {
+            "oneOf": [
+              {"type": "string"},
+              {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "label": {"type": "string"},
+                  "value": {},
+                  "status": {"type": "string", "description": "pass | fail | warn | info"}
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "study_card": {
+      "type": "object",
+      "description": "v4 narrative field — one-paragraph dashboard card. Distinct from `report.objective` (which is multi-sentence). dnaa-02 example: {goal: 'Split DnaA into apo/ATP/ADP...', mechanism: 'New bulk species + a first-order hydrolysis Step', why_before_next: 'dnaa-03 needs to know which nucleotide form...', expected_result: 'DnaA-ATP / total in [0.2, 0.5]', main_expert_question: 'v2ecoli already has a MONOMER0-160_RXN — should we reuse it?'}.",
+      "additionalProperties": true,
+      "properties": {
+        "goal": {"type": "string"},
+        "mechanism": {"type": "string"},
+        "why_before_next": {"type": "string", "description": "Why this study must finish before the next one in the DAG."},
+        "expected_result": {"type": "string"},
+        "main_expert_question": {"type": "string", "description": "The one question the study most wants an expert to weigh in on. Surfaced in the expert-review panel."}
+      }
+    },
+    "biological_summary": {
+      "type": "string",
+      "description": "v4 narrative field — multi-paragraph plain-English mechanism summary. Distinct from `report.main_insight` (one sentence) and `study_card.mechanism` (one paragraph). This is the 'textbook write-up' a non-modeler would read to understand what the study is about. Markdown allowed."
+    },
+    "literature_anchors": {
+      "type": "array",
+      "description": "v4 narrative field — testable expectations from the literature, paired with how they're measured in the model. Each entry pins a literature claim to a model observable and tracks its current status in the workspace. Lets a reviewer audit 'did we actually implement this?' without reading code.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "expectation": {"type": "string", "description": "What the literature claims (e.g. 'DnaA-ATP / total DnaA ≈ 20-50% during steady growth')."},
+          "model_observable": {"type": "string", "description": "How to measure this in the simulation (e.g. 'bulk[DnaA_ATP] / (bulk[DnaA_apo] + bulk[DnaA_ATP] + bulk[DnaA_ADP])')."},
+          "source": {"type": "string", "description": "Bib-key or short literature citation (e.g. 'Boesen 2024 PNAS', 'Skarstad 1986')."},
+          "status_in_workspace": {
+            "type": "string",
+            "description": "Free-form; common values: 'Not yet measurable — species don't exist yet' | 'Already available via X listener' | 'Partial — only Y is plumbed' | 'Verified — observed value matches'."
+          },
+          "cites": {"type": "array", "items": {"type": "string"}, "description": "Optional bib_key list (preferred over the free-form `source` for new entries)."}
+        }
+      }
+    },
+    "design_pivot_required": {
+      "type": "array",
+      "description": "v4 narrative field — named open decision points the study has hit, with their candidate paths. Lets an expert see what choices are blocking forward progress instead of guessing from prose. dnaa-02 example: {id: dnaa-02-EQ-04, status: superseded-by-dnaa-02f, question: 'How do we make hydrolysis stick when MONOMER0-4565_RXN re-equilibrates?', alternatives: ['A. Add locked species', 'B. Patch stoichMatrix'], requested_response: 'Expert opinion on (A) vs (B)'}.",
+      "items": {
+        "type": "object",
+        "required": ["id", "question"],
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "description": "Stable slug, unique within this study (e.g. dnaa-02-EQ-04)."
+          },
+          "status": {
+            "type": "string",
+            "description": "Common values: open | accepted | rejected | superseded-by-<slug> | obsolete | resolved."
+          },
+          "question": {"type": "string", "description": "The decision being made."},
+          "alternatives": {
+            "type": "array",
+            "description": "Candidate paths. Free-form strings.",
+            "items": {"type": "string"}
+          },
+          "requested_response": {"type": "string", "description": "What the author wants from a reviewer (e.g. 'Expert opinion on whether (A) or (B) is cleaner')."},
+          "notes": {"type": "string"}
+        }
+      }
+    },
+    "conclusion_verdicts": {
+      "type": "object",
+      "description": "v4 narrative field — three-track verdict block. Distinct from `conclusion_logic` (which is the if-pass/if-fail decision tree). dnaa established three separable dimensions a study can pass/fail on: regression_compatibility (does the code still build/run cleanly?), biological_validation (does it match the literature?), explanatory_gain (did we learn something new?). Each track is {result: PASS|FAIL|MIXED|PENDING, basis: '<why>'}. Lets the dashboard render a 'PASS on regression but MIXED on biology' verdict instead of forcing one boolean.",
+      "additionalProperties": true,
+      "properties": {
+        "regression_compatibility": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "result": {"type": "string", "enum": ["PASS", "FAIL", "MIXED", "PENDING"]},
+            "basis": {"type": "string"}
+          }
+        },
+        "biological_validation": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "result": {"type": "string", "enum": ["PASS", "FAIL", "MIXED", "PENDING"]},
+            "basis": {"type": "string"}
+          }
+        },
+        "explanatory_gain": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "result": {"type": "string", "enum": ["POSITIVE", "NEUTRAL", "NEGATIVE", "PENDING"]},
+            "basis": {"type": "string"}
+          }
         }
       }
     }
