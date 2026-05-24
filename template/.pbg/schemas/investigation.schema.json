@@ -27,8 +27,8 @@
       "description": "ISO-8601 creation date (YYYY-MM-DD)."
     },
     "status": {
-      "enum": ["planned", "planning", "running", "ran", "complete", "failed", "invalid", "archived"],
-      "description": "Overall status of the investigation. 'planning' is accepted as an alias for 'planned' for back-compat."
+      "enum": ["planned", "planning", "running", "ran", "complete", "failed", "invalid", "archived", "closed"],
+      "description": "Overall status of the investigation. 'planning' is accepted as an alias for 'planned' for back-compat. 'closed' is the terminal post-merge state set by the close-investigation workflow (`/pbg-investigation close <slug>`) after the report.html has been checked in and the PR opened."
     },
     "question": {
       "type": "string",
@@ -158,6 +158,60 @@
       "type": "object",
       "description": "v2 narrative field — investigation-wide rules: literature anchors, parameter tables, naming conventions, calibration thresholds that every member study should respect. Free-form sub-fields; common ones include `literature_anchors[]`, `parameter_catalog[]`, `naming_conventions`, `calibration_targets`.",
       "additionalProperties": true
+    },
+    "contributors": {
+      "type": "array",
+      "description": "S5: who built this investigation. Auto-derived by `/pbg-investigation close` from `git log --pretty='%an|%ae' <main>..<branch>` plus any agent-session metadata under .pbg/agent-sessions/, then editable by the author. Survives squash-merges where git authors would otherwise be lost. Lets future contributors see who came before and gives credit when others build on top.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": true,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Display name (human or agent)."
+          },
+          "email": {
+            "type": "string",
+            "description": "Email (humans) or NULL/placeholder (agents)."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["human", "agent"],
+            "default": "human",
+            "description": "human = git commit author; agent = recorded via .pbg/agent-sessions/."
+          },
+          "roles": {
+            "type": "array",
+            "description": "Roles played on this investigation. Free-form; common values: designer | implementer | reviewer | agent_runner | data_curator. A single contributor may have multiple roles.",
+            "items": {"type": "string"}
+          },
+          "commits": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count of commits attributed to this contributor on the investigation branch (since divergence from main). Populated by the close mechanic; informational only."
+          },
+          "sessions": {
+            "type": "array",
+            "description": "For agents: list of session ids (UUIDs from .pbg/agent-sessions/<id>.json) attributed to this contributor.",
+            "items": {"type": "string"}
+          },
+          "notes": {
+            "type": "string",
+            "description": "Optional free-form acknowledgement (e.g., 'expert review of dnaa-02 implementation')."
+          }
+        }
+      }
+    },
+    "closed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "S5: ISO-8601 timestamp when `/pbg-investigation close` stamped the investigation. Set automatically by the close mechanic; not user-edited. Distinct from `created` (start of work)."
+    },
+    "report_url": {
+      "type": "string",
+      "description": "S5: path to the checked-in HTML report. Relative to the investigation directory (typically just 'report.html'). Set automatically by the close mechanic when it copies the rendered report into investigations/<slug>/report.html. Lets the dashboard link to the immutable snapshot of what the investigation produced."
     }
   }
 }
