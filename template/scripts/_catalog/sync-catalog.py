@@ -111,6 +111,32 @@ def _entry(repo: dict) -> dict:
     }
 
 
+# Fields that this script owns — it overwrites them on every run from the
+# GitHub metadata. Any OTHER field on an existing entry is curator-owned
+# (e.g. hand-authored `checks:` blocks for runtime dependency validation,
+# like the OpenMPI + lammps-importable probes on pbg-lammps) and must be
+# preserved across a re-sync — otherwise running this script eats curation.
+_AUTO_KEYS = frozenset({
+    "name", "description", "source", "ref", "package", "homepage", "tags",
+})
+
+
+def _merge_extras(fresh: dict, existing: dict | None) -> dict:
+    """Return `fresh` augmented with any non-auto fields from `existing`.
+
+    Auto fields (the ones derived from GitHub on each run) always come from
+    `fresh`. Curator-authored fields like `checks` survive a re-sync. New
+    entries (no existing) pass through unchanged.
+    """
+    if not existing:
+        return fresh
+    out = dict(fresh)
+    for key, value in existing.items():
+        if key not in _AUTO_KEYS:
+            out[key] = value
+    return out
+
+
 def main() -> int:
     repos = _gh_list_org(ORG)
     by_name = {r["name"]: r for r in repos}
@@ -128,10 +154,40 @@ def main() -> int:
             print(f"warning: '{nm}' not found on {ORG}", file=sys.stderr)
     selected.sort(key=lambda r: r["name"])
 
-    out = [_entry(r) for r in selected]
     out_path = Path(__file__).parent / "modules.json"
+    existing_by_name: dict[str, dict] = {}
+    if out_path.is_file():
+        try:
+            for e in json.loads(out_path.read_text()):
+                if isinstance(e, dict) and e.get("name"):
+                    existing_by_name[e["name"]] = e
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    out = [
+        _merge_extras(_entry(r), existing_by_name.get(r["name"]))
+        for r in selected
+    ]
+
+    # Surface any preserved-extras so the operator running the sync can
+    # eyeball that nothing meaningful got dropped on a stale-entry removal.
+    preserved = [
+        e["name"] for e in out
+        if any(k not in _AUTO_KEYS for k in e)
+    ]
+    dropped_stale = sorted(set(existing_by_name) - {r["name"] for r in selected})
+
     out_path.write_text(json.dumps(out, indent=2) + "\n")
     print(f"wrote {len(out)} entries to {out_path}")
+    if preserved:
+        print(f"  preserved curator-authored extras on: {', '.join(sorted(preserved))}")
+    if dropped_stale:
+        print(f"  WARNING: dropped entries no longer on {ORG}: {', '.join(dropped_stale)}")
+        for nm in dropped_stale:
+            e = existing_by_name[nm]
+            extras = [k for k in e if k not in _AUTO_KEYS]
+            if extras:
+                print(f"    {nm}: had curator-authored fields {extras} — verify they're not needed")
     return 0
 
 
