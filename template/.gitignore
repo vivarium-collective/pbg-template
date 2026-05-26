@@ -13,6 +13,9 @@
 # and ARE authored content. They live under .pbg/ for namespacing but
 # need to remain tracked.
 !.pbg/schemas/
+# hpc.env.example is a committed template; hpc.env and hpc_known_hosts
+# are gitignored by .pbg/* above (they hold real credentials/key paths).
+!.pbg/hpc.env.example
 # Investigation runtime artifacts (results DB + rendered HTML + lock file).
 # spec.yaml + data/ are tracked; everything else is regenerated on each run.
 investigations/*/runs.db
