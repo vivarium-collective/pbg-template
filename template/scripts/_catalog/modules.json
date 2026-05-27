@@ -1,5 +1,14 @@
 [
   {
+    "name": "Viva-munk",
+    "description": "",
+    "source": "https://github.com/vivarium-collective/Viva-munk.git",
+    "ref": "main",
+    "package": "Viva_munk",
+    "homepage": "https://github.com/vivarium-collective/Viva-munk",
+    "tags": []
+  },
+  {
     "name": "pbg-biomodels",
     "description": "Process-bigraph workspace: BIOMODELS regression \u2014 installs pbg-biomodels-bundle and drives investigations against the BioModels corpus",
     "source": "https://github.com/vivarium-collective/pbg-biomodels.git",
@@ -131,6 +140,15 @@
     "tags": [
       "sbml"
     ]
+  },
+  {
+    "name": "pbg-emitters",
+    "description": "Focused emitter library for process-bigraph composites",
+    "source": "https://github.com/vivarium-collective/pbg-emitters.git",
+    "ref": "main",
+    "package": "pbg_emitters",
+    "homepage": "https://github.com/vivarium-collective/pbg-emitters",
+    "tags": []
   },
   {
     "name": "pbg-idynomics2",

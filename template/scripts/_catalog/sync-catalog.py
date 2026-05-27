@@ -19,7 +19,14 @@ from pathlib import Path
 
 
 ORG = "vivarium-collective"
-EXTRAS = ["v2ecoli", "spatio-flux"]
+# Non-pbg-* repos that are genuine process-bigraph extensions (Processes,
+# Steps, Types) workspaces install via pyproject + import in composites.
+# Listed here because the auto-pull filter is `name.startswith("pbg-")`;
+# extension packages without that prefix would otherwise be invisible to
+# the catalog. Keep this list tight — workspace-y repos (vEcoli*,
+# multiscale-bioprocess, etc.) and infrastructure (bigraph-*, sms-*)
+# do NOT belong here.
+EXTRAS = ["v2ecoli", "spatio-flux", "Viva-munk"]
 EXCLUDE = {"pbg-superpowers", "pbg-template"}
 
 
