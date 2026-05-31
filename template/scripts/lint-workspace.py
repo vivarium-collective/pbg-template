@@ -82,9 +82,43 @@ def _sha256(path: Path) -> str:
 WS_ROOT = Path(__file__).resolve().parents[1]
 WS_FILE = WS_ROOT / "workspace.yaml"
 
+# Canonical flat layout — keep in sync with the WorkspacePaths resolver
+# (vivarium_dashboard.lib.workspace_paths.LAYOUT_DEFAULTS). Directory locations
+# come from the optional `layout:` map in workspace.yaml; unset keys default to
+# the flat name, so a workspace with no `layout:` block is unchanged.
+_LAYOUT_DEFAULTS = {
+    "studies": "studies", "investigations": "investigations",
+    "composites": "composites", "references": "references",
+    "datasets": "datasets", "notes": "notes", "experiments": "experiments",
+    "reports": "reports", "pbg": ".pbg", "scripts": "scripts",
+    "tests": "tests", "docs": "docs",
+}
+
+
+def _load_layout() -> dict:
+    cfg = {}
+    if WS_FILE.exists():
+        try:
+            cfg = yaml.safe_load(WS_FILE.read_text()) or {}
+        except Exception:
+            cfg = {}
+    layout = dict(_LAYOUT_DEFAULTS)
+    for k, v in (cfg.get("layout") or {}).items():
+        if k in _LAYOUT_DEFAULTS and isinstance(v, str) and v:
+            layout[k] = v
+    return layout
+
+
+_LAYOUT = _load_layout()
+
+
+def _dir(name: str) -> Path:
+    """Absolute path to a workspace directory, honoring workspace.yaml `layout:`."""
+    return WS_ROOT / _LAYOUT[name]
+
 
 def _schema(name: str) -> dict:
-    p = WS_ROOT / ".pbg" / "schemas" / name
+    p = _dir("pbg") / "schemas" / name
     if not p.exists():
         sys.exit(f"missing schema at {p}; was workspace scaffolded?")
     return json.loads(p.read_text())
@@ -128,8 +162,8 @@ def main() -> None:
             _fail(f"dataset '{d['name']}' has neither path nor url")
 
     # References cross-ref
-    refs_yaml = WS_ROOT / "references" / "claims.yaml"
-    bib = WS_ROOT / "references" / "papers.bib"
+    refs_yaml = _dir("references") / "claims.yaml"
+    bib = _dir("references") / "papers.bib"
     if refs_yaml.exists() and bib.exists():
         claims = (yaml.safe_load(refs_yaml.read_text()) or {}).get("claims", {}) or {}
         bib_text = bib.read_text()
@@ -160,7 +194,7 @@ def main() -> None:
                     _fail(f"expert_docs '{doc.get('name', '?')}' sha256 mismatch (recorded={sha[:16]}…, actual={actual[:16]}…)")
 
     # References PDFs: always verify sha256 + bib_key cross-reference
-    bib = WS_ROOT / "references" / "papers.bib"
+    bib = _dir("references") / "papers.bib"
     bib_keys: set = set()
     if bib.exists():
         bib_text = bib.read_text()
@@ -228,14 +262,14 @@ def main() -> None:
     expert_names = [d.get("name", "?") for d in expert_docs if isinstance(d, dict)]
 
     # Count bib keys
-    bib_file = WS_ROOT / "references" / "papers.bib"
+    bib_file = _dir("references") / "papers.bib"
     bib_keys_found: set = set()
     if bib_file.exists():
         bib_keys_found = set(re.findall(r"@\w+\{([A-Za-z0-9_:-]+),", bib_file.read_text()))
     n_bib = len(bib_keys_found)
 
     # Count claims
-    claims_file = WS_ROOT / "references" / "claims.yaml"
+    claims_file = _dir("references") / "claims.yaml"
     n_claims = 0
     if claims_file.exists():
         try:
@@ -249,7 +283,7 @@ def main() -> None:
             n_claims = sum(1 for ln in claims_file.read_text().splitlines() if ln.strip() and not ln.startswith("#"))
 
     # Enumerate studies
-    study_schema_path = WS_ROOT / ".pbg" / "schemas" / "study.schema.json"
+    study_schema_path = _dir("pbg") / "schemas" / "study.schema.json"
     study_schema: dict | None = None
     if study_schema_path.exists():
         try:
@@ -279,7 +313,7 @@ def main() -> None:
     # `fails dashboard load`. Headline + body must agree.
     n_studies_failed_dashboard = 0
 
-    for study_yaml_path in sorted((WS_ROOT / "studies").glob("*/study.yaml")):
+    for study_yaml_path in sorted((_dir("studies")).glob("*/study.yaml")):
         study_dir = study_yaml_path.parent.name
         try:
             study_data = yaml.safe_load(study_yaml_path.read_text()) or {}
@@ -329,7 +363,7 @@ def main() -> None:
     # than studies — typically just name, title, studies[] — but they're the
     # first artifact a workspace promotion lands, so the lint summary should
     # confirm they exist + parse.)
-    inv_schema_path = WS_ROOT / ".pbg" / "schemas" / "investigation.schema.json"
+    inv_schema_path = _dir("pbg") / "schemas" / "investigation.schema.json"
     inv_schema: dict | None = None
     if inv_schema_path.exists():
         try:
@@ -342,9 +376,9 @@ def main() -> None:
     # Cross-reference target — the slugs we'll check investigation references
     # against. Computed once from the studies directory rather than per-iter.
     on_disk_study_slugs = {p.parent.name for p in
-                            (WS_ROOT / "studies").glob("*/study.yaml")}
+                            (_dir("studies")).glob("*/study.yaml")}
 
-    for inv_yaml_path in sorted((WS_ROOT / "investigations").glob("*/investigation.yaml")):
+    for inv_yaml_path in sorted((_dir("investigations")).glob("*/investigation.yaml")):
         inv_dir = inv_yaml_path.parent.name
         try:
             inv_data = yaml.safe_load(inv_yaml_path.read_text()) or {}
@@ -395,7 +429,7 @@ def main() -> None:
     # Count runs (by checking for runs.db files)
     n_active_runs = 0
     n_completed_runs = 0
-    for runs_db in (WS_ROOT / "studies").glob("*/runs.db"):
+    for runs_db in (_dir("studies")).glob("*/runs.db"):
         try:
             import sqlite3
             conn = sqlite3.connect(str(runs_db))
