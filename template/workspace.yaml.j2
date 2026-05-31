@@ -4,21 +4,20 @@ created: "{{ today }}"
 plugin_version: {{ plugin_version }}
 package_path: {{ package_path }}
 
-# Directory layout. By default every research directory sits at the top level
-# (studies/, investigations/, references/, .pbg/, …). To group them under a
-# tidier subtree, uncomment and adjust — any key you omit stays at its flat
-# default, and tooling (dashboard, lint, skills) resolves these automatically:
-#
-# layout:
-#   studies: workspace/studies
-#   investigations: workspace/investigations
-#   composites: workspace/composites
-#   references: workspace/references
-#   datasets: workspace/datasets
-#   notes: workspace/notes
-#   experiments: workspace/experiments
-#   reports: workspace/reports
-#   pbg: workspace/.pbg
+# Directory layout. New workspaces group their research directories under a
+# tidy `workspace/` subtree (the dirs below); the hidden `.pbg/` machine state
+# stays at the root like `.git/`. Tooling (dashboard, lint, skills) resolves
+# these via the shared WorkspacePaths resolver. Any key you remove falls back
+# to its flat top-level default — so you can move things back if you prefer.
+layout:
+  studies: workspace/studies
+  investigations: workspace/investigations
+  composites: workspace/composites
+  references: workspace/references
+  datasets: workspace/datasets
+  notes: workspace/notes
+  experiments: workspace/experiments
+  reports: workspace/reports
 
 # The four arrays below start empty; the dashboard populates them as you
 # work. Hand-editing is fine for small adds, but the dashboard's writers
@@ -41,6 +40,6 @@ simulations: []
 # the Inputs tab "Attach dataset" action.
 datasets: []
 
-references_bib: references/papers.bib
+references_bib: workspace/references/papers.bib
 server:
   enabled: false

@@ -84,14 +84,10 @@ and `lint-workspace.py` read and write). This split is the canonical layout.
 
 ### Where these directories live — the `layout:` map
 
-By default every research directory sits at the **top level** (`studies/`,
-`investigations/`, …). Their locations are not hardcoded: tooling resolves them
-through an optional **`layout:`** map in `workspace.yaml`. Any key you omit
-keeps its conventional flat name, so a workspace with no `layout:` block uses
-the classic top-level layout — and every existing workspace is unaffected.
-
-To group the research directories under a tidier subtree, set the paths you want
-to move:
+Directory locations are not hardcoded: tooling resolves them through a
+**`layout:`** map in `workspace.yaml`. **New workspaces ship nested** — the
+research directories are grouped under a tidy `workspace/` subtree, while the
+hidden `.pbg/` machine state stays at the root (like `.git/`):
 
 ```yaml
 layout:
@@ -103,8 +99,14 @@ layout:
   notes: workspace/notes
   experiments: workspace/experiments
   reports: workspace/reports
-  pbg: workspace/.pbg
 ```
+
+The `layout:` block is purely a set of overrides: **any key you remove falls
+back to its conventional flat top-level name** (`studies` → `studies/`). So you
+can flatten the layout, move directories elsewhere, or relocate `scripts`,
+`tests`, `docs`, even the `package` — and a workspace with *no* `layout:` block
+at all uses the classic flat layout, which is why every pre-existing workspace
+keeps working untouched.
 
 The dashboard, the `/pbg-*` skills, and `lint-workspace.py` all honor this map
 (via the shared `WorkspacePaths` resolver), so you can relocate any directory —

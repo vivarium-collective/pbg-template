@@ -78,7 +78,7 @@ Composite documents — process-bigraph state trees — live here. Pick one, ins
 
 ## 4 — Studies and Investigations
 
-A **study** (`studies/<slug>/study.yaml`) is one research question, with a
+A **study** (`workspace/studies/<slug>/study.yaml`) is one research question, with a
 `phase:` of `Design | Build | Simulate | Evaluate | Decide`. Use `/pbg-study
 <slug>` from the [pbg-superpowers] plugin to scaffold one. Decide-phase
 studies can record `followup_proposals[]`; seed a child study from any
@@ -116,7 +116,7 @@ and a reviewer can land on a study without reading the YAML.
 
 ### The investigation.yaml narrative spine (schema v2)
 
-An **investigation** (`investigations/<slug>/investigation.yaml`) groups
+An **investigation** (`workspace/investigations/<slug>/investigation.yaml`) groups
 related studies and orders them as a DAG. A complete investigation pairs the
 study list with a narrative spine that mirrors the study spine at a level up.
 Use `/pbg-investigation <slug>` to scaffold.
@@ -170,9 +170,9 @@ Each push triggers `.github/workflows/build-and-push.yml`, which builds your wor
 ## Config files to know
 
 - `workspace.yaml` — canonical state (observables, simulations, visualizations, imports, datasets, …)
-- `studies/<slug>/study.yaml` — one research question (8 canonical sections, `phase:` lifecycle)
-- `investigations/<slug>/investigation.yaml` — DAG of studies via `pipeline_gate.prerequisites`
-- `references/{papers.bib, claims.yaml}` — bibliography + claim → paper mapping
+- `workspace/studies/<slug>/study.yaml` — one research question (8 canonical sections, `phase:` lifecycle)
+- `workspace/investigations/<slug>/investigation.yaml` — DAG of studies via `pipeline_gate.prerequisites`
+- `workspace/references/{papers.bib, claims.yaml}` — bibliography + claim → paper mapping
 - `.pbg/schemas/{workspace,study,investigation}.schema.json` — JSON schemas (lint enforces them)
 
 ## Focused dashboard panels
