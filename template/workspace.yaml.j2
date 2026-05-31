@@ -4,6 +4,22 @@ created: "{{ today }}"
 plugin_version: {{ plugin_version }}
 package_path: {{ package_path }}
 
+# Directory layout. By default every research directory sits at the top level
+# (studies/, investigations/, references/, .pbg/, …). To group them under a
+# tidier subtree, uncomment and adjust — any key you omit stays at its flat
+# default, and tooling (dashboard, lint, skills) resolves these automatically:
+#
+# layout:
+#   studies: workspace/studies
+#   investigations: workspace/investigations
+#   composites: workspace/composites
+#   references: workspace/references
+#   datasets: workspace/datasets
+#   notes: workspace/notes
+#   experiments: workspace/experiments
+#   reports: workspace/reports
+#   pbg: workspace/.pbg
+
 # The four arrays below start empty; the dashboard populates them as you
 # work. Hand-editing is fine for small adds, but the dashboard's writers
 # also keep cross-references (studies, runs, viz wiring) consistent.

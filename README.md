@@ -52,15 +52,63 @@ both flows stay in sync. Every change the dashboard makes is a git commit
 on your current branch, so you get a full audit trail of how your study
 evolved.
 
-## What a scaffolded workspace contains
+## Canonical workspace organization
 
-- `workspace.yaml` — canonical state (observables, simulations, imports, …).
-- `pbg_<slug>/` — your Python package (`core.py` exposes `build_core()`; add composites and visualizations here).
-- `studies/` — research-question specs (one folder per study; see `study.schema.json`).
-- `composites/` — runnable process-bigraph documents.
-- `references/`, `datasets/` — bibliography + curated data.
-- `.pbg/schemas/` — validators the dashboard and `lint-workspace.py` check against.
-- `scripts/` — `lint-workspace.py`, `serve.sh` (launches the dashboard), helpers.
+A scaffolded workspace separates **project code** (a normal Python project, at
+the repo root) from **research state** (the directories the dashboard, skills,
+and `lint-workspace.py` read and write). This split is the canonical layout.
+
+**Project code — stays at the repo root:**
+
+| Path | What it is |
+|---|---|
+| `pbg_<slug>/` | your Python package — `core.py` exposes `build_core()`; composites, processes, and visualizations live here |
+| `scripts/` | `lint-workspace.py`, `serve.sh` (launches the dashboard), helpers |
+| `tests/` | your test suite |
+| `docs/` | project documentation |
+| `pyproject.toml`, `README.md`, `workspace.yaml` | standard repo-root files |
+
+**Research state — the pbg directories:**
+
+| Path | What it is |
+|---|---|
+| `studies/` | research-question specs, one folder per study (`study.schema.json`) |
+| `investigations/` | collections of studies with a DAG (`investigation.schema.json`) |
+| `composites/` | runnable process-bigraph documents |
+| `references/` | bibliography (`papers.bib`) + claims log + PDFs |
+| `datasets/` | curated input data |
+| `notes/` | field records (friction logs, walkthroughs, per-paper notes) |
+| `experiments/` | ad-hoc experiment runs |
+| `reports/` | generated HTML reports + `figures/` |
+| `.pbg/` | machine state — `schemas/` (validators), run DBs, dashboard/server state |
+
+### Where these directories live — the `layout:` map
+
+By default every research directory sits at the **top level** (`studies/`,
+`investigations/`, …). Their locations are not hardcoded: tooling resolves them
+through an optional **`layout:`** map in `workspace.yaml`. Any key you omit
+keeps its conventional flat name, so a workspace with no `layout:` block uses
+the classic top-level layout — and every existing workspace is unaffected.
+
+To group the research directories under a tidier subtree, set the paths you want
+to move:
+
+```yaml
+layout:
+  studies: workspace/studies
+  investigations: workspace/investigations
+  composites: workspace/composites
+  references: workspace/references
+  datasets: workspace/datasets
+  notes: workspace/notes
+  experiments: workspace/experiments
+  reports: workspace/reports
+  pbg: workspace/.pbg
+```
+
+The dashboard, the `/pbg-*` skills, and `lint-workspace.py` all honor this map
+(via the shared `WorkspacePaths` resolver), so you can relocate any directory —
+including `scripts`, `tests`, `docs`, and the `package` — without touching code.
 
 ## Schemas
 
