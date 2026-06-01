@@ -24,7 +24,7 @@ __pycache__/
 .pytest_cache/
 # Dashboard-copied report assets (style.css, client.js, vivarium-logo.png, …) —
 # regenerated from vivarium-dashboard on each report render. Only .keep is tracked.
-reports/assets/*
-!reports/assets/.keep
+workspace/reports/assets/*
+!workspace/reports/assets/.keep
 # Transient brainstorm session artifacts (server PIDs, logs, rendered HTML).
 .superpowers/brainstorm/

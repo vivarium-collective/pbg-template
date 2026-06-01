@@ -20,29 +20,33 @@ Claude Code plugin provides skills that drive the canonical PR flow:
 - `/pbg-expert <tool>` — wrap a simulator as a process-bigraph Process or Step (sibling repo + tests + report). Pass `--lightweight` to write in-workspace instead.
 - `/pbg-expert <name> <tools…>` — wire wrapped simulators into a composite (sibling repo, or `--lightweight` for in-workspace).
 - `/pbg-viz` — generate a Visualization from a natural-language description.
-- `/pbg-report` — regenerate `reports/index.html`.
+- `/pbg-report` — regenerate `workspace/reports/index.html`.
 
 Decide-phase studies can record `followup_proposals[]`; seed a child study
 from any proposal with `/pbg-study seed-from-followup <parent>/<proposal_id>`.
 
 ## Layout
 
+Project code lives at the repo root; research state is grouped under `workspace/`
+(the `.pbg/` machine state stays at the root like `.git/`). Directory locations
+come from the `layout:` map in `workspace.yaml` — edit it to move things.
+
 - `workspace.yaml` — canonical state (validated against `.pbg/schemas/workspace.schema.json`).
 - `{{ package_path }}/` — your Python package (`core.py` exposes `build_core()`).
-- `studies/`, `composites/`, `references/`, `datasets/` — research artifacts.
-- `notes/` — friction logs, walkthroughs, agent transcripts, ADRs. See `notes/README.md` for the
+- `scripts/` — `lint-workspace.py`, `serve.sh`, helpers.
+- `workspace/studies/`, `workspace/composites/`, `workspace/references/`, `workspace/datasets/` — research artifacts.
+- `workspace/notes/` — friction logs, walkthroughs, agent transcripts, ADRs. See `workspace/notes/README.md` for the
   cleanup rule: **files under `notes/` survive cleanup sweeps by default**, because they're the
   input to the next round of infrastructure improvements.
 - `.pbg/schemas/` — JSON schemas the lint + dashboard validate against.
-- `scripts/` — `lint-workspace.py`, `serve.sh`, helpers.
 
 ## Cleanup conventions
 
 Cleanup PRs (`chore(cleanup): …`, `chore(repo): trim …`) routinely remove generated files,
 one-shot scripts, and stale planning docs. Two locations are off-limits to bulk cleanup:
 
-- `notes/**` — see the rule in `notes/README.md`.
-- `references/notes/**` — per-paper literature notes, used by the findings protocol.
+- `workspace/notes/**` — see the rule in `workspace/notes/README.md`.
+- `workspace/references/notes/**` — per-paper literature notes, used by the findings protocol.
 
 If a specific file in either location is genuinely obsolete, delete it in its own commit
 with a one-line justification per file. Don't bundle with unrelated cleanup.
