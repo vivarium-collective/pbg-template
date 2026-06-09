@@ -20,16 +20,22 @@ bash scripts/serve.sh   # opens browser at http://localhost:<port>
 
 > **If `uv pip install` fails with "vivarium-dashboard was not found in
 > the package registry":** vivarium-dashboard isn't on PyPI yet. The
-> template's init script auto-pins it when a sibling `../vivarium-dashboard/`
-> checkout exists, but if you scaffolded elsewhere you'll need to add it
-> manually to `pyproject.toml`:
+> template's init script ALWAYS pins it to its public git source in
+> `pyproject.toml` (never a committed local path — that would break CI,
+> Docker, and collaborators who lack the sibling checkout):
 >
 > ```toml
 > [tool.uv.sources]
-> vivarium-dashboard = { path = "/path/to/vivarium-dashboard", editable = true }
+> vivarium-dashboard = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git", branch = "main" }
 > ```
 >
-> Re-run `uv pip install -e ".[dev]"` after the edit.
+> If that block is missing, add it and re-run `uv pip install -e ".[dev]"`.
+> For local dev against a sibling checkout, override with an editable install
+> into your venv (no committed local path required):
+>
+> ```bash
+> uv pip install -e ../vivarium-dashboard
+> ```
 
 ## The dashboard tabs
 
@@ -78,7 +84,7 @@ Composite documents — process-bigraph state trees — live here. Pick one, ins
 
 ## 4 — Studies and Investigations
 
-A **study** (`workspace/studies/<slug>/study.yaml`) is one research question, with a
+A **study** (`studies/<slug>/study.yaml`) is one research question, with a
 `phase:` of `Design | Build | Simulate | Evaluate | Decide`. Use `/pbg-study
 <slug>` from the [pbg-superpowers] plugin to scaffold one. Decide-phase
 studies can record `followup_proposals[]`; seed a child study from any
@@ -116,7 +122,7 @@ and a reviewer can land on a study without reading the YAML.
 
 ### The investigation.yaml narrative spine (schema v2)
 
-An **investigation** (`workspace/investigations/<slug>/investigation.yaml`) groups
+An **investigation** (`investigations/<slug>/investigation.yaml`) groups
 related studies and orders them as a DAG. A complete investigation pairs the
 study list with a narrative spine that mirrors the study spine at a level up.
 Use `/pbg-investigation <slug>` to scaffold.
@@ -170,9 +176,9 @@ Each push triggers `.github/workflows/build-and-push.yml`, which builds your wor
 ## Config files to know
 
 - `workspace.yaml` — canonical state (observables, simulations, visualizations, imports, datasets, …)
-- `workspace/studies/<slug>/study.yaml` — one research question (8 canonical sections, `phase:` lifecycle)
-- `workspace/investigations/<slug>/investigation.yaml` — DAG of studies via `pipeline_gate.prerequisites`
-- `workspace/references/{papers.bib, claims.yaml}` — bibliography + claim → paper mapping
+- `studies/<slug>/study.yaml` — one research question (8 canonical sections, `phase:` lifecycle)
+- `investigations/<slug>/investigation.yaml` — DAG of studies via `pipeline_gate.prerequisites`
+- `references/{papers.bib, claims.yaml}` — bibliography + claim → paper mapping
 - `.pbg/schemas/{workspace,study,investigation}.schema.json` — JSON schemas (lint enforces them)
 
 ## Focused dashboard panels
