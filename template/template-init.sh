@@ -64,29 +64,24 @@ EOF
   echo "created $PACKAGE_PATH/{__init__.py,core.py}"
 fi
 
-# vivarium-dashboard isn't on PyPI yet. Pin it via [tool.uv.sources]:
-#   - if a sibling checkout exists (or VIVARIUM_DASHBOARD_PATH is set), pin
-#     to that local path so local dev iterates against the user's checkout;
-#   - otherwise, fall back to a git source on
-#     github.com/vivarium-collective/vivarium-dashboard@main so that Docker
-#     builds and CI runs (which have no local sibling) can still resolve it.
+# vivarium-dashboard isn't on PyPI yet. Pin it via [tool.uv.sources] to its
+# public git repo. We ALWAYS use the git source — never a committed local path
+# — because a committed path (relative or absolute) breaks `uv pip install` on
+# every other machine: CI, Docker, and collaborators all lack the sibling
+# checkout and hit "Distribution not found at: file:///.../vivarium-dashboard".
+# For local dev against a sibling checkout, override with an editable install
+# into your venv instead (no committed local path required):
+#     uv pip install -e ../vivarium-dashboard
 # Skip cleanly if pyproject.toml already has a [tool.uv.sources] block
 # (don't clobber user edits).
-VIVARIUM_LOCAL="${VIVARIUM_DASHBOARD_PATH:-../vivarium-dashboard}"
 VIVARIUM_GIT_URL="https://github.com/vivarium-collective/vivarium-dashboard.git"
 VIVARIUM_GIT_REF="${VIVARIUM_DASHBOARD_REF:-main}"
 if [ -f pyproject.toml ] \
    && ! grep -q '^\[tool\.uv\.sources\]' pyproject.toml \
    && grep -q '"vivarium-dashboard"' pyproject.toml; then
-  if [ -d "$VIVARIUM_LOCAL" ] && [ -f "$VIVARIUM_LOCAL/pyproject.toml" ]; then
-    printf '\n[tool.uv.sources]\nvivarium-dashboard = { path = "%s", editable = true }\n' \
-      "$VIVARIUM_LOCAL" >> pyproject.toml
-    echo "pinned vivarium-dashboard to local source: $VIVARIUM_LOCAL"
-  else
-    printf '\n[tool.uv.sources]\nvivarium-dashboard = { git = "%s", branch = "%s" }\n' \
-      "$VIVARIUM_GIT_URL" "$VIVARIUM_GIT_REF" >> pyproject.toml
-    echo "pinned vivarium-dashboard to git source: $VIVARIUM_GIT_URL@$VIVARIUM_GIT_REF (no local sibling found)"
-  fi
+  printf '\n[tool.uv.sources]\nvivarium-dashboard = { git = "%s", branch = "%s" }\n' \
+    "$VIVARIUM_GIT_URL" "$VIVARIUM_GIT_REF" >> pyproject.toml
+  echo "pinned vivarium-dashboard to git source: $VIVARIUM_GIT_URL@$VIVARIUM_GIT_REF"
 fi
 
 # Remove the init script itself once we're done
