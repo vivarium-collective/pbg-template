@@ -134,12 +134,15 @@ def main() -> None:
         _fail(f"{WS_FILE} not found — run inside a workspace")
     ws = yaml.safe_load(WS_FILE.read_text())
 
-    # Schema version guard: fail clearly for v1 workspaces.
+    # Schema version guard: fail clearly for unsupported (e.g. v1) workspaces.
+    # v2 and v3 are both accepted (v3 adds default_baseline); see
+    # .pbg/schemas/workspace.schema.json (schema_version enum).
     schema_ver = ws.get("schema_version")
-    if schema_ver != 2:
+    if schema_ver not in (2, 3):
         _fail(
             f"workspace.yaml is schema v{schema_ver}; "
-            "run `python3 scripts/_migrate_v1_to_v2.py` to migrate to v2 before linting."
+            "only schema v2 and v3 are supported. "
+            "Run `python3 scripts/_migrate_v1_to_v2.py` to migrate a v1 workspace."
         )
 
     Draft7Validator(_schema("workspace.schema.json"), format_checker=FormatChecker()).validate(ws)
