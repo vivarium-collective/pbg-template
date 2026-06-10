@@ -181,3 +181,127 @@ def test_readout_without_status_still_valid(validator):
         {"name": "r1", "store_path": "p"}
     ])
     assert list(validator.iter_errors(spec)) == []
+
+
+# ---------------------------------------------------------------------------
+# aggregate: canonical field (Task 4 — readout-resolver subproject #3)
+# ---------------------------------------------------------------------------
+
+
+def test_aggregate_sum_validates(validator):
+    """aggregate with op=sum validates."""
+    spec = _study([
+        {
+            "name": "DnaA-total",
+            "index_by": {"type": "bulk_id", "value": "PD03831[c]"},
+            "aggregate": {"op": "sum"},
+        }
+    ])
+    assert list(validator.iter_errors(spec)) == []
+
+
+def test_aggregate_with_over_list_validates(validator):
+    """aggregate.over (list of IDs) is optional but valid when present."""
+    spec = _study([
+        {
+            "name": "DnaA-total",
+            "index_by": {"type": "bulk_id", "value": "PD03831[c]"},
+            "aggregate": {
+                "op": "sum",
+                "over": ["PD03831[c]", "MONOMER0-160[c]", "MONOMER0-4565[c]"],
+            },
+        }
+    ])
+    assert list(validator.iter_errors(spec)) == []
+
+
+@pytest.mark.parametrize("good_op", ["sum", "mean", "max", "min"])
+def test_aggregate_op_enum(validator, good_op):
+    """aggregate.op must be one of sum|mean|max|min."""
+    spec = _study([
+        {
+            "name": "r",
+            "index_by": {"type": "bulk_id", "value": "X[c]"},
+            "aggregate": {"op": good_op},
+        }
+    ])
+    assert list(validator.iter_errors(spec)) == []
+
+
+def test_aggregate_bad_op_fails(validator):
+    """aggregate.op outside the enum fails."""
+    spec = _study([
+        {
+            "name": "r",
+            "index_by": {"type": "bulk_id", "value": "X[c]"},
+            "aggregate": {"op": "product"},  # not in enum
+        }
+    ])
+    errs = list(validator.iter_errors(spec))
+    assert errs, "expected failure for aggregate.op='product'"
+
+
+def test_aggregate_requires_op(validator):
+    """aggregate without op key fails."""
+    spec = _study([
+        {
+            "name": "r",
+            "index_by": {"type": "bulk_id", "value": "X[c]"},
+            "aggregate": {"over": ["X[c]"]},  # no op
+        }
+    ])
+    errs = list(validator.iter_errors(spec))
+    assert errs, "expected failure when aggregate.op is missing"
+
+
+# ---------------------------------------------------------------------------
+# Back-compat: identifier + store_path tolerated (additionalProperties:true)
+# ---------------------------------------------------------------------------
+
+
+def test_identifier_field_is_tolerated(validator):
+    """identifier: string is tolerated (deprecated but legal — additionalProperties)."""
+    spec = _study([
+        {
+            "name": "dnaA-monomer",
+            "identifier": "listeners.monomer_counts[3861]",
+            "units": "count",
+            "status": "primary",
+        }
+    ])
+    assert list(validator.iter_errors(spec)) == []
+
+
+def test_identifier_expression_is_tolerated(validator):
+    """identifier: bulk expression is tolerated."""
+    spec = _study([
+        {
+            "name": "DnaA-ATP fraction",
+            "identifier": (
+                "bulk MONOMER0-160[c] / (PD03831[c] + MONOMER0-160[c] + MONOMER0-4565[c])"
+            ),
+            "units": "fraction",
+            "status": "primary",
+        }
+    ])
+    assert list(validator.iter_errors(spec)) == []
+
+
+def test_store_path_derived_is_tolerated(validator):
+    """store_path: derived is tolerated (deprecated — resolved at runtime)."""
+    spec = _study([
+        {"name": "derived-obs", "store_path": "derived", "status": "aspirational"}
+    ])
+    assert list(validator.iter_errors(spec)) == []
+
+
+def test_notes_field_validates(validator):
+    """notes: string is valid on readout items."""
+    spec = _study([
+        {
+            "name": "oriC",
+            "identifier": "listeners.replication_data.number_of_oric",
+            "notes": "Cell-cycle integrity — periodic 1↔2, never 4.",
+        }
+    ])
+    assert list(validator.iter_errors(spec)) == []
