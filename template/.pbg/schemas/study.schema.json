@@ -190,30 +190,78 @@
       }
     },
     "tests": {
-      "type": "object",
-      "description": "Test configuration block. Usually auto-managed.",
-      "additionalProperties": true,
-      "properties": {
-        "auto_discover": {"type": "boolean"},
-        "data_source": {
-          "type": "string",
-          "description": "Where the dashboard reads test inputs from. Common values: runs_db, emitter, file, latest_run. Free-form for forward compat across dashboard versions."
-        },
-        "pytest_args": {
-          "type": "array",
-          "items": {"type": "string"}
-        },
-        "last_results": {
-          "type": ["object", "null"],
+      "description": "Either a test-configuration block (auto_discover, data_source, pytest_args — usually auto-managed) or a v4 per-test item array (the band/pass_if shape used by dnaa-style studies). Both forms keep additionalProperties:true for forward compat.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Test configuration block. Usually auto-managed.",
           "additionalProperties": true,
           "properties": {
-            "passed": {"type": "integer"},
-            "failed": {"type": "integer"},
-            "errors": {"type": "integer"},
-            "timestamp": {"type": "string"}
+            "auto_discover": {"type": "boolean"},
+            "data_source": {
+              "type": "string",
+              "description": "Where the dashboard reads test inputs from. Common values: runs_db, emitter, file, latest_run. Free-form for forward compat across dashboard versions."
+            },
+            "pytest_args": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "last_results": {
+              "type": ["object", "null"],
+              "additionalProperties": true,
+              "properties": {
+                "passed": {"type": "integer"},
+                "failed": {"type": "integer"},
+                "errors": {"type": "integer"},
+                "timestamp": {"type": "string"}
+              }
+            }
+          }
+        },
+        {
+          "type": "array",
+          "description": "v4 per-test items (the band/pass_if shape used by dnaa-style studies). Each item declares a named test with a measure, acceptance criterion, and optional citation.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {"type": "string"},
+              "classification": {
+                "type": "string",
+                "description": "Common values: primary, secondary, supporting, diagnostic. Free-form for forward compat."
+              },
+              "question": {"type": "string"},
+              "measure": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {"type": "string"},
+                  "path": {"type": "string"}
+                }
+              },
+              "pass_if": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "op": {"type": "string"},
+                  "low": {"type": "number"},
+                  "high": {"type": "number"},
+                  "threshold": {"type": "number"},
+                  "tolerance": {"type": "number"}
+                }
+              },
+              "status": {"type": "string"},
+              "result": {"type": "string"},
+              "notes": {"type": "string"},
+              "cites": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "bib_keys (in references/papers.bib) sourcing the acceptance band or criterion for this test."
+              }
+            }
           }
         }
-      }
+      ]
     },
     "references": {
       "description": "References supporting this study. May be an object (keyed sections) or an array of {file, section?} items.",
@@ -738,6 +786,11 @@
           "notes": {
             "type": "string",
             "description": "Human-readable notes about this readout (biological context, data source, etc.)."
+          },
+          "cites": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "bib_keys (in references/papers.bib) sourcing the acceptance band or observable value for this readout."
           }
         }
       }
