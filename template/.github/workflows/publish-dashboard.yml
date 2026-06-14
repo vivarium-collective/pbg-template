@@ -97,3 +97,23 @@ jobs:
             git push origin gh-pages
             echo "published read-only dashboard to gh-pages:dashboard/"
           fi
+
+      - name: Feature the live dashboard in README
+        # Keep a prominent dashboard banner in README.md (on main) pointing at
+        # the hosted site. Derives the URL from the repo, commits only on a diff
+        # (so effectively a one-time edit), and never blocks — README isn't in
+        # this workflow's trigger paths, so the commit won't re-trigger it.
+        run: |
+          set -euo pipefail
+          owner="${{ github.repository_owner }}"; repo="${{ github.event.repository.name }}"
+          python3 scripts/feature_dashboard_in_readme.py README.md \
+            "https://${owner}.github.io/${repo}/dashboard/" \
+            "https://${owner}.github.io/${repo}/"
+          if ! git diff --quiet README.md; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            git commit -m "docs: feature the live dashboard in README (automated)"
+            git push origin HEAD:main \
+              || echo "README push skipped (non-fast-forward); refreshes next run"
+          fi
