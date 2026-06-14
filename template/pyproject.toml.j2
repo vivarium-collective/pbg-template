@@ -30,5 +30,10 @@ build-backend = "hatchling.build"
 # bypass-selection skips hatchling's package-discovery step so `pip install -e .`
 # only installs the dependencies above and doesn't try to package the workspace's
 # top-level dirs (datasets/, docs/, models/, …) as Python modules.
+# Allow ecosystem git-direct-reference deps (pbg-superpowers / vivarium-dashboard
+# @ git+https://…) that workspaces commonly add — hatchling rejects them otherwise.
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
