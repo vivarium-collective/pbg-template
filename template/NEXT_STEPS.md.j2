@@ -197,6 +197,23 @@ Open just one panel for a targeted interaction:
 
 Skills in Claude Code can `open <url>` to surface a focused interaction without dropping users into the full rail.
 
+## Publishing (read-only, hosted)
+
+This workspace ships with auto-publish CI. On every merge to `main`:
+
+- **`publish-dashboard.yml`** builds the static read-only dashboard SPA and pushes it to the `gh-pages` branch at `dashboard/`.
+- **`publish-reports.yml`** renders each investigation's self-contained HTML report (headless Playwright driving the SPA) and pushes them to `gh-pages` at `investigations/<slug>.html`, plus a landing index.
+
+Both derive the repo name / links from the GitHub repo automatically — nothing to edit. They are deploy jobs, not PR gates: a failure never blocks a merge.
+
+**One-time setup:** after the first publish run creates the `gh-pages` branch, go to **Settings → Pages → Source = "Deploy from a branch" → `gh-pages` / `(root)`**. The dashboard is then served at `https://<user>.github.io/{{ workspace_name }}/dashboard/` and reports at `…/{{ workspace_name }}/investigations/<slug>.html`.
+
+Preview the published bundle locally (no server, no base-path):
+
+```bash
+scripts/publish_dashboard.sh /tmp/dash && python -m http.server -d /tmp/dash 8080
+```
+
 ## When stuck
 
 1. `python3 scripts/lint-workspace.py` — most workspace-shape issues surface here.
