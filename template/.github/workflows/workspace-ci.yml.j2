@@ -24,6 +24,12 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: false
+      # Fail fast if a local absolute path (file:///, /Users/, /home/) was
+      # committed into a tracked file — a recurring CI break when a sibling
+      # editable install leaks into pyproject.toml. Only needs the repo, so it
+      # runs right after checkout, before any venv-dependent step.
+      - name: Check for leaked local paths
+        run: bash scripts/check-no-local-paths.sh
       - name: Init external submodules (best-effort, non-recursive)
         run: |
           # Default `git submodule update` is non-recursive — omit --recursive
