@@ -1,0 +1,32 @@
+name: template-ci
+
+# CI for the pbg-template repo itself (NOT the workflows it scaffolds into new
+# workspaces — those live under template/ and are validated as scaffold here).
+# Two meaningful checks:
+#   1. the JSON schemas shipped in template/.pbg/schemas/ are valid and behave
+#      as the schema test suite expects (tests/);
+#   2. every scaffold YAML under template/ parses (workflows + workspace specs).
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validation deps
+        run: python -m pip install --upgrade pip pytest jsonschema pyyaml
+
+      - name: Validate template scaffold YAML
+        run: python .github/scripts/validate_scaffold_yaml.py
+
+      - name: Run schema test suite
+        run: python -m pytest tests/ -q
