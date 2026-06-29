@@ -1196,7 +1196,7 @@
         "default_emitter": {
           "type": "string",
           "enum": ["sqlite", "xarray"],
-          "description": "Per-study emitter override. Defaults to workspace.yaml.runtime.default_emitter (which itself defaults to sqlite). Set to xarray when the study wires a multi-generation zarr pipeline."
+          "description": "Per-study emitter override. Defaults to workspace.yaml.runtime.default_emitter; the dashboard framework default is now xarray (zarr), with sqlite as the explicit opt-out. Set to sqlite for studies that need the unstructured-state SQLite history (e.g. unique-molecule snapshots); xarray suits multi-generation zarr pipelines."
         },
         "max_generations": {
           "type": "integer",
