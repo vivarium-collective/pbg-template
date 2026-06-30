@@ -5,9 +5,11 @@ builds, and Singularity for HPC deployment.  Any change to one must be
 reflected in the other so that a workspace behaves identically regardless
 of which container runtime is used.
 
-The dashboard (vivarium-dashboard) also has a content-parity test that
-verifies the scaffold pipeline preserves both files; this test checks
-the source templates themselves.
+This test checks the source templates themselves. Scaffolding carries
+both files through automatically: ``template-init.sh`` renders every
+``.j2`` under ``template/`` with no per-file allowlist, and the dashboard
+consumes the rendered workspace at runtime without rebuilding or
+inspecting these container definitions.
 
 Conventions tested here:
   - Base image family matches exactly.
