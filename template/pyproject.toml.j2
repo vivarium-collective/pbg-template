@@ -26,14 +26,14 @@ dev = ["pytest>=7.4"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# This is a research workspace, not a distributable Python package.
-# bypass-selection skips hatchling's package-discovery step so `pip install -e .`
-# only installs the dependencies above and doesn't try to package the workspace's
-# top-level dirs (datasets/, docs/, models/, …) as Python modules.
 # Allow ecosystem git-direct-reference deps (pbg-superpowers / vivarium-dashboard
 # @ git+https://…) that workspaces commonly add — hatchling rejects them otherwise.
 [tool.hatch.metadata]
 allow-direct-references = true
 
+# Declare the workspace Python package explicitly so this workspace is
+# pip-installable (e.g. `pip install git+<repo>@<sha>`).  sms-api injects it
+# as an extra_pip_dep so the container runner can import the workspace's
+# processes from a committed + pushed git ref.
 [tool.hatch.build.targets.wheel]
-bypass-selection = true
+packages = ["{{ package_path }}"]
