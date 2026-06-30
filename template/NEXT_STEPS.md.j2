@@ -207,6 +207,36 @@ Open just one panel for a targeted interaction:
 
 Skills in Claude Code can `open <url>` to surface a focused interaction without dropping users into the full rail.
 
+## Run on sms-api (remote HPC)
+
+Use this path to run a composite on a remote sms-api instance (e.g. AWS
+GovCloud via `vivarium-dashboard`).  Because the container runner installs
+the workspace from git, **all processes must live in the committed
+`{{ package_path }}` package and the HEAD must be pushed.**
+
+1. Commit everything and push the branch:
+   ```bash
+   git add -A && git commit -m "chore: ready for remote run"
+   git push origin HEAD
+   ```
+2. Launch from the dashboard CLI:
+   ```bash
+   vivarium-dashboard run-remote <composite-id>
+   ```
+   This will:
+   - Verify the working tree is clean and HEAD is on the remote.
+   - Export the composite to a portable `.pbg` file (full import-path
+     addresses: `local:!{{ package_path }}.<Module>.<ClassName>`).
+   - Submit to sms-api with `extra_pip_deps=["git+<origin>@<sha>"]` so
+     the Singularity container installs `{{ package_path }}` from the
+     exact committed revision.
+   - Poll until the job completes, then download `results.zip` containing
+     `final_state.json` and any emitter output.
+
+> **Tip:** The dashboard `SmsApiClient` reads the sms-api URL and credentials
+> from the workspace's `workspace.yaml` (or the `SMS_API_URL` env var).
+> Point `vivarium-dashboard serve` at a live sms-api endpoint before running.
+
 ## Publishing (read-only, hosted)
 
 This workspace ships with auto-publish CI. On every merge to `main`:
