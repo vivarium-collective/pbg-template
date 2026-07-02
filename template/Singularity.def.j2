@@ -47,7 +47,7 @@ From: python:3.13-slim-bookworm
 
 %runscript
     cd /app
-    exec uv run vivarium-dashboard serve --workspace /app --host 0.0.0.0 --port 9863
+    exec uv run vivarium-workbench serve --workspace /app --host 0.0.0.0 --port 9863
 
 %labels
     org.vivarium.workspace {{ workspace_name }}

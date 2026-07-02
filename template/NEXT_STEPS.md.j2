@@ -18,15 +18,15 @@ bash scripts/serve.sh   # opens browser at http://localhost:<port>
 - [ ] Lint: `python3 scripts/lint-workspace.py` should print `workspace lint: OK`
 - [ ] Commit + (eventually) push: `git init && git add -A && git commit -m "feat: workspace bootstrap"`
 
-> **If `uv pip install` fails with "vivarium-dashboard was not found in
-> the package registry":** vivarium-dashboard isn't on PyPI yet. The
+> **If `uv pip install` fails with "vivarium-workbench was not found in
+> the package registry":** vivarium-workbench isn't on PyPI yet. The
 > template's init script ALWAYS pins it to its public git source in
 > `pyproject.toml` (never a committed local path — that would break CI,
 > Docker, and collaborators who lack the sibling checkout):
 >
 > ```toml
 > [tool.uv.sources]
-> vivarium-dashboard = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git", branch = "main" }
+> vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git", branch = "main" }
 > ```
 >
 > If that block is missing, add it and re-run `uv pip install -e ".[dev]"`.
@@ -34,7 +34,7 @@ bash scripts/serve.sh   # opens browser at http://localhost:<port>
 > into your venv (no committed local path required):
 >
 > ```bash
-> uv pip install -e ../vivarium-dashboard
+> uv pip install -e ../vivarium-workbench
 > ```
 
 ## The dashboard tabs
@@ -210,7 +210,7 @@ Skills in Claude Code can `open <url>` to surface a focused interaction without 
 ## Run on sms-api (remote HPC)
 
 Use this path to run a composite on a remote sms-api instance (e.g. AWS
-GovCloud via `vivarium-dashboard`).  Because the container runner installs
+GovCloud via `vivarium-workbench`).  Because the container runner installs
 the workspace from git, **all processes must live in the committed
 `{{ package_path }}` package and the HEAD must be pushed.**
 
@@ -221,7 +221,7 @@ the workspace from git, **all processes must live in the committed
    ```
 2. Launch from the dashboard CLI:
    ```bash
-   vivarium-dashboard run-remote <composite-id>
+   vivarium-workbench run-remote <composite-id>
    ```
    This will:
    - Verify the working tree is clean and HEAD is on the remote.
@@ -235,7 +235,7 @@ the workspace from git, **all processes must live in the committed
 
 > **Tip:** The dashboard `SmsApiClient` reads the sms-api URL and credentials
 > from the workspace's `workspace.yaml` (or the `SMS_API_URL` env var).
-> Point `vivarium-dashboard serve` at a live sms-api endpoint before running.
+> Point `vivarium-workbench serve` at a live sms-api endpoint before running.
 
 ## Publishing (read-only, hosted)
 

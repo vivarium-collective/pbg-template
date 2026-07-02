@@ -46,17 +46,17 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12.9
 
-      - name: Install dependencies (incl. vivarium-dashboard)
+      - name: Install dependencies (incl. vivarium-workbench)
         run: uv sync --extra dev || uv sync
 
       - name: Ensure the publish CLI is present (latest dashboard main)
-        # uv.lock may pin a vivarium-dashboard commit predating the publish CLI;
-        # force current main so `vivarium-dashboard-publish` exists.
-        run: uv pip install --reinstall-package vivarium-dashboard "vivarium-dashboard @ git+https://github.com/vivarium-collective/vivarium-dashboard.git@main"
+        # uv.lock may pin a vivarium-workbench commit predating the publish CLI;
+        # force current main so `vivarium-workbench-publish` exists.
+        run: uv pip install --reinstall-package vivarium-workbench "vivarium-workbench @ git+https://github.com/vivarium-collective/vivarium-dashboard.git@main"
 
       - name: Build dashboard snapshot
         # Run inside the activated venv, NOT `uv run` — `uv run` re-syncs to
-        # uv.lock first, which would undo the ad-hoc vivarium-dashboard@main
+        # uv.lock first, which would undo the ad-hoc vivarium-workbench@main
         # install above and drop the publish console script (-> exit 127).
         # base-path / interactive-url are derived from the GitHub repo.
         run: |
