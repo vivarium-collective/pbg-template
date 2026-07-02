@@ -19,3 +19,4 @@ __pycache__/
 reports/assets/cache/
 # Transient brainstorm session artifacts (server PIDs, logs, rendered HTML).
 .superpowers/brainstorm/
+todo.md
