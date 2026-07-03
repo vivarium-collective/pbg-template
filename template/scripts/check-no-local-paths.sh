@@ -43,7 +43,7 @@ if [ "$found" -ne 0 ]; then
   echo "ERROR: a local absolute path leaked into a tracked file (see above)."
   echo "       Use a git source / tool.uv.sources, never a committed local path."
   echo "       Replace local 'path = \"/Users/...\"' deps with a git source, e.g.:"
-  echo "         vivarium-workbench = { git = \"https://github.com/vivarium-collective/vivarium-dashboard.git\", branch = \"main\" }"
+  echo "         vivarium-workbench = { git = \"https://github.com/vivarium-collective/vivarium-workbench.git\", branch = \"main\" }"
   echo "       For local development use an editable install in your venv instead:"
   echo "         uv pip install -e ../vivarium-workbench"
   exit 1

@@ -28,7 +28,7 @@ Use this template directly. No plugin, no Claude Code required.
        bash scripts/serve.sh                 # or: vivarium-workbench serve --workspace .
 
    Open the URL it prints. See the generated `NEXT_STEPS.md` for a guided tour,
-   and the [vivarium-workbench](https://github.com/vivarium-collective/vivarium-dashboard)
+   and the [vivarium-workbench](https://github.com/vivarium-collective/vivarium-workbench)
    README for the dashboard's own feature walkthrough.
 
 ### Path B — AI-augmented (via the pbg-superpowers Claude Code plugin)
@@ -127,7 +127,7 @@ plugin's current version; standalone users get whatever was last synced here.
 ## Companion repos
 
 - **[pbg-superpowers](https://github.com/vivarium-collective/pbg-superpowers)** — the Claude Code plugin that wraps this template with scaffolding + Studies + Visualizations skills. Use it for the AI-assisted authoring flow.
-- **[vivarium-workbench](https://github.com/vivarium-collective/vivarium-dashboard)** — the local web UI for browsing composites, running studies, and rendering visualizations against a scaffolded workspace.
+- **[vivarium-workbench](https://github.com/vivarium-collective/vivarium-workbench)** — the local web UI for browsing composites, running studies, and rendering visualizations against a scaffolded workspace.
 
 ## License
 
