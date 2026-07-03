@@ -158,7 +158,7 @@ fi
 #     uv pip install -e ../vivarium-workbench
 # Skip cleanly if pyproject.toml already has a [tool.uv.sources] block
 # (don't clobber user edits).
-VIVARIUM_GIT_URL="https://github.com/vivarium-collective/vivarium-dashboard.git"
+VIVARIUM_GIT_URL="https://github.com/vivarium-collective/vivarium-workbench.git"
 VIVARIUM_GIT_REF="${VIVARIUM_WORKBENCH_REF:-main}"
 if [ -f pyproject.toml ] \
    && ! grep -q '^\[tool\.uv\.sources\]' pyproject.toml \
