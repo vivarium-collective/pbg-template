@@ -2,7 +2,7 @@
 # Guard against local laptop paths leaking into committed config.
 #
 # A recurring failure mode in pbg workspaces: a local editable install such as
-#   vivarium-dashboard = { path = "/Users/<you>/code/vivarium-dashboard", ... }
+#   vivarium-workbench = { path = "/Users/<you>/code/vivarium-workbench", ... }
 # gets committed to pyproject.toml. uv then synthesizes a `file:///Users/...`
 # URL that exists only on the author's laptop, so CI (and any fresh clone)
 # fails with "Distribution not found at: file:///Users/...".
@@ -43,9 +43,9 @@ if [ "$found" -ne 0 ]; then
   echo "ERROR: a local absolute path leaked into a tracked file (see above)."
   echo "       Use a git source / tool.uv.sources, never a committed local path."
   echo "       Replace local 'path = \"/Users/...\"' deps with a git source, e.g.:"
-  echo "         vivarium-dashboard = { git = \"https://github.com/vivarium-collective/vivarium-dashboard.git\", branch = \"main\" }"
+  echo "         vivarium-workbench = { git = \"https://github.com/vivarium-collective/vivarium-dashboard.git\", branch = \"main\" }"
   echo "       For local development use an editable install in your venv instead:"
-  echo "         uv pip install -e ../vivarium-dashboard"
+  echo "         uv pip install -e ../vivarium-workbench"
   exit 1
 fi
 

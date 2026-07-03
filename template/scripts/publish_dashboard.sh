@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the read-only dashboard snapshot — a self-contained static SPA bundle
 # (every investigation + study + assets) that anyone can browse with no server.
-# Built by `vivarium-dashboard-publish`; the same build is used locally (to
+# Built by `vivarium-workbench-publish`; the same build is used locally (to
 # preview) and by .github/workflows/publish-dashboard.yml (to publish to
 # gh-pages:dashboard/).
 #
@@ -20,7 +20,7 @@
 #   scripts/publish_dashboard.sh /tmp/dash
 #   python -m http.server -d /tmp/dash 8080   # -> http://localhost:8080/
 #
-# Needs `vivarium-dashboard-publish` on PATH (run via the workspace .venv, or
+# Needs `vivarium-workbench-publish` on PATH (run via the workspace .venv, or
 # `uv run`).
 set -euo pipefail
 
@@ -37,7 +37,7 @@ args=(--workspace "$WS_ROOT" --out "$OUT")
 
 # The workspace's own package must be importable for build_core() registration.
 PYTHONPATH="$WS_ROOT${PYTHONPATH:+:$PYTHONPATH}" \
-  vivarium-dashboard-publish "${args[@]}"
+  vivarium-workbench-publish "${args[@]}"
 
 # Strip bigraph-loom source maps (~half the bundle) — a read-only viewer never
 # needs them — and disable Jekyll so files starting with _ are served.

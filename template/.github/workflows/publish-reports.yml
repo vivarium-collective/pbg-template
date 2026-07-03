@@ -2,7 +2,7 @@ name: Publish investigation reports
 
 # Regenerate every investigation's self-contained HTML report and publish it to
 # the gh-pages branch at investigations/<slug>.html. The report is built by the
-# vivarium-dashboard SPA CLIENT-SIDE, so we serve the dashboard headlessly and
+# vivarium-workbench SPA CLIENT-SIDE, so we serve the dashboard headlessly and
 # drive its "Generate report" button via Playwright
 # (scripts/publish_investigation_reports.py).
 #
@@ -44,7 +44,7 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12.9
 
-      - name: Install dependencies (incl. vivarium-dashboard)
+      - name: Install dependencies (incl. vivarium-workbench)
         run: uv sync --extra dev || uv sync
 
       - name: Install Playwright + Chromium
