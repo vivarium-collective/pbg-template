@@ -71,6 +71,22 @@ jobs:
           else
             echo "No scripts/lint-workspace.py found — skipping workspace lint."
           fi
+      - name: Check README generated tables are fresh
+        run: |
+          source .venv/bin/activate
+          # README's <!-- BEGIN:composites/investigations --> tables are generated
+          # from the workspace by `vivarium-workbench gen-readme` (the same sets
+          # the dashboard shows). Fail if a composite/investigation change left
+          # them stale. Regenerate with: vivarium-workbench gen-readme --workspace .
+          #
+          # Guard on availability so a workspace pinned to an older
+          # vivarium-workbench (before gen-readme) doesn't false-fail; the
+          # template pins vivarium-workbench @ git main, which has the command.
+          if vivarium-workbench gen-readme --help >/dev/null 2>&1; then
+            vivarium-workbench gen-readme --workspace . --check
+          else
+            echo "vivarium-workbench gen-readme unavailable (older pin) — skipping README freshness check."
+          fi
       - name: Run workspace tests
         if: hashFiles('tests/**/*.py') != ''
         run: |
