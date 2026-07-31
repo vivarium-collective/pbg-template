@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Renders .j2 files in the current directory using simple sed substitution.
-# For users who clicked "Use this template" on github.com/vivarium-collective/pbg-template
-# without installing the pbg-superpowers plugin.
+# For users who clicked "Use this template" on github.com/vivarium-collective/viva-template
+# without installing the viva-superpowers plugin.
 set -euo pipefail
 
 if ! command -v uv &> /dev/null; then
@@ -52,7 +52,7 @@ EOF
 `process_bigraph.allocate_core()` auto-discovers processes/types from *installed
 distributions* that depend on bigraph-schema (it scans
 ``importlib.metadata.packages_distributions()``). That works for sibling
-``pbg-*`` wrapper packages installed as regular wheels, but it does NOT see this
+``viva-*`` wrapper packages installed as regular wheels, but it does NOT see this
 workspace's own package when it is installed *editable* (``pip install -e .`` —
 the way CI and local dev install it): an editable install records only a
 ``.pth`` shim in its ``RECORD``, so ``packages_distributions()`` never maps this

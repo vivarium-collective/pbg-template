@@ -1,7 +1,7 @@
 name: workspace-ci
 on: [push, pull_request]
 
-# CI for a workspace scaffolded from pbg-template.
+# CI for a workspace scaffolded from viva-template.
 #
 # Sequence:
 #   1. Check out the workspace (no submodules — workspace tests don't need them,
@@ -13,7 +13,7 @@ on: [push, pull_request]
 #   4. Lint workspace.yaml against the JSON schema.
 #   5. Run pytest at the workspace root (if any test files exist).
 #
-# This file ships in pbg-template as `.j2` so GitHub does NOT run it on the
+# This file ships in viva-template as `.j2` so GitHub does NOT run it on the
 # template repo itself (which has no real pyproject.toml). template-init.sh
 # renders it to `.yml` when a user scaffolds a workspace.
 

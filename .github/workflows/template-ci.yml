@@ -1,6 +1,6 @@
 name: template-ci
 
-# CI for the pbg-template repo itself (NOT the workflows it scaffolds into new
+# CI for the viva-template repo itself (NOT the workflows it scaffolds into new
 # workspaces — those live under template/ and are validated as scaffold here).
 # Two meaningful checks:
 #   1. the JSON schemas shipped in template/.pbg/schemas/ are valid and behave

@@ -3,17 +3,17 @@
 Guidance for AI coding assistants (and humans following the same flow)
 working in this workspace. Read this before opening a PR.
 
-Workspaces built from [pbg-template] inherit this file as the seed; extend
+Workspaces built from [viva-template] inherit this file as the seed; extend
 it as the workspace grows (see v2ecoli's AGENTS.md for a fully-fleshed
 example covering process-bigraph composition, biological domain rules,
 etc.). The conventions below are **framework-wide** — they apply to every
-pbg-superpowers workspace.
+viva-superpowers workspace.
 
-[pbg-template]: https://github.com/vivarium-collective/pbg-template
+[viva-template]: https://github.com/vivarium-collective/viva-template
 
 ## What this workspace is
 
-`{{ workspace_name }}` is a pbg-superpowers workspace. The Python package
+`{{ workspace_name }}` is a viva-superpowers workspace. The Python package
 lives under `{{ package_path }}/`; investigations live under
 `workspace/investigations/<slug>/`; per-study YAML + runs live under
 `workspace/studies/<slug>/`. See [`README.md`](README.md) and
@@ -22,7 +22,7 @@ flow.
 
 ## PR conventions
 
-Two distinct PR types live in any pbg-superpowers workspace, and they
+Two distinct PR types live in any viva-superpowers workspace, and they
 look different on GitHub:
 
 ### Feature / fix PRs (merge candidates)
@@ -78,7 +78,7 @@ infrastructure rather than carrying it.
 When an investigation is done (research question answered, narrative
 written, report rendered), run:
 
-    /pbg-investigation close <slug>
+    /viva-investigation close <slug>
 
 This stamps the investigation YAML with `status: closed`, populates
 `contributors[]` (derived from `git log` + agent sessions), copies the
@@ -86,4 +86,4 @@ rendered HTML report into `workspace/investigations/<slug>/report.html` (git-
 tracked artifact), commits on the branch, and opens a PR. **Never auto-
 merges.** Reviewer clicks merge in the GitHub UI.
 
-See `/pbg-investigation close --help` for details.
+See `/viva-investigation close --help` for details.
