@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Validate the scaffold YAML that pbg-template renders into new workspaces.
+"""Validate the scaffold YAML that viva-template renders into new workspaces.
 
-pbg-template ships its real content under ``template/`` as scaffold files that
+viva-template ships its real content under ``template/`` as scaffold files that
 ``template-init.sh`` renders into a fresh workspace. Several of those are YAML
 (GitHub workflows, ``workspace.yaml``, ``decisions.yaml``, ``claims.yaml``, …),
 some as Jinja-ish ``*.yml.j2`` / ``*.yaml.j2`` templates. A malformed scaffold

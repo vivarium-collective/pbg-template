@@ -10,7 +10,7 @@ Add a dataset with:
 
     bash scripts/add-dataset.sh
 
-…or with the `pbg-superpowers` plugin's `/pbg-data <model>` skill.
+…or with the `viva-superpowers` plugin's `/viva-data <model>` skill.
 
 Storage rules:
 

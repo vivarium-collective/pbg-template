@@ -1,4 +1,4 @@
-# pbg-template
+# viva-template
 
 Workspace scaffold for **Process-Bigraph** multiscale modeling. Each scaffolded
 workspace is a self-contained research repo: a Python package, study specs,
@@ -13,8 +13,8 @@ Two paths, depending on whether you want AI assistance.
 
 Use this template directly. No plugin, no Claude Code required.
 
-1. Click **Use this template** on github.com/vivarium-collective/pbg-template
-   (or `git clone https://github.com/vivarium-collective/pbg-template my-workspace`).
+1. Click **Use this template** on github.com/vivarium-collective/viva-template
+   (or `git clone https://github.com/vivarium-collective/viva-template my-workspace`).
 2. Initialize and install:
 
        cd my-workspace
@@ -31,14 +31,14 @@ Use this template directly. No plugin, no Claude Code required.
    and the [vivarium-workbench](https://github.com/vivarium-collective/vivarium-workbench)
    README for the dashboard's own feature walkthrough.
 
-### Path B — AI-augmented (via the pbg-superpowers Claude Code plugin)
+### Path B — AI-augmented (via the viva-superpowers Claude Code plugin)
 
 Want AI-assisted authoring? Install the
-[pbg-superpowers](https://github.com/vivarium-collective/pbg-superpowers)
-Claude Code plugin; running `/pbg-workspace my-project` from inside Claude
+[viva-superpowers](https://github.com/vivarium-collective/viva-superpowers)
+Claude Code plugin; running `/viva-workspace my-project` from inside Claude
 Code clones this template and bootstraps a workspace with conversational
 study, composite, and visualization authoring on top. See the
-[pbg-superpowers Getting Started](https://github.com/vivarium-collective/pbg-superpowers#getting-started)
+[viva-superpowers Getting Started](https://github.com/vivarium-collective/viva-superpowers#getting-started)
 for the full walkthrough.
 
 ### What to expect
@@ -108,7 +108,7 @@ can flatten the layout, move directories elsewhere, or relocate `scripts`,
 at all uses the classic flat layout, which is why every pre-existing workspace
 keeps working untouched.
 
-The dashboard, the `/pbg-*` skills, and `lint-workspace.py` all honor this map
+The dashboard, the `/viva-*` skills, and `lint-workspace.py` all honor this map
 (via the shared `WorkspacePaths` resolver), so you can relocate any directory —
 including `scripts`, `tests`, `docs`, and the `package` — without touching code.
 
@@ -121,12 +121,12 @@ into every scaffolded workspace:
 - `study.schema.json` — the 8-section canonical Study structure (Design → Build → Simulate → Evaluate → Decide), including follow-up proposals for Decide-phase loops.
 - `investigation.schema.json` — Investigations as collections of studies with a DAG via `pipeline_gate.prerequisites`.
 
-Schemas are pinned at scaffold time. `/pbg-workspace` overwrites them with the
+Schemas are pinned at scaffold time. `/viva-workspace` overwrites them with the
 plugin's current version; standalone users get whatever was last synced here.
 
 ## Companion repos
 
-- **[pbg-superpowers](https://github.com/vivarium-collective/pbg-superpowers)** — the Claude Code plugin that wraps this template with scaffolding + Studies + Visualizations skills. Use it for the AI-assisted authoring flow.
+- **[viva-superpowers](https://github.com/vivarium-collective/viva-superpowers)** — the Claude Code plugin that wraps this template with scaffolding + Studies + Visualizations skills. Use it for the AI-assisted authoring flow.
 - **[vivarium-workbench](https://github.com/vivarium-collective/vivarium-workbench)** — the local web UI for browsing composites, running studies, and rendering visualizations against a scaffolded workspace.
 
 ## License

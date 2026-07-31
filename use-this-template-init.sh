@@ -2,22 +2,22 @@
 # GitHub "Use this template" entry point.
 #
 # Users who created their repo via the GitHub UI receive a copy of the
-# entire pbg-template tree — including pbg-template's own tests/, docs/,
+# entire viva-template tree — including viva-template's own tests/, docs/,
 # and superpowers cruft. This script collapses template/* to repo root,
-# removes pbg-template's dev infra, then runs the normal render via
+# removes viva-template's dev infra, then runs the normal render via
 # template-init.sh.
 #
-# Users coming through the pbg-superpowers /pbg-workspace command never
+# Users coming through the viva-superpowers /viva-workspace command never
 # touch this script — the plugin scaffolder copies template/* directly.
 set -euo pipefail
 
 if [[ ! -d template ]]; then
   echo "ERROR: template/ directory missing. This script must run in a fresh" >&2
-  echo "       copy of pbg-template created via GitHub's 'Use this template'." >&2
+  echo "       copy of viva-template created via GitHub's 'Use this template'." >&2
   exit 1
 fi
 
-# Remove pbg-template's own dev infra. We are not pbg-template; we are a
+# Remove viva-template's own dev infra. We are not viva-template; we are a
 # new workspace created from it.
 rm -rf docs/superpowers .superpowers tests README.md
 
