@@ -1,11 +1,13 @@
 # {{ workspace_name }}
 
-<!-- BEGIN dashboard -->
-> ## 📊 Live dashboard
-> A read-only dashboard + investigation reports auto-publish to GitHub Pages on
-> every merge to `main` — the live link appears here after the first publish
-> (enable once: Settings → Pages → Source = `gh-pages`).
-<!-- END dashboard -->
+<!-- BEGIN:dashboard -->
+<!-- `vivarium-workbench gen-readme` fills this with a prominent link to the
+     live read-only dashboard (URL derived from the git remote). Before the repo
+     is pushed it shows a local-serve note; after the publish-dashboard workflow
+     runs (enable once: Settings → Pages → Source = `gh-pages`) it links the live
+     GitHub Pages dashboard. Run `vivarium-workbench gen-readme --workspace .`
+     (and `--check` in CI) to keep it fresh. -->
+<!-- END:dashboard -->
 
 A Process-Bigraph research workspace scaffolded from
 [viva-template](https://github.com/vivarium-collective/viva-template).
