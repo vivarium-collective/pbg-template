@@ -56,6 +56,24 @@ bash scripts/serve.sh   # opens browser at http://localhost:<port>
 backwards compatibility — the rail label was renamed but the URL fragment
 wasn't. Use the table above when bookmarking focused panels.)
 
+> **Composite vs. process — a modeling convention.** A composite *composes* — it
+> wires two or more processes together (or adds emitters / structure). A "composite"
+> that wraps a **single process** with a hardcoded config is really a *config preset
+> of one process*, not a composition. For a family of configs of the same process
+> (e.g. the same engine at different parameters), register **ONE** parameterized
+> composite and pass params from each study:
+>
+> ```python
+> @composite_generator(name="recruitment",
+>     parameters={"cue_rate": {...}, "chemo_lambda": {...}})
+> def recruitment(core=None, cue_rate=10, chemo_lambda=14):
+>     return composite_document(cue_rate, chemo_lambda)
+> # studies pass params -> one composite, not one-per-config
+> ```
+>
+> `scripts/lint-workspace.py` warns on single-process composites that carry no
+> parameters, so this stays visible as the workspace grows.
+
 ## 1 — Workspace inputs (any time)
 
 Inputs aren't a sequential stage — load them whenever they're useful.
