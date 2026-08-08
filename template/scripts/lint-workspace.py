@@ -475,6 +475,37 @@ def main() -> None:
                             f"dashboard's subprocess runner. (v2ecoli friction #2)"
                         )
 
+    # Composite hygiene: a "composite" that wraps a SINGLE process with no extra
+    # wiring and no parameters is really a config preset of one process, not a
+    # composition. Parameterize a config family into ONE @composite_generator
+    # (parameters=...), or reference the process + config from the study.
+    composite_warnings: list[str] = []
+    _cpkg = ws.get("package_path") or ("pbg_" + ws.get("name", "").replace("-", "_"))
+    try:
+        import importlib as _il
+        _il.import_module(_cpkg)  # fire @composite_generator decorators
+        from process_bigraph.composite_generator import (
+            _REGISTRY as _CG, build_generator as _bg)
+        for _gid, _entry in list(_CG.items()):
+            if not _gid.startswith(_cpkg + ".") or getattr(_entry, "parameters", None):
+                continue  # foreign, or a parameterized family (the correct pattern)
+            try:
+                _doc = _bg(_entry)
+            except Exception:
+                continue
+            _procs = [k for k, v in _doc.items()
+                      if isinstance(v, dict) and v.get("_type") == "process"
+                      and "emitter" not in str(v.get("address", "")).lower()]
+            if len(_procs) == 1:
+                composite_warnings.append(
+                    f"  WARN composite {_gid}: wraps a single process ({_procs[0]}) "
+                    f"with no parameters — a config preset, not a composition. "
+                    f"Parameterize a config family into ONE "
+                    f"@composite_generator(parameters=...), or reference the process "
+                    f"+ config from the study.")
+    except Exception:
+        pass  # process-bigraph too old / no generators — skip silently
+
     # Print summary
     ws_name = ws.get("name", "?")
     ws_pkg = ws.get("package_path", "")
@@ -526,6 +557,8 @@ def main() -> None:
     for w in study_warnings:
         print(w, file=sys.stderr)
     for w in any_type_warnings:
+        print(w, file=sys.stderr)
+    for w in composite_warnings:
         print(w, file=sys.stderr)
 
 
