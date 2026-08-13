@@ -1,0 +1,46 @@
+name: workflow-drift-report
+
+# Org-wide view of which workspaces are running STALE generated CI workflows.
+#
+# Every workspace scaffolded from viva-template stamps its GitHub Actions
+# workflows with the hash of the source template (see
+# template/scripts/check-workflow-freshness.py). This job scans the org, reads
+# each repo's stamped workflows, and reports which no longer match
+# viva-template's CURRENT templates — the ones that should be regenerated.
+#
+# It never fails the run by default (it is a report); pass fail-on-drift via the
+# manual dispatch input to make it hard-fail instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      org:
+        description: "GitHub org to scan"
+        default: "vivarium-collective"
+        required: false
+      fail_on_drift:
+        description: "Fail the run if any workspace is stale"
+        type: boolean
+        default: false
+  schedule:
+    # Mondays 07:00 UTC — a weekly nudge, cheap and non-blocking.
+    - cron: "0 7 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Scan org for stale generated workflows
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/report-workflow-drift.py \
+            --org "${{ github.event.inputs.org || 'vivarium-collective' }}" \
+            ${{ github.event.inputs.fail_on_drift == 'true' && '--fail-on-drift' || '' }}
