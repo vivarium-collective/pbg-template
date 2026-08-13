@@ -1,3 +1,16 @@
+# >>> viva-template-provenance >>>
+# This GitHub Actions workflow is GENERATED from viva-template. Do not edit
+# it by hand: your changes are lost the next time it is regenerated, and a
+# hand-edit is invisible to the drift guard.
+#
+# If viva-template's copy of this workflow changes, this file becomes STALE
+# and workspace CI flags it (scripts/check-workflow-freshness.py). Refresh by
+# re-scaffolding, or by copying the current source from
+#   vivarium-collective/viva-template/template/.github/workflows/<template>
+# template: build-and-push.yml
+# sha256: 6a54b82d60c95c8bc35f9e56c5578bda095c28aaf62f47aa051581c14227d82d
+# <<< viva-template-provenance <<<
+
 name: Build and Push Workspace Image
 
 on:

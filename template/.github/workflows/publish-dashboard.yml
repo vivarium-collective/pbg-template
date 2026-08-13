@@ -1,3 +1,16 @@
+# >>> viva-template-provenance >>>
+# This GitHub Actions workflow is GENERATED from viva-template. Do not edit
+# it by hand: your changes are lost the next time it is regenerated, and a
+# hand-edit is invisible to the drift guard.
+#
+# If viva-template's copy of this workflow changes, this file becomes STALE
+# and workspace CI flags it (scripts/check-workflow-freshness.py). Refresh by
+# re-scaffolding, or by copying the current source from
+#   vivarium-collective/viva-template/template/.github/workflows/<template>
+# template: publish-dashboard.yml
+# sha256: bd55b0ac31ec6ebc395d2f54a384f36b8fc46fe5d74c0b932cd3823c60b965d7
+# <<< viva-template-provenance <<<
+
 name: Publish read-only dashboard
 
 # Build the workspace into a self-contained static SPA snapshot and publish it

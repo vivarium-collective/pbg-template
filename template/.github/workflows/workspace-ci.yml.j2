@@ -1,3 +1,16 @@
+# >>> viva-template-provenance >>>
+# This GitHub Actions workflow is GENERATED from viva-template. Do not edit
+# it by hand: your changes are lost the next time it is regenerated, and a
+# hand-edit is invisible to the drift guard.
+#
+# If viva-template's copy of this workflow changes, this file becomes STALE
+# and workspace CI flags it (scripts/check-workflow-freshness.py). Refresh by
+# re-scaffolding, or by copying the current source from
+#   vivarium-collective/viva-template/template/.github/workflows/<template>
+# template: workspace-ci.yml.j2
+# sha256: da0588070a47890052489e60c2ee1193d81d0489cc657eeb2f24cd41e6a424ea
+# <<< viva-template-provenance <<<
+
 name: workspace-ci
 on: [push, pull_request]
 
@@ -86,6 +99,22 @@ jobs:
             vivarium-workbench gen-readme --workspace . --check
           else
             echo "vivarium-workbench gen-readme unavailable (older pin) — skipping README freshness check."
+          fi
+      - name: Check generated workflows are fresh vs viva-template
+        run: |
+          # Every workflow scaffolded from viva-template carries a provenance
+          # stamp in its header (# >>> viva-template-provenance >>>). This step
+          # fails if viva-template's copy of a workflow has since changed and
+          # this generated copy is now STALE — the recurring "stale generated CI
+          # workflow" rot. Regenerate by re-scaffolding from viva-template, or by
+          # copying the current source from
+          #   vivarium-collective/viva-template/template/.github/workflows/
+          # The checker is stdlib-only; an unreachable upstream (network flake or
+          # an older pin) is treated as non-fatal — only real drift fails here.
+          if [ -f scripts/check-workflow-freshness.py ]; then
+            python scripts/check-workflow-freshness.py --check
+          else
+            echo "scripts/check-workflow-freshness.py not present — skipping workflow drift check."
           fi
       - name: Run workspace tests
         if: hashFiles('tests/**/*.py') != ''
