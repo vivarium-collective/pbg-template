@@ -46,7 +46,7 @@ def migrate_v1_to_v2(original: dict) -> dict:
 
     # Set package_path from first model slug.
     if first_model_name:
-        ws["package_path"] = f"pbg_{_safe_slug(first_model_name)}"
+        ws["package_path"] = f"viva_{_safe_slug(first_model_name)}"
 
     # Lift pbg_processes.
     ws["pbg_processes"] = first_model.get("pbg_processes", []) or []

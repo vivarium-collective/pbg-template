@@ -20,8 +20,9 @@ fi
 
 TODAY="$(date -u +%Y-%m-%d)"
 PLUGIN_VERSION="0.4.16"
-# Python package name for the workspace: hyphens become underscores
-PACKAGE_PATH="pbg_${WS_NAME//-/_}"
+# Python package name for the workspace: hyphens become underscores.
+# viva- workspaces use the viva_ package prefix (matches the repo/ecosystem name).
+PACKAGE_PATH="viva_${WS_NAME//-/_}"
 
 # Render every .j2 file in the workspace root (skip scripts/ — those are
 # runtime Jinja2 templates for the dashboard renderer, not init-time files)

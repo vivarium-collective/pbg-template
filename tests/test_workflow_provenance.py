@@ -67,7 +67,7 @@ def _scaffold_workspace_workflows(dest: Path) -> Path:
     provenance stamp carries no placeholders, so it survives rendering."""
     wf_dir = dest / ".github" / "workflows"
     wf_dir.mkdir(parents=True)
-    subs = {"workspace_name": "demo-ws", "package_path": "pbg_demo_ws",
+    subs = {"workspace_name": "demo-ws", "package_path": "viva_demo_ws",
             "today": "2026-01-01", "plugin_version": "0.0.0",
             "generated_at": "2026-01-01"}
     for src in TEMPLATE_WORKFLOWS.iterdir():
