@@ -8,7 +8,7 @@
 # re-scaffolding, or by copying the current source from
 #   vivarium-collective/viva-template/template/.github/workflows/<template>
 # template: workspace-ci.yml.j2
-# sha256: da0588070a47890052489e60c2ee1193d81d0489cc657eeb2f24cd41e6a424ea
+# sha256: a1176cb3abe72e32ec48ef76d4b86711c19d315b5992fd3602c30040fe4b3c89
 # <<< viva-template-provenance <<<
 
 name: workspace-ci
@@ -84,19 +84,26 @@ jobs:
           else
             echo "No scripts/lint-workspace.py found — skipping workspace lint."
           fi
-      - name: Check README generated tables are fresh
+      - name: Check README generated tables are fresh (non-blocking)
         run: |
           source .venv/bin/activate
           # README's <!-- BEGIN:composites/investigations --> tables are generated
           # from the workspace by `vivarium-workbench gen-readme` (the same sets
-          # the dashboard shows). Fail if a composite/investigation change left
-          # them stale. Regenerate with: vivarium-workbench gen-readme --workspace .
+          # the dashboard shows). Adding/editing composites or investigations
+          # without re-running it leaves the tables stale.
+          #
+          # This is COSMETIC drift (the README mirrors content that also lives in
+          # the dashboard), so it is a NON-BLOCKING warning — it must not gate
+          # merges. Correctness (workspace lint + tests) still fails the build.
+          # This prevents the recurring "CI red on every content edit" churn.
+          # Refresh anytime with: vivarium-workbench gen-readme --workspace .
           #
           # Guard on availability so a workspace pinned to an older
-          # vivarium-workbench (before gen-readme) doesn't false-fail; the
-          # template pins vivarium-workbench @ git main, which has the command.
+          # vivarium-workbench (before gen-readme) doesn't warn spuriously.
           if vivarium-workbench gen-readme --help >/dev/null 2>&1; then
-            vivarium-workbench gen-readme --workspace . --check
+            if ! vivarium-workbench gen-readme --workspace . --check; then
+              echo "::warning title=Stale README tables::README generated tables are out of date. Run 'vivarium-workbench gen-readme --workspace .' and commit to refresh them."
+            fi
           else
             echo "vivarium-workbench gen-readme unavailable (older pin) — skipping README freshness check."
           fi
