@@ -19,7 +19,7 @@ def _try_get_registry(ws_root: Path, ws_data: dict) -> set | None:
 
     Returns None if introspection fails (caller should warn, not fail).
     """
-    package_name = ws_data.get("package_path") or ("pbg_" + ws_data.get("name", "").replace("-", "_"))
+    package_name = ws_data.get("package_path") or ("viva_" + ws_data.get("name", "").replace("-", "_"))
     try:
         py = sys.executable
         script = f"""
@@ -480,7 +480,7 @@ def main() -> None:
     # composition. Parameterize a config family into ONE @composite_generator
     # (parameters=...), or reference the process + config from the study.
     composite_warnings: list[str] = []
-    _cpkg = ws.get("package_path") or ("pbg_" + ws.get("name", "").replace("-", "_"))
+    _cpkg = ws.get("package_path") or ("viva_" + ws.get("name", "").replace("-", "_"))
     try:
         import importlib as _il
         _il.import_module(_cpkg)  # fire @composite_generator decorators

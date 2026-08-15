@@ -9,7 +9,7 @@ with a cryptic ``no link found at address`` error. This test makes that
 regression fail fast, with a clear message, the moment a process is added.
 
 It is fully generic — it discovers the workspace package at runtime (from
-``workspace.yaml`` or the sole top-level ``pbg_*`` package) and discovers that
+``workspace.yaml`` or the sole top-level ``viva_*`` (or legacy ``pbg_*``) package) and discovers that
 package's own Process/Step subclasses. A brand-new scaffold with no process
 classes yet passes trivially (it is skipped), so this never red-flags a fresh
 workspace.
@@ -38,7 +38,7 @@ def _find_workspace_root() -> Path:
     return Path.cwd()
 
 
-# The workspace package (``pbg_<name>/``) lives at the workspace root and is
+# The workspace package (``viva_<name>/``) lives at the workspace root and is
 # imported by virtue of the root being on sys.path — that is how the dashboard
 # loads it (it chdirs to the root) and how a ``pip install -e .`` workspace
 # exposes it. The root pyproject uses hatchling ``bypass-selection`` (the
@@ -55,7 +55,7 @@ def _discover_package_name() -> str:
     """Resolve the workspace package name.
 
     Prefer ``package_path`` from workspace.yaml; fall back to the sole top-level
-    ``pbg_*`` directory that looks like a Python package.
+    ``viva_*`` (or legacy ``pbg_*``) directory that looks like a Python package.
     """
     root = _find_workspace_root()
     wsyaml = root / "workspace.yaml"
@@ -75,9 +75,9 @@ def _discover_package_name() -> str:
         for p in root.iterdir()
         if p.is_dir() and (p / "__init__.py").is_file() and not p.name.startswith(".")
     ]
-    pbg = [c for c in candidates if c.startswith("pbg_")]
-    if len(pbg) == 1:
-        return pbg[0]
+    pkgs = [c for c in candidates if c.startswith("viva_") or c.startswith("pbg_")]
+    if len(pkgs) == 1:
+        return pkgs[0]
     if len(candidates) == 1:
         return candidates[0]
     pytest.skip(

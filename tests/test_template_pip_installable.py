@@ -1,4 +1,4 @@
-"""Task B1: verify that the rendered pyproject.toml makes pbg_<slug> a
+"""Task B1: verify that the rendered pyproject.toml makes viva_<slug> a
 pip-installable wheel package.
 
 The test substitutes the j2 placeholders directly (same substitutions that
@@ -20,7 +20,7 @@ PYPROJECT_J2 = TEMPLATE / "pyproject.toml.j2"
 
 # Fixed substitution values used for the test render
 _WS_NAME = "demo"
-_PKG_PATH = "pbg_demo"
+_PKG_PATH = "viva_demo"
 _TODAY = "2026-01-01"
 _PLUGIN_VERSION = "0.0.0"
 
@@ -39,14 +39,14 @@ def _render_pyproject(tmp: Path) -> Path:
 
 
 def _create_stub_package(ws: Path) -> None:
-    """Create a minimal pbg_demo package so hatchling has something to package."""
+    """Create a minimal viva_demo package so hatchling has something to package."""
     pkg = ws / _PKG_PATH
     pkg.mkdir(parents=True, exist_ok=True)
-    (pkg / "__init__.py").write_text('"""pbg_demo workspace package."""\n')
+    (pkg / "__init__.py").write_text('"""viva_demo workspace package."""\n')
 
 
 def test_wheel_contains_workspace_package(tmp_path):
-    """The rendered pyproject.toml must produce a wheel containing pbg_<slug>."""
+    """The rendered pyproject.toml must produce a wheel containing viva_<slug>."""
     ws = tmp_path / "ws"
     ws.mkdir()
     _render_pyproject(ws)
@@ -69,8 +69,8 @@ def test_wheel_contains_workspace_package(tmp_path):
     whl = wheels[0]
 
     names = zipfile.ZipFile(whl).namelist()
-    assert any(n.startswith("pbg_") and n.endswith("__init__.py") for n in names), (
-        f"Wheel does not contain pbg_*/__init__.py. Contents:\n{names}"
+    assert any(n.startswith("viva_") and n.endswith("__init__.py") for n in names), (
+        f"Wheel does not contain viva_*/__init__.py. Contents:\n{names}"
     )
 
 
