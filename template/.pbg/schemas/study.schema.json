@@ -64,9 +64,21 @@
       "enum": ["Design", "Build", "Simulate", "Evaluate", "Decide"],
       "description": "Optional declaration of the study's current high-level phase. The 5-phase lifecycle (Design → Build → Simulate → Evaluate → Decide) is the canonical coarse-grained coordinate; the existing `status:` field captures the finer-grained runtime state within a phase. The enum is capitalized — the dashboard's study-detail.html template reads `study.phase` directly. If absent, the dashboard infers the phase from status + the presence of artifacts (spec fields filled, runs.db exists, etc.). See docs/concepts/vivarium-dashboard-model.md for the canonical 8-section structure."
     },
+    "claim": {
+      "type": "string",
+      "description": "One-sentence headline of the compositional idea this study tests \u2014 the CLAIM in the study Overview (Claim \u2192 Test \u2192 Result), and the investigation-graph node's 'Finds' line. Authored concise and direct."
+    },
+    "experiment": {
+      "type": "string",
+      "description": "One-paragraph statement of what was built and run to test the claim \u2014 the TEST in the study Overview. Supersedes the older `objective` field."
+    },
+    "result": {
+      "type": "string",
+      "description": "One-paragraph statement of what happened and what it establishes \u2014 the RESULT in the study Overview, supported by `findings`. Supersedes the prose `conclusion` blob for the Overview."
+    },
     "objective": {
       "type": "string",
-      "description": "One-paragraph statement of what this study measures or demonstrates."
+      "description": "DEPRECATED for new studies \u2014 use `experiment` (the study Overview's Test). One-paragraph statement of what this study measures or demonstrates."
     },
     "description": {
       "type": "string",
@@ -74,7 +86,7 @@
     },
     "hypothesis": {
       "type": "string",
-      "description": "Testable prediction; optional for exploratory studies."
+      "description": "DEPRECATED for new studies \u2014 the Overview is Claim/Test/Result. Testable prediction; optional for exploratory studies."
     },
     "conclusion": {
       "type": ["string", "null"],
