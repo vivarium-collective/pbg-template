@@ -8,11 +8,26 @@
 # re-scaffolding, or by copying the current source from
 #   vivarium-collective/viva-template/template/.github/workflows/<template>
 # template: workspace-ci.yml.j2
-# sha256: a1176cb3abe72e32ec48ef76d4b86711c19d315b5992fd3602c30040fe4b3c89
+# sha256: 700dbafdcb8c0167ee323ceeef34242330a374af2742c756e4e40fbe104fb6c1
 # <<< viva-template-provenance <<<
 
 name: workspace-ci
-on: [push, pull_request]
+
+# Trigger scope keeps CI honest without flooding: pushes run CI only on the
+# default branch, while all other-branch validation happens via the PR. That
+# stops every work-in-progress push to a feature branch from firing a run (and
+# emailing a failure) — you get ONE run per PR sync instead of a push + a
+# pull_request run per commit. The concurrency group then cancels a superseded
+# run when you push again, so rapid iteration no longer leaves a trail of
+# completed red runs.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: workspace-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 # CI for a workspace scaffolded from viva-template.
 #

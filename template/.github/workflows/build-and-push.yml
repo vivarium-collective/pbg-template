@@ -8,16 +8,19 @@
 # re-scaffolding, or by copying the current source from
 #   vivarium-collective/viva-template/template/.github/workflows/<template>
 # template: build-and-push.yml
-# sha256: 6a54b82d60c95c8bc35f9e56c5578bda095c28aaf62f47aa051581c14227d82d
+# sha256: 9c3aade91217120961f0053a53f1e9207aeabcd6d0985e664382acc9a67c72fd
 # <<< viva-template-provenance <<<
 
 name: Build and Push Workspace Image
 
 on:
   push:
-    branches: ["**"]
+    branches: [main, master]
   pull_request:
-    branches: ["**"]
+
+concurrency:
+  group: build-and-push-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
