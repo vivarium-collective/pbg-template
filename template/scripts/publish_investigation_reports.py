@@ -51,6 +51,8 @@ def discover_investigations(ws_root: Path) -> list[str]:
     inv_root = ws_root / "workspace" / "investigations"
     if not inv_root.is_dir():
         inv_root = ws_root / "investigations"  # flat-layout fallback
+    if not inv_root.is_dir():
+        return []  # workspace has no investigations dir yet — not an error
     return sorted(
         d.name for d in inv_root.iterdir()
         if d.is_dir() and (d / "investigation.yaml").is_file()
@@ -275,8 +277,11 @@ def main() -> int:
         want = {s.strip() for s in args.only.split(",")}
         slugs = [s for s in slugs if s in want]
     if not slugs:
-        print("no investigations found", file=sys.stderr)
-        return 1
+        # A workspace with no investigations is a valid (early) state, not a
+        # failure — exit cleanly so this non-gating deploy job stays green
+        # instead of reddening (and emailing) on every push.
+        print("no investigations found; nothing to publish", file=sys.stderr)
+        return 0
     print(f"investigations: {', '.join(slugs)}")
 
     proc = None
